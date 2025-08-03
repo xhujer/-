@@ -1,0 +1,12 @@
+# filter_circleList.jq
+
+def want: ["关注","推荐","新发"];
+
+.data.circleList |= (
+  map(
+    select(.showInfo.title as $t | want | index($t))
+  )
+  | map(
+    .showInfo.titleImage = {url:"", lightUrl:""}
+  )
+)
