@@ -1,13 +1,5 @@
-// filter_circleList_with_spacing.jq
-
-def want: ["关注", "推荐", "新发"];
-
+def want: ["关注","推荐","新发"];
 .data.circleList |= (
-  map(
-    select(.showInfo.title as $t | want | index($t))
-  )
-  | map(
-    .showInfo.titleImage = {url:"", lightUrl:""} |
-    .showInfo.title = "\u3000\u3000" + .showInfo.title + "\u3000\u3000"
-  )
+  map(select(.showInfo.title as $t | want | index($t))) |
+  map(.showInfo.titleImage = {url:"", lightUrl:""})
 )
