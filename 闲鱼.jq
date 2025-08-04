@@ -1,19 +1,21 @@
 def reorder($order):
-  [ $order[] as $name
-    | .[]?
+[ $order[] as $name
+    | add[]
     | select(.exContent.title == $name)
-  ];
+];
 
 .data.container.sections |= map(
-  if .template.name == "my_fy25_tools" and (.item.tool.exContent.tools? // null) then
-    .item.tool.exContent.tools |= (
-      map(select(
-        (.exContent.title // "") as $t
-        | ($t != "闲鱼币" and $t != "循环商店" and $t != "反诈宣传月" and $t != "小法庭" and $t != "闲鱼赚钱")
-      ))
-      | reorder(["淘宝转卖", "安全中心"])
-    )
-  else
-    .
-  end
+    if .template.name == "my_fy25_slider" then
+        empty
+    elif .template.name == "my_fy25_recycle" then
+        empty
+    elif .template.name == "xianyu_home_fish_my_banner_card_2023" then
+        empty
+    elif .template.name == "my_fy25_tools" then
+        .item.tool.exContent.tools |= [reorder(["淘宝转卖", "宝贝上首页", "简历认证", "安全中心", "我的帖子"])]
+    elif .template.name == "my_fy25_community" then
+        .item.bottom = {}
+    else
+        .
+    end
 )
