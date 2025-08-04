@@ -5,16 +5,17 @@ def reorder($order):
   ];
 
 .data.container.sections |= map(
-  if .template.name == "my_fy25_slider" then
-    empty
-  elif .template.name == "my_fy25_recycle" then
-    empty
-  elif .template.name == "xianyu_home_fish_my_banner_card_2023" then
-    empty
-  elif .template.name == "my_fy25_tools" then
-    .item.tool.exContent.tools |= reorder(["淘宝转卖", "安全中心"])
-  elif .template.name == "my_fy25_community" then
-    .item.bottom = {}
+  if .template.name == "my_fy25_tools" then
+    .item.tool.exContent.tools |= (
+      map(select(
+        .exContent.title != "闲鱼币"
+        and .exContent.title != "循环商店"
+        and .exContent.title != "反诈宣传月"
+        and .exContent.title != "小法庭"
+        and .exContent.title != "闲鱼赚钱"
+      ))
+      | reorder(["淘宝转卖", "安全中心"])  # 你想保留并排序的按钮列表
+    )
   else
     .
   end
