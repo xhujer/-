@@ -1,13 +1,11 @@
 def reorder($order):
-  [ $order[] as $name
-    | add[]
-    | select(.exContent.title == $name)
-  ];
+  map(select((.title // .exContent.title // "") as $t | $order | index($t)));
 
 .data.container.sections |= map(
   if .template.name == "my_fy25_slider"
      or .template.name == "my_fy25_recycle"
      or .template.name == "xianyu_home_fish_my_banner_card_2023"
+     or .template.name == "my_fy25_ad"
   then
     empty
 
