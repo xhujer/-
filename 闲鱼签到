@@ -1,6 +1,1 @@
-.data.container.sections |= map(
-  select(
-    (.exContent.title != "签到") and
-    (.exContent.title != "同城")
-  )
-)
+
