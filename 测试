@@ -1,7 +1,1 @@
-#!name = 屏蔽闲鱼左侧入口
-#!desc = 屏蔽 mtop.gaia.nodejs.gaia.idle.data.gw.v2.index.get 接口
-#!author = 明
-#!homepage = https://github.com/xhujer
 
-[Rewrite]
-^https:\/\/.+\/mtop\.gaia\.nodejs\.gaia\.idle\.data\.gw\.v2\.index\.get reject-dict
