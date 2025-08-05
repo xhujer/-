@@ -1,0 +1,7 @@
+.data.container.sections |= map(
+  if .template.name == "topEntrance" and (.item.exContent.title == "签到") then
+    empty
+  else
+    .
+  end
+)
