@@ -1,6 +1,6 @@
-# 删除闲鱼币入口（BIZ_IDLE_COIN_ENTRANCE_2）和所有浮动球（FLOAT_LAYER）
-
-.data.strategies |= map(select(
-  .type != "BIZ_IDLE_COIN_ENTRANCE_2" and
-  .type != "FLOAT_LAYER"
-))
+.data.container.sections |= map(
+  select(
+    (.exContent.title != "签到") and
+    (.exContent.title != "同城")
+  )
+)
