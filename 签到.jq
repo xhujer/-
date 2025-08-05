@@ -1,6 +1,1 @@
-.data.strategies |= map(
-  select(
-    (.type != "BIZ_IDLE_COIN_ENTRANCE_2") and
-    (.type != "BIZ_PUBLISH_BALL")
-  )
-)
+.pageConfInfo.$slots.footerSlot.components |= map(select(.fullName != "@ali/alimod-coin-left-business-entrance"))
