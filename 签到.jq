@@ -1,7 +1,5 @@
-if .data? then
-  .data.cardList = [] |
-  .data.resultList = [] |
-  .data.recommendModules = []
+if .data? and .data.cardList? then
+  .data.cardList = []
 else
   .
 end
