@@ -1,1 +1,7 @@
-
+jq '
+.data.resultList = [] |
+del(.data.cateTrackParams) |
+del(.data.needDecryptKeys) |
+del(.data.hasNext) |
+del(.data.serverTime)
+' input.json
