@@ -1,12 +1,9 @@
-#!name=Cainiao Clean
-#!desc=菜鸟 我的页面+底部Tab 精简 去广告
-#!author=明 x ChatGPT
-#!system=ios
+# 菜鸟 我的页面 去广告精简版
+# Author: 明 x ChatGPT
+# 功能：去除回收、红包、会员、活动、轮播广告，仅保留头像、寄件/购物订单、包裹入口
 
 [Rewrite]
-^https:\/\/guide-acs\.m\.cainiao\.com\/gw\/mtop\.cainiao\.app\.e2e\.engine\.page\.fetch\.cn script-response-body cainiao_mine_clean.js
-^https:\/\/guide-acs\.m\.cainiao\.com\/gw\/mtop\.cainiao\.app\.e2e\.engine\.tabbar\.fetch\.cn script-response-body cainiao_tab_clean.js
+^https:\/\/guide-acs\.m\.cainiao\.com\/gw\/mtop\.cainiao\.app\.e2e\.engine\.page\.fetch\.cn url script-response-body cainiao_mine_clean.js
 
 [Script]
-http-response ^https:\/\/guide-acs\.m\.cainiao\.com\/gw\/mtop\.cainiao\.app\.e2e\.engine\.page\.fetch\.cn tag=cainiao_mine_clean,requires-body=1,max-size=0,timeout=10,script-path=cainiao_mine_clean.js
-http-response ^https:\/\/guide-acs\.m\.cainiao\.com\/gw\/mtop\.cainiao\.app\.e2e\.engine\.tabbar\.fetch\.cn tag=cainiao_tab_clean,requires-body=1,max-size=0,timeout=10,script-path=cainiao_tab_clean.js
+cainiao_mine_clean.js = type=http-response,pattern=^https:\/\/guide-acs\.m\.cainiao\.com\/gw\/mtop\.cainiao\.app\.e2e\.engine\.page\.fetch\.cn,requires-body=1,max-size=0,timeout=10,script-path=cainiao_mine_clean.js
