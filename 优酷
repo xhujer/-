@@ -1,13 +1,27 @@
-# > 优酷
+#!name=优酷去广告
+#!desc=去除优酷开屏广告、首页信息流、搜索广告、弹窗、青少年模式等
+#!author=整理 by 明 & ChatGPT
+#!openUrl=https://apps.apple.com/app/id336141475
+#!icon=https://is1-ssl.mzstatic.com/image/thumb/Purple122/v4/08/d2/39/08d2390f-28e5-0cb2-39d0-1d9cbb4a0f4c/AppIcon-1x_U007emarketing-0-10-0-85-220.png/246x0w.webp
+
+[Script]
 # 播放详情页,首页信息流,顶部tab,我的页面,评论区
 http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.columbus\.(gateway\.new\.execute|home\.feed|home\.query|uc\.query|ycp\.query) script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/cnftp.js, requires-body=true, timeout=60, tag=优酷, enable={yzku_enable}
+
 # 底部tab
 http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.haidai\.lantern\.appconfig\.get script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/cnftp.js, requires-body=true, timeout=60, tag=优酷底部tab, enable={yzku_enable}
+
 # 青少年模式弹窗
 http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.huluwa\.dispatcher\.youthmode\.config2 script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/cnftp.js, requires-body=true, timeout=60, tag=优酷青少年模式弹窗, enable={yzku_enable}
+
 # 搜索列表
 http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.soku\.yksearch script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/cnftp.js, requires-body=true, timeout=60, tag=优酷搜索列表, enable={yzku_enable}
+
 # 热剧弹窗
 http-response ^https?:\/\/push\.m\.youku\.com\/collect-api\/get_push_interval_config_wx\? script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/cnftp.js, requires-body=true, timeout=60, tag=优酷热剧弹窗, enable={yzku_enable}
+
 # 开屏广告
 http-response ^https?:\/\/un-acs\.youku\.com\/gw\/mtop\.youku\.play\.ups\.appinfo\.get script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/cnftp.js, requires-body=true, timeout=60, tag=优酷开屏广告, enable={yzku_enable}
+
+[MITM]
+hostname = acs.youku.com, un-acs.youku.com, push.m.youku.com
