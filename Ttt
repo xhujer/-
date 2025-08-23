@@ -1,9 +1,43 @@
-# 菜鸟 我的页面 去广告精简版
-# Author: 明 x ChatGPT
-# 功能：去除回收、红包、会员、活动、轮播广告，仅保留头像、寄件/购物订单、包裹入口
-
-[Rewrite]
-^https:\/\/guide-acs\.m\.cainiao\.com\/gw\/mtop\.cainiao\.app\.e2e\.engine\.page\.fetch\.cn url script-response-body cainiao_mine_clean.js
+#!name=Cainiao Clean
+#!desc=菜鸟 我的页面 + 底部 Tab 精简 去广告
+#!author=明 x ChatGPT
+#!system=ios
 
 [Script]
-cainiao_mine_clean.js = type=http-response,pattern=^https:\/\/guide-acs\.m\.cainiao\.com\/gw\/mtop\.cainiao\.app\.e2e\.engine\.page\.fetch\.cn,requires-body=1,max-size=0,timeout=10,script-path=cainiao_mine_clean.js
+http-response ^https:\/\/guide-acs\.m\.cainiao\.com\/gw\/mtop\.cainiao\.app\.e2e\.engine\.page\.fetch\.cn tag=cainiao_mine_clean,requires-body=1,max-size=0,timeout=10,script-content=(()=>{
+  let body = $response.body;
+  if (body) {
+    let obj = JSON.parse(body);
+    if (obj?.data?.data) {
+      let data = obj.data.data;
+      // 删除广告模块
+      delete data.wallet;   // 绿色回收
+      delete data.banner;   // 轮播广告
+      delete data.activity; // 活动/小游戏
+      delete data.asset;    // 红包卡券/寄件优惠/环保金/积分
+      delete data.vip;      // 会员成长
+      // 精简订单，仅保留寄件订单和购物订单
+      if (data.order?.data?.items) {
+        data.order.data.items = data.order.data.items.filter(i => i.type !== "huishou");
+      }
+    }
+    $done({ body: JSON.stringify(obj) });
+  } else {
+    $done({});
+  }
+})()
+
+http-response ^https:\/\/guide-acs\.m\.cainiao\.com\/gw\/mtop\.cainiao\.app\.e2e\.engine\.tabbar\.fetch\.cn tag=cainiao_tab_clean,requires-body=1,max-size=0,timeout=10,script-content=(()=>{
+  let body = $response.body;
+  if (body) {
+    let obj = JSON.parse(body);
+    if (obj?.data?.tabs) {
+      obj.data.tabs = obj.data.tabs.filter(tab =>
+        ["首页", "包裹", "我的"].includes(tab.title)
+      );
+    }
+    $done({ body: JSON.stringify(obj) });
+  } else {
+    $done({});
+  }
+})()
