@@ -1,27 +1,24 @@
-#!name=旅游类App 去广告精简 - 激进URL版
-#!desc=彻底屏蔽无忧行及通用旅游类App广告、推荐、推广、非核心Tab，保留最基础核心功能
-#!author=明定制
-#!openUrl=https://apps.apple.com
-#!bundleId=com.travel.app
-#!tag=去广告,精简,激进
-#!icon=https://raw.githubusercontent.com/Orz-3/mini/master/Color/travel.png
+#!name=无忧行
+#!desc=无忧行-流量机票酒店火车票预订，去广告屏蔽首页推荐
+#!openUrl=https://apps.apple.com/app/id1037589370
+#!bundleId=com.cmi.jegotrip
+#!tag=去广告
+#!icon=https://imgtolinkx.com/i/2XmxzT6C
+#!date=2025-08-26
 
 [URL Rewrite]
-# ============ 无忧行首页广告/推荐/推荐列表/Banner ============
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.* url reject
+# 屏蔽首页广告/推荐
+^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/destination\/getDestinationById url reject
+^https?:\/\/app3.jegotrip.com.cn\/api\/layout\/v1\/init\/destinationModel url reject
+^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/banner\/getDestBanners url reject
+^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/queryGlobalStrategyData url reject
+^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/rec\/columnListByRegion url reject
+^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId url reject
+^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/rec\/queryData url reject
 
-# ============ 无忧行推送/广告图片 ============
+# 拦截推送/同步广告资源
 ^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge url reject
 ^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage url reject
 
-# ============ 通用旅游类App首页广告 ============
-^https?:\/\/.*\/home\/.* url reject
-
-# ============ 通用旅游类App我的页面推广 ============
-^https?:\/\/.*\/mine\/.* url reject
-
-# ============ 通用旅游类App Tab非核心模块 ============
-^https?:\/\/.*\/tab\/.* url reject
-
 [MITM]
-hostname = %APPEND% app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn, *.travel.com, *.ctrip.com
+hostname=app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
