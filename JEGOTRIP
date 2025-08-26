@@ -1,5 +1,5 @@
-#!name=无忧行去广告 - 极简版
-#!desc=彻底去除广告，精简底部 tab，仅保留首页、我的页面和电话功能
+#!name=无忧行去广告 - 强化版
+#!desc=彻底去广告，精简底部 tab，保留首页核心内容和我的页面功能
 #!author=ZenmoFeiShi[https://github.com/ZenmoFeiShi]
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -8,7 +8,7 @@
 #!date=2025-08-26
 
 [Rewrite]
-// 首页及广告接口，用 JS 清理广告字段
+// 所有广告相关接口，用 JS 清理字段
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById.* script-body=true,requires-body=true,tag=无忧行去广告
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel.* script-body=true,requires-body=true,tag=无忧行去广告
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners.* script-body=true,requires-body=true,tag=无忧行去广告
@@ -28,26 +28,30 @@ try {
 
     // -------- 首页处理 --------
     if (body.data) {
+        // 删除广告模块
         delete body.data.bannerList;
         delete body.data.recommend;
         delete body.data.columnListByRegion;
         delete body.data.poiList;
 
-        // 保留电话模块（假设路径为 body.data.phone）
-        if (!body.data.phone) body.data.phone = {};
+        // 保留电话模块和核心内容（热门目的地可保留）
+        body.data.phone = body.data.phone || {};
+        body.data.destinationList = body.data.destinationList || []; // 热门目的地
     }
 
     // -------- 我的页面处理 --------
     if (body.data?.userCenter) {
-        delete body.data.userCenter.ads;      // 删除广告
-        // 保留用户信息、头像、电话等
-        if (!body.data.userCenter.profile) body.data.userCenter.profile = {};
-        if (!body.data.userCenter.phone) body.data.userCenter.phone = {};
+        delete body.data.userCenter.ads;  // 删除广告
+        body.data.userCenter.profile = body.data.userCenter.profile || {};
+        body.data.userCenter.phone = body.data.userCenter.phone || {};
+        // 删除空占位模块
+        if (body.data.userCenter.extraModules) {
+            body.data.userCenter.extraModules = body.data.userCenter.extraModules.filter(item => item.content);
+        }
     }
 
     // -------- 底部 Tab 精简 --------
     if (body.data?.tabBarList) {
-        // 只保留首页和我的页面 tab
         body.data.tabBarList = body.data.tabBarList.filter(item => 
             item.name === "首页" || item.name === "我的"
         );
@@ -55,5 +59,6 @@ try {
 
     $done({ body: JSON.stringify(body) });
 } catch (e) {
+    // 出错返回原始内容，避免崩溃
     $done({ body: $response.body });
 }
