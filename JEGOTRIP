@@ -1,18 +1,23 @@
 #!name=无忧行 - 去广告
-#!desc=移除开屏广告、屏蔽首页推荐，拦截推送广告资源，全面净化使用体验
-#!icon=https://imgtolinkx.com/i/CO0eIFoS
+#!desc=移除开屏广告、屏蔽首页推荐，拦截推送广告资源
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
 #!tag=去广告
-#!system=iOS
+#!icon=https://imgtolinkx.com/i/CO0eIFoS
+#!date=2025-08-26
 
 [Rewrite]
-# 首页广告/推荐接口
+# 屏蔽首页广告/推荐接口
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(destination|getDestinationById|banner|getDestBanners|queryGlobalStrategyData|rec\/columnListByRegion|poi\/queryJegoListAndNameByDestinationId|rec\/queryData) - reject
 
-# 推送/广告资源
+# 拦截推送/同步广告资源
 ^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge - reject
 ^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage - reject
 
-[MITM]
+[Script]
+# 如果未来需要动态修改响应体，可以在这里加 http-response 脚本
+# 示例：
+# http-response ^https:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-path=https://example.com/script.js,requires-body=true,tag=动态拦截首页推荐
+
+[MitM]
 hostname = app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
