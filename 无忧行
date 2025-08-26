@@ -1,0 +1,16 @@
+#!name=无忧行 - JEGOTRIP
+#!desc=无忧行 去广告 & 屏蔽推送角标
+#!author=zirawell[https://github.com/zirawell]
+#!tag=去广告
+#!system=iOS
+#!loon_version=3.2.2(735)
+#!date=2025-08-26
+
+[URL Rewrite]
+# 拦截推送角标
+^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge$ - reject
+# 拦截广告资源
+^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage - reject
+
+[MITM]
+hostname = %APPEND% push.it.10086.cn, oss.jegotrip.com.cn
