@@ -1,51 +1,36 @@
-#!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、精简首页
-#!tag=去广告
-#!icon=https://imgtolinkx.com/i/CO0eIFoS
+#!name=无忧行 - 去广告精简 (Auto)
+#!desc=移除开屏/首页推荐/活动弹窗，屏蔽埋点与推送回执；尽量保留首页/电话/我的等核心功能
+#!author=明 & ChatGPT
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
-#!date=2025-08-26
+#!tag=去广告
+#!date=2025-08-27
+[URL Rewrite]
+# hostname = app.jegotrip.com.cn, app3.jegotrip.com.cn, cdn.jegotrip.com.cn, cnlogs.umeng.com, dnconfig.cmpassport.com:443, dnlog.cmpassport.com:9443, jegotrip3.jegotrip.com.cn, thirdwx.qlogo.cn, ucc.umeng.com, utoken.umeng.com
+^https?:\/\/app\.jegotrip\.com\.cn^/eventtracking/api/business/event/api/log/upload reject  # tracking
+^https?:\/\/app\.jegotrip\.com\.cn^/eventtracking/api/business/event/api/log/config/iOS\.conf reject  # tracking
+^https?:\/\/app\.jegotrip\.com\.cn^/eventtracking/api/business/event/api/app/getInfo/app_qihkykcpub reject  # tracking
+^https?:\/\/app3\.jegotrip\.com\.cn^/api/destination/v1/init/cityBanner reject-dict  # ad_recommend
+^https?:\/\/app3\.jegotrip\.com\.cn^/api/destination/v1/group/recommendGroup reject-dict  # ad_recommend
+^https?:\/\/cdn\.jegotrip\.com\.cn^/layout/uploadlayout/\d\+/\d\+ reject-dict  # layout_config
+^https?:\/\/cdn\.jegotrip\.com\.cn^/layout/uploadlayout/file/\d\+ reject-dict  # layout_config
+^https?:\/\/cnlogs\.umeng\.com^/zcfg reject  # tracking
+^https?:\/\/cnlogs\.umeng\.com^/unify_logs reject  # tracking
+^https?:\/\/cnlogs\.umeng\.com^/umpx_share reject  # tracking
+^https?:\/\/cnlogs\.umeng\.com^/umpx_push_launch reject  # tracking
+^https?:\/\/cnlogs\.umeng\.com^/umpx_push_register reject  # tracking
+^https?:\/\/dnconfig\.cmpassport\.com:443^/client/uniConfig reject-dict  # layout_config
+^https?:\/\/dnlog\.cmpassport\.com:9443^/log/logReport reject  # tracking
+^https?:\/\/jegotrip3\.jegotrip\.com\.cn^/commodity/%E4%B8%8A%E7%BD%\d\+%E5%8D%A1banner-\d\+\.jpg reject-dict  # ad_recommend
+^https?:\/\/thirdwx\.qlogo\.cn^/mmopen/vi_\d\+/0nluCqghffPGicXwU5T4iao3S6Kc6ofq4D5u1rrR8ox0Xfa7cpTmDmcyxdbNuianb0w5tYCtiaEUobSFjibYIcTbsww/\d\+ reject  # tracking
+^https?:\/\/thirdwx\.qlogo\.cn^/mmopen/vi_\d\+/lpHJrtHiaxD3aF9OR\d\+IMu3UsD7VzZVcodzCkXtTATONly\d\+k4MibBGshsGB1sv6eJdnObRtGA1DZoJOicS7ZomnQ/\d\+ reject  # tracking
+^https?:\/\/ucc\.umeng\.com^/v2/inn/fetch reject  # tracking
+^https?:\/\/utoken\.umeng\.com^/anti/postZdata reject  # tracking
+^https?:\/\/utoken\.umeng\.com^/anti/updateZdata reject  # tracking
+^https?:\/\/cnlogs\.umeng\.com\/.* - reject  # tracking
+^https?:\/\/ucc\.umeng\.com\/.* - reject  # tracking
+^https?:\/\/utoken\.umeng\.com\/.* - reject  # tracking
+^https?:\/\/codepush\.appcenter\.ms\/.* - reject  # push
 
-[Rule]
-# 屏蔽首页广告/推荐接口
-DOMAIN,app3.jegotrip.com.cn,REJECT
-# 拦截推送/同步广告资源
-DOMAIN,push.it.10086.cn,REJECT
-DOMAIN,oss.jegotrip.com.cn,REJECT
-
-[Rewrite]
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/queryGlobalStrategyData reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData reject-dict
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject-dict
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage reject-dict
-
-[Script]
-// 内置 JS 脚本处理首页和我的页面广告模块
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
-
-[MitM]
-hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn
-
-// -------- 内置 JS 脚本内容（script-body） --------
-let body = JSON.parse($response.body);
-
-// 删除首页广告模块
-if (body && body.data) {
-    if (body.data.bannerList) delete body.data.bannerList;
-    if (body.data.recommend) delete body.data.recommend;
-    if (body.data.columnListByRegion) delete body.data.columnListByRegion;
-    if (body.data.poiList) delete body.data.poiList;
-}
-
-// 删除我的页面广告
-if (body && body.data && body.data.userCenter) {
-    if (body.data.userCenter.ads) delete body.data.userCenter.ads;
-}
-
-$done({ body: JSON.stringify(body) });
+[MITM]
+hostname = %APPEND% 115.223.48.19, 183.134.11.22, 60.188.105.11, a.gdt.qq.com, alibaba-cn-pvg-00001.oss-enet.aliyuncs.com, analysis.tratao.com, app-product.(null), app-site-association.cdn-apple.com, app.jegotrip.com.cn, app3.jegotrip.com.cn, appprod.bmac.com.cn, cdn.jegotrip.com.cn, clients3.google.com, cnlogs.umeng.com, codepush.appcenter.ms, cp.jegotrip.com.cn, dispatcher.is.autonavi.com, dnconfig.cmpassport.com:443, dnlog.cmpassport.com:9443, dualstack-arestapi.amap.com, gw.alipayobjects.com, jegotrip3.jegotrip.com.cn, jtoss.jegotrip.com.cn, oss.jegotrip.com.cn, thirdwx.qlogo.cn, ucc.umeng.com, utoken.umeng.com
