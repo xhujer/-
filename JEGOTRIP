@@ -14,21 +14,38 @@ DOMAIN,push.it.10086.cn,REJECT
 DOMAIN,oss.jegotrip.com.cn,REJECT
 
 [Rewrite]
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById REJECT-DICT
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel REJECT-DICT
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners REJECT-DICT
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/queryGlobalStrategyData REJECT-DICT
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion REJECT-DICT
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId REJECT-DICT
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData REJECT-DICT
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge REJECT-DICT
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage REJECT-DICT
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/queryGlobalStrategyData reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData reject-dict
+^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject-dict
+^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage reject-dict
 
 [Script]
-# 建议用脚本做“保底精简”，即便接口未被 REJECT 也能删干净
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-path=local://jego_remove_ads.js, requires-body=true, timeout=10, tag=无忧行去广告
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-path=local://jego_remove_ads.js, requires-body=true, timeout=10, tag=无忧行去广告
+// 内置 JS 脚本处理首页和我的页面广告模块
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
 
-[Mitm]
-enable = true
-hostname = app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
+[MitM]
+hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn
+
+// -------- 内置 JS 脚本内容（script-body） --------
+let body = JSON.parse($response.body);
+
+// 删除首页广告模块
+if (body && body.data) {
+    if (body.data.bannerList) delete body.data.bannerList;
+    if (body.data.recommend) delete body.data.recommend;
+    if (body.data.columnListByRegion) delete body.data.columnListByRegion;
+    if (body.data.poiList) delete body.data.poiList;
+}
+
+// 删除我的页面广告
+if (body && body.data && body.data.userCenter) {
+    if (body.data.userCenter.ads) delete body.data.userCenter.ads;
+}
+
+$done({ body: JSON.stringify(body) });
