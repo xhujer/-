@@ -8,11 +8,9 @@
 #!date=2025-08-26
 
 [Rule]
-# 非核心广告接口直接 reject-dict
-DOMAIN-SUFFIX,push.it.10086.cn,reject-dict
-DOMAIN-SUFFIX,oss.jegotrip.com.cn,reject-dict
-# 资源类图片可用 reject-img（可选）
-# DOMAIN-SUFFIX,img.jegotrip.com.cn,reject-img
+# 非核心广告接口直接 reject
+DOMAIN-SUFFIX,push.it.10086.cn,reject
+DOMAIN-SUFFIX,oss.jegotrip.com.cn,reject
 
 [Rewrite]
 // 核心接口用 JS 清理广告
