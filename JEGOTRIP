@@ -1,5 +1,5 @@
-#!name=无忧行去广告 - 安全精简版
-#!desc=彻底去广告，底部仅保留首页和我的页面，保留电话和我的页面核心信息
+#!name=无忧行去广告 - REJECT+JS
+#!desc=结合 REJECT 和 JS 去广告，彻底屏蔽广告模块，保留首页和我的页面核心功能
 #!author=ZenmoFeiShi[https://github.com/ZenmoFeiShi]
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -7,69 +7,67 @@
 #!bundleId=com.cmi.jegotrip
 #!date=2025-08-26
 
+[Rule]
+# 非核心广告接口直接 REJECT
+DOMAIN,push.it.10086.cn,REJECT
+DOMAIN,oss.jegotrip.com.cn,REJECT
+DOMAIN,app3.jegotrip.com.cn,REJECT  # 如果想彻底屏蔽首页推荐，可加，但可能影响核心功能
+
 [Rewrite]
-// 所有广告接口使用 JS 清理
+// 核心接口不 REJECT，用 JS 清理广告
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById.* script-body=true,requires-body=true,tag=无忧行去广告
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel.* script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners.* script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData.* script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion.* script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId.* script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge.* script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage.* script-body=true,requires-body=true,tag=无忧行去广告
 
 [MitM]
 hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn
 
 [Script]
-// JS 脚本处理广告字段并返回安全核心数据
+// JS 脚本彻底屏蔽模块，同时保留核心字段
 try {
     let body = $response.body ? JSON.parse($response.body) : {};
 
-    // -------- 首页处理 --------
+    // -------- 首页模块 --------
     if (body.data) {
         delete body.data.bannerList;
         delete body.data.recommend;
         delete body.data.columnListByRegion;
         delete body.data.poiList;
 
-        // 保留电话模块
+        // 保留电话模块和必要字段
         body.data.phone = body.data.phone || {};
-
-        // 保留首页核心内容（可选热门目的地）
-        body.data.destinationList = body.data.destinationList || [];
+        body.data.destinationList = []; // 不显示其他模块
     }
 
-    // -------- 我的页面处理 --------
+    // -------- 我的页面 --------
     if (body.data?.userCenter) {
-        delete body.data.userCenter.ads;  // 删除广告
+        delete body.data.userCenter.ads;
+        body.data.userCenter.extraModules = [];
         body.data.userCenter.profile = body.data.userCenter.profile || {};
         body.data.userCenter.phone = body.data.userCenter.phone || {};
-
-        // 删除其他占位模块
-        if (body.data.userCenter.extraModules) {
-            body.data.userCenter.extraModules = [];
-        }
     }
 
-    // -------- 底部 Tab 精简，只保留 首页 和 我的 --------
+    // -------- 底部 Tab 精简 --------
     if (body.data?.tabBarList) {
-        body.data.tabBarList = body.data.tabBarList.filter(item =>
-            item.name === "首页" || item.name === "我的"
-        );
+        body.data.tabBarList = body.data.tabBarList
+            .filter(item => item.name === "首页" || item.name === "我的")
+            .map(item => ({
+                name: item.name,
+                icon: item.icon || "",
+                pageUrl: item.pageUrl || ""
+            }));
     }
 
     $done({ body: JSON.stringify(body) });
 } catch (e) {
-    // 出错时返回安全默认数据
+    // 出错时返回最小安全结构
     let safeBody = {
         data: {
             phone: {},
             destinationList: [],
-            userCenter: { profile: {}, phone: {} },
+            userCenter: { profile: {}, phone: {}, extraModules: [] },
             tabBarList: [
-                { name: "首页" },
-                { name: "我的" }
+                { name: "首页", icon:"", pageUrl:"" },
+                { name: "我的", icon:"", pageUrl:"" }
             ]
         }
     };
