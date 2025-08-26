@@ -1,61 +1,61 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、推荐流量位、活动推广，精简首页 & 我的页面广告
+#!desc=移除开屏广告、屏蔽首页推荐、精简首页 & 我的页面广告
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
 #!date=2025-08-27
 
+[Rule]
+# 屏蔽广告接口和推荐
+DOMAIN,app3.jegotrip.com.cn,REJECT
+# 屏蔽推送和广告资源
+DOMAIN,push.it.10086.cn,REJECT
+DOMAIN,oss.jegotrip.com.cn,REJECT
+
 [Rewrite]
-# --- 首页广告/推荐/推广 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-dict
+# 首页接口阻断
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/(columnListByRegion|queryData|sceneQuery) reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/queryGlobalStrategyData reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData reject-dict
 
-# --- 活动/专题/策略推广 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(queryGlobalStrategyData|activity|promotion|topic|strategy) reject-dict
-
-# --- 目的地/POI 推荐广告 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/(queryJegoListAndNameByDestinationId|queryRecommendList|queryAdsPoiList) reject-dict
-
-# --- 广告资源 ---
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage reject
-^https?:\/\/oss\.jegotrip\.com\.cn\/img\/ reject
-
-# --- 推送/埋点 ---
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject
-^https?:\/\/umeng\.com reject
-^https?:\/\/bugly\.qq\.com reject
+# 广告图片资源
+^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage reject-dict
 
 [Script]
-# 首页接口去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-response-body jegotrip_remove_ads.js
-# 首页布局精简
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-response-body jegotrip_remove_ads.js
+// 清理首页和我的页面广告模块
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
 
-[MITM]
-hostname = %APPEND% app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn, umeng.com, bugly.qq.com
+[MitM]
+hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn
 
-[Script Content]
-#!name=jegotrip_remove_ads.js
-#!desc=去除首页与我的页面广告
-let body = JSON.parse($response.body);
+// -------- 内置 JS 脚本内容 --------
+let body;
+try {
+    body = JSON.parse($response.body);
+} catch(e) {
+    $done({});
+}
 
 // 删除首页广告模块
 if (body && body.data) {
-    if (body.data.bannerList) delete body.data.bannerList;
-    if (body.data.recommend) delete body.data.recommend;
-    if (body.data.columnListByRegion) delete body.data.columnListByRegion;
-    if (body.data.poiList) delete body.data.poiList;
-    if (body.data.promotionList) delete body.data.promotionList;
-    if (body.data.strategyList) delete body.data.strategyList;
+    delete body.data.bannerList;
+    delete body.data.recommend;
+    delete body.data.columnListByRegion;
+    delete body.data.poiList;
+    delete body.data.promotionList;
+    delete body.data.strategyList;
 }
 
 // 删除“我的页面”广告
 if (body && body.data && body.data.userCenter) {
-    if (body.data.userCenter.ads) delete body.data.userCenter.ads;
-    if (body.data.userCenter.bannerList) delete body.data.userCenter.bannerList;
+    delete body.data.userCenter.ads;
+    delete body.data.userCenter.bannerList;
 }
 
 $done({ body: JSON.stringify(body) });
