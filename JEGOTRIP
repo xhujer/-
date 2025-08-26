@@ -1,37 +1,58 @@
-#!name=无忧行 - 去广告精简
-#!desc=去除开屏/首页推荐/活动/埋点，精简底部Tab仅保留 电话 & 我的
-#!author=明 & ChatGPT
+#!name=无忧行去广告精简
+#!desc=移除开屏广告、屏蔽首页推荐、去除活动弹窗、精简底部Tab仅保留电话 & 我的
+#!tag=去广告
+#!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
-#!tag=去广告
 #!date=2025-08-27
 
-[URL Rewrite]
-# 开屏广告 / 推荐 / 活动
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/(ad|promotion|activity|banner|recommend) url reject-dict
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage url reject
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge url reject
+[Rewrite]
+# 首页广告/推荐/活动
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners|recommend|rec\/|activity|promotion) reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/queryGlobalStrategyData reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId reject-dict
 
-# 埋点/统计/日志
-^https?:\/\/(umeng|bugly|sentry|bdstat|mtj|analytics)\. url reject
+# 推送 / badge
+^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject
+
+# 广告资源图
+^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage reject
 
 [Script]
-# 精简底部Tab - 仅保留 电话 和 我的
+# 首页接口去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-response-body jegotrip_remove_ads.js
+# 首页布局精简
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-response-body jegotrip_remove_ads.js
+# 精简底部Tab，仅保留 电话 & 我的
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v\d+\/init\/tab script-response-body jegotrip_tab_filter.js
 
 [MITM]
-hostname = %APPEND% app3.jegotrip.com.cn, oss.jegotrip.com.cn, push.it.10086.cn
+hostname = %APPEND% app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
 
 [Script Content]
-#!name=jegotrip_tab_filter.js
-#!desc=精简无忧行底部Tab，仅保留 电话 和 我的
-#!author=明 & ChatGPT
-#!arguments=
+#!name=jegotrip_remove_ads.js
+#!desc=去除首页与我的页面广告
+let body = JSON.parse($response.body);
 
-/***********************************************
- * 无忧行 Tab 精简脚本
- * 保留 “电话” & “我的” tab，其它全部删除
- ***********************************************/
+// 删除首页广告模块
+if (body && body.data) {
+    if (body.data.bannerList) delete body.data.bannerList;
+    if (body.data.recommend) delete body.data.recommend;
+    if (body.data.columnListByRegion) delete body.data.columnListByRegion;
+    if (body.data.poiList) delete body.data.poiList;
+}
+
+// 删除“我的页面”广告
+if (body && body.data && body.data.userCenter) {
+    if (body.data.userCenter.ads) delete body.data.userCenter.ads;
+}
+
+$done({ body: JSON.stringify(body) });
+
+---
+
+#!name=jegotrip_tab_filter.js
+#!desc=精简底部Tab，仅保留 电话 & 我的
 let body = JSON.parse($response.body);
 
 if (body && body.data && body.data.tabList) {
