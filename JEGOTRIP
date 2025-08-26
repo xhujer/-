@@ -1,5 +1,5 @@
-#!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、精简首页和我的页面，保留核心功能
+#!name=无忧行去广告 - 极简版
+#!desc=彻底去除广告，精简底部 tab，仅保留首页、我的页面和电话功能
 #!author=ZenmoFeiShi[https://github.com/ZenmoFeiShi]
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -8,41 +8,52 @@
 #!date=2025-08-26
 
 [Rewrite]
-// 首页和广告相关接口，用 JS 清理广告字段
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage script-body=true,requires-body=true,tag=无忧行去广告
+// 首页及广告接口，用 JS 清理广告字段
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage.* script-body=true,requires-body=true,tag=无忧行去广告
 
 [MitM]
 hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn
 
 [Script]
-// -------- 内置 JS 脚本内容（script-body） --------
+// 内置 JS 脚本内容（script-body）
 try {
-    let body = JSON.parse($response.body);
+    let body = $response.body ? JSON.parse($response.body) : {};
 
-    // 删除首页广告模块
+    // -------- 首页处理 --------
     if (body.data) {
         delete body.data.bannerList;
         delete body.data.recommend;
         delete body.data.columnListByRegion;
         delete body.data.poiList;
+
+        // 保留电话模块（假设路径为 body.data.phone）
+        if (!body.data.phone) body.data.phone = {};
     }
 
-    // 删除我的页面广告
+    // -------- 我的页面处理 --------
     if (body.data?.userCenter) {
-        delete body.data.userCenter.ads;
+        delete body.data.userCenter.ads;      // 删除广告
+        // 保留用户信息、头像、电话等
+        if (!body.data.userCenter.profile) body.data.userCenter.profile = {};
+        if (!body.data.userCenter.phone) body.data.userCenter.phone = {};
     }
 
-    // 保留核心数据（电话、用户信息等）
-    // 可根据需要调整，如保留 body.data.userCenter.profile
+    // -------- 底部 Tab 精简 --------
+    if (body.data?.tabBarList) {
+        // 只保留首页和我的页面 tab
+        body.data.tabBarList = body.data.tabBarList.filter(item => 
+            item.name === "首页" || item.name === "我的"
+        );
+    }
 
     $done({ body: JSON.stringify(body) });
-} catch(e) {
-    $done({}); // 出错返回空
+} catch (e) {
+    $done({ body: $response.body });
 }
