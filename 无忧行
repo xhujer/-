@@ -1,16 +1,54 @@
-#!name=无忧行 - JEGOTRIP
-#!desc=无忧行 去广告 & 屏蔽推送角标
-#!author=zirawell[https://github.com/zirawell]
-#!tag=去广告
-#!system=iOS
-#!loon_version=3.2.2(735)
-#!date=2025-08-26
+/***********************************
+ * 
+> 应用名称：无忧行 - JEGOTRIP
+> 功能：极简首页 + 精简底部Tab + 终极去广告
+> 作者：zirawell
+> 日期：2025-08-26
 
-[URL Rewrite]
-# 拦截推送角标
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge$ - reject
-# 拦截广告资源
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage - reject
+[rewrite_local]
 
-[MITM]
-hostname = %APPEND% push.it.10086.cn, oss.jegotrip.com.cn
+# -------------------------------
+# 屏蔽首页广告/推荐/轮播/策略/活动接口 - 优化正则
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(destination|getDestBanners|layout|queryGlobalStrategyData|rec|poi) url reject
+
+# -------------------------------
+# 推送/广告资源屏蔽
+^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge url reject
+^https?:\/\/oss\.jegotrip\.com\.cn\/\/appSyncimage url reject
+
+[script]
+
+# -------------------------------
+# 内嵌 JS 脚本：极简首页 + 精简底部Tab
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.* requires-body=1,script-path=inline-script
+
+[mitm] 
+hostname=%APPEND% app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
+
+[inline-script]
+// 无忧行 - 稳定版极简首页 JS
+let body = $response.body ? JSON.parse($response.body) : null;
+
+if (body && body.data) {
+    const keepKeys = ['home','phone','mine'];
+
+    // -------------------------------
+    // 保留首页/电话/我的模块，清空其他
+    for (let key in body.data) {
+        if (!keepKeys.includes(key)) {
+            body.data[key] = [];
+        }
+    }
+
+    // 模块数组形式处理
+    if (body.data.moduleList && Array.isArray(body.data.moduleList)) {
+        body.data.moduleList = body.data.moduleList.filter(m => keepKeys.includes(m.id || m.type));
+    }
+
+    // 精简底部Tab，仅保留首页/电话/我的
+    if (body.data.tabList && Array.isArray(body.data.tabList)) {
+        body.data.tabList = body.data.tabList.filter(tab => keepKeys.includes(tab.id || tab.type));
+    }
+}
+
+$done({ body: JSON.stringify(body) });
