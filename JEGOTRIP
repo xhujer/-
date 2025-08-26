@@ -1,17 +1,12 @@
-/***********************************
- * 
-> 应用名称：无忧行
-> 描述：极简首页 + 精简底部Tab + 终极去广告
-> 作者：明
-> 日期：2025-08-26
-> 适用系统：iOS
-> 插件类型：Loon Script + Rule
-> 版本：1.0
-> 图标：https://raw.githubusercontent.com/zirawell/Git/R-Store/Res/Icon/App/jegotrip.png
-> AppStore：https://apps.apple.com/app/id1037589370
+#!name=无忧行 - 极简首页插件
+#!desc=终极去广告，只保留首页/电话/我的 + 精简底部Tab，一键导入 Loon
+#!version=1.0
+#!icon=https://raw.githubusercontent.com/zirawell/Git/R-Store/Res/Icon/App/jegotrip.png
+#!author=zirawell
+#!openUrl=https://apps.apple.com/app/id1037589370
+#!platform=iOS
 
-[rewrite_local]
-
+[URL Rewrite]
 # -------------------------------
 # 屏蔽首页广告/推荐/轮播/策略/活动接口
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(destination|getDestBanners|layout|queryGlobalStrategyData|rec|poi) url reject
@@ -21,23 +16,21 @@
 ^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge url reject
 ^https?:\/\/oss\.jegotrip\.com\.cn\/\/appSyncimage url reject
 
-[script]
-
+[Script]
 # -------------------------------
-# 内嵌 JS 脚本：极简首页 + 精简底部Tab
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.* requires-body=1,script-path=inline-script
+# 极简首页 + 精简底部Tab 内嵌脚本
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.* requires-body=1, script-path=inline-script
 
-[mitm] 
+[MITM]
 hostname=%APPEND% app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
 
 [inline-script]
-// 无忧行 - 极简首页 Loon 插件脚本
+// 无忧行 - 极简首页内嵌 JS
 let body = $response.body ? JSON.parse($response.body) : null;
 
 if (body && body.data) {
     const keepKeys = ['home','phone','mine'];
 
-    // -------------------------------
     // 保留首页/电话/我的模块，清空其他
     for (let key in body.data) {
         if (!keepKeys.includes(key)) {
