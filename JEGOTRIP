@@ -1,5 +1,5 @@
-#!name=无忧行去广告 - Loon可用版
-#!desc=彻底屏蔽广告模块，保留首页和我的页面核心功能，底部只保留首页和我的
+#!name=无忧行去广告 - 完全JS版
+#!desc=彻底屏蔽广告模块，只保留首页和我的页面核心功能，底部Tab精简
 #!author=ZenmoFeiShi[https://github.com/ZenmoFeiShi]
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -7,19 +7,14 @@
 #!bundleId=com.cmi.jegotrip
 #!date=2025-08-26
 
-[Rule]
-# 非核心广告接口直接 reject
-DOMAIN-SUFFIX,push.it.10086.cn,reject
-DOMAIN-SUFFIX,oss.jegotrip.com.cn,reject
-
 [Rewrite]
-// 核心接口用 JS 清理广告
+// 核心接口使用 JS 清理广告模块
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById.* script-body=true,requires-body=true,tag=无忧行去广告
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel.* script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners.* script-body=true,requires-body=true,tag=無忧行去广告
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData.* script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion.* script-body=true,requires-body=true,tag=无忧行去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion.* script-body=true,requires-body=true,tag=無忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId.* script-body=true,requires-body=true,tag=無忧行去广告
 
 [MitM]
 hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn
@@ -35,7 +30,6 @@ try {
         body.data.recommend = [];
         body.data.columnListByRegion = [];
         body.data.poiList = [];
-
         // 保留电话模块和必要字段
         body.data.phone = body.data.phone || {};
         body.data.destinationList = [];
