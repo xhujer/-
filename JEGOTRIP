@@ -1,51 +1,77 @@
-#!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、精简首页和我的页面
+#!name=无忧行去广告 - 安全精简版
+#!desc=彻底去广告，底部仅保留首页和我的页面，保留电话和我的页面核心信息
+#!author=ZenmoFeiShi[https://github.com/ZenmoFeiShi]
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
 #!date=2025-08-26
 
-[Rule]
-# 屏蔽首页广告/推荐接口
-DOMAIN,app3.jegotrip.com.cn,REJECT
-# 拦截推送/同步广告资源
-DOMAIN,push.it.10086.cn,REJECT
-DOMAIN,oss.jegotrip.com.cn,REJECT
-
 [Rewrite]
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/queryGlobalStrategyData reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData reject-dict
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject-dict
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage reject-dict
-
-[Script]
-// 内置 JS 脚本处理首页和我的页面广告模块
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
+// 所有广告接口使用 JS 清理
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage.* script-body=true,requires-body=true,tag=无忧行去广告
 
 [MitM]
 hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn
 
-// -------- 内置 JS 脚本内容（script-body） --------
-let body = JSON.parse($response.body);
+[Script]
+// JS 脚本处理广告字段并返回安全核心数据
+try {
+    let body = $response.body ? JSON.parse($response.body) : {};
 
-// 删除首页广告模块
-if (body && body.data) {
-    if (body.data.bannerList) delete body.data.bannerList;
-    if (body.data.recommend) delete body.data.recommend;
-    if (body.data.columnListByRegion) delete body.data.columnListByRegion;
-    if (body.data.poiList) delete body.data.poiList;
+    // -------- 首页处理 --------
+    if (body.data) {
+        delete body.data.bannerList;
+        delete body.data.recommend;
+        delete body.data.columnListByRegion;
+        delete body.data.poiList;
+
+        // 保留电话模块
+        body.data.phone = body.data.phone || {};
+
+        // 保留首页核心内容（可选热门目的地）
+        body.data.destinationList = body.data.destinationList || [];
+    }
+
+    // -------- 我的页面处理 --------
+    if (body.data?.userCenter) {
+        delete body.data.userCenter.ads;  // 删除广告
+        body.data.userCenter.profile = body.data.userCenter.profile || {};
+        body.data.userCenter.phone = body.data.userCenter.phone || {};
+
+        // 删除其他占位模块
+        if (body.data.userCenter.extraModules) {
+            body.data.userCenter.extraModules = [];
+        }
+    }
+
+    // -------- 底部 Tab 精简，只保留 首页 和 我的 --------
+    if (body.data?.tabBarList) {
+        body.data.tabBarList = body.data.tabBarList.filter(item =>
+            item.name === "首页" || item.name === "我的"
+        );
+    }
+
+    $done({ body: JSON.stringify(body) });
+} catch (e) {
+    // 出错时返回安全默认数据
+    let safeBody = {
+        data: {
+            phone: {},
+            destinationList: [],
+            userCenter: { profile: {}, phone: {} },
+            tabBarList: [
+                { name: "首页" },
+                { name: "我的" }
+            ]
+        }
+    };
+    $done({ body: JSON.stringify(safeBody) });
 }
-
-// 删除我的页面广告
-if (body && body.data && body.data.userCenter) {
-    if (body.data.userCenter.ads) delete body.data.userCenter.ads;
-}
-
-$done({ body: JSON.stringify(body) });
