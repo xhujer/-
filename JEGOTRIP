@@ -1,24 +1,18 @@
-#!name=无忧行
-#!desc=移除开屏广告 屏蔽首页推荐
+#!name=无忧行 - 去广告
+#!desc=移除开屏广告、屏蔽首页推荐，拦截推送广告资源，全面净化使用体验
+#!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
 #!tag=去广告
-#!icon=https://imgtolinkx.com/i/CO0eIFoS
-#!date=2025-08-26
+#!system=iOS
 
-[URL Rewrite]
-# 屏蔽首页广告/推荐
-^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/destination\/getDestinationById url reject
-^https?:\/\/app3.jegotrip.com.cn\/api\/layout\/v1\/init\/destinationModel url reject
-^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/banner\/getDestBanners url reject
-^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/queryGlobalStrategyData url reject
-^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/rec\/columnListByRegion url reject
-^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId url reject
-^https?:\/\/app3.jegotrip.com.cn\/api\/destination\/v1\/rec\/queryData url reject
+[Rewrite]
+# 首页广告/推荐接口
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(destination|getDestinationById|banner|getDestBanners|queryGlobalStrategyData|rec\/columnListByRegion|poi\/queryJegoListAndNameByDestinationId|rec\/queryData) - reject
 
-# 拦截推送/同步广告资源
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge url reject
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage url reject
+# 推送/广告资源
+^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge - reject
+^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage - reject
 
 [MITM]
-hostname=app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
+hostname = app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
