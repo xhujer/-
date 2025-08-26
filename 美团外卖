@@ -1,39 +1,34 @@
-#!name=美团 & 美团外卖去广告
-#!desc=屏蔽启动页、更新、推荐、悬浮广告及图片/动画资源，只保留首页/订单/我的页面功能
+#!name=美团外卖 - 极速去广告
+#!desc=极速启动，彻底屏蔽启动页/首页/订单页广告，去除图片/GIF/视频/动画，只保留核心功能
 #!bundleId=com.meituan.imeituan
-#!author=zirawell[https://github.com/zirawell]
-#!openUrl=https://apps.apple.com/app/id423084029
-#!icon=https://raw.githubusercontent.com/zirawell/Git/R-Store/Res/Icon/App/meituan.png
+#!icon=https://raw.githubusercontent.com/zirawell/Git/R-Store/Res/Icon/App/meituanwm.png
+#!author=zirawell
 #!tag=去广告
 #!date=2025-08-26
 
+# MITM 主机名，用于 HTTPS 拦截
+hostname = wmapi.meituan.com, img.meituan.net, s3plus.meituan.net, flowplus.meituan.net, p*.meituan.net, apimobile.meituan.com
+
 [URL Rewrite]
-# 启动页/更新/推荐/营销接口
-^https?:\/\/wmapi\.meituan\.com\/api\/v7\/(loadInfo|openscreen|startpicture) url reject
-^https?:\/\/apimobile\.meituan\.com\/appupdate url reject
-^https?:\/\/apimobile\.meituan\.com\/appupdate\/mach\/checkUpdate\? url reject
-^https?:\/\/apimobile\.meituan\.com\/group\/v\d+\/recommend\/unity\/recommends url reject
-^https?:\/\/www\.meituan\.com\/api\/v\d+\/appstatus\? url reject
-^https?:\/\/s3plus\.meituan\.net\/v\d+\/mss_\w+\/waimai-alita\/\w+\.zip$ url reject
-^https?:\/\/s3plus\.meituan\.net\/v\d+\/mss_\w+\/brandcpt url reject
-^https?:\/\/sqt\.meituan\.com\/s\/gateway\/mweb\/api\/marketingResource\/show url reject
-^https?:\/\/img\.meituan\.net\/bizad url reject
-^https?:\/\/p\d\.meituan\.net\/(display|mmc|cell)\/ url reject
+# -------------------------
+# 启动页广告接口极速拒绝
+^https?:\/\/wmapi\.meituan\.com\/api\/v\d+\/(loadInfo|openscreen|startpicture) url reject
+^https?:\/\/wmapi\.meituan\.com\/api\/v7\/(loadInfo|openscreen|startpicture)\? reject-dict
+
+# 首页/订单页广告接口极速屏蔽
+^https?:\/\/p\d\.meituan\.net\/cell url reject
+^https?:\/\/apimobile\.meituan\.com\/group\/v1\/recommend\/unity\/recommends reject-dict
+
+# JSON 配置/无关请求直接拒绝，加速首页加载
+^https?:\/\/s3plus\.meituan\.net\/ocean-blk-index\/index\/blk_conf_73\.json reject-dict
+^https?:\/\/s3plus\.meituan\.net\/v1\/mss_\w+\/(brandcpt-vedio|waimai-alita)\/\w+\.zip$ reject-dict
+^http:\/\/59\.82\.113\.10\/amdc\/mobileDispatch\?appkey=213807& reject-dict
+
+# 图片/视频/GIF 广告资源屏蔽，减少流量
+^https?:\/\/(s3plus|flowplus)\.meituan\.net\/v\d\/\w+\/linglong\/\w+\.(gif|jpg|mp4) reject-img
+^https?:\/\/img\.meituan\.net\/bizad\/bizad_brandCpt_\d+\.jpg reject-img
+^https?:\/\/img\.meituan\.net\/goodsawardpic\/[a-f0-9]+\.png\.webp reject-img
 
 [Map Local]
-# 屏蔽广告图片/动画资源
-^https?:\/\/img\.meituan\.net\/(adunion|display|midas)\/.+\.(gif|jpg)\.webp file:///dev/null
-^https?:\/\/img\.meituan\.net\/groceryimages\/\w+\.gif file:///dev/null
-^https?:\/\/img\.meituan\.net\/groceryimages\/\w+\.png@220w_220h_1e_1l file:///dev/null
-^https?:\/\/p\d\.meituan\.net\/movie\/.+?\.jpg\?may_covertWebp file:///dev/null
-^https?:\/\/p\d\.meituan\.net\/travelcube\/(?!1d4a663|52e9bfc|29a6227|412c4ac|6ee35c4|13bf0bf|ab8692e|6858b1d).+@100w_100h file:///dev/null
-^https?:\/\/p\d\.meituan\.net\/(\d+\.\d+\.\d+\/)?wmbanner\/(?!fb51b9d|4e9d3c4).+\.gif file:///dev/null
-^https?:\/\/(s3plus|flowplus)\.meituan\.net\/v\d+\/\w+\/linglong\/.+\.(gif|jpg|mp4) file:///dev/null
-^https?:\/\/portal-portm\.meituan\.com\/horn_ios file:///dev/null
-
-[Script]
-# linglong 广告脚本处理
-meituan = type=http-response,pattern=^https?:\/\/p\d\.meituan\.net\/linglong\/,requires-body=1,max-size=0,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/meituan.js
-
-[MITM]
-hostname=wmapi.meituan.com, apimobile.meituan.com, img.meituan.net, p*.meituan.net, www.meituan.com, s3plus.meituan.net, flowplus.meituan.net, portal-portm.meituan.com, sqt.meituan.com
+# 替换动画资源为空文件，避免加载广告动画
+^https?:\/\/s3plus\.meituan\.net\/v\d\/mss_\w+\/goku\/(lottie|lucency) file:///dev/null
