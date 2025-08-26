@@ -1,6 +1,6 @@
 #!name=无忧行 - 极简首页插件
-#!desc=终极去广告，只保留首页/电话/我的 + 精简底部Tab，一键导入 Loon
-#!version=1.0
+#!desc=稳定版终极去广告，只保留首页/电话/我的 + 精简底部Tab
+#!version=1.1
 #!icon=https://raw.githubusercontent.com/zirawell/Git/R-Store/Res/Icon/App/jegotrip.png
 #!author=zirawell
 #!openUrl=https://apps.apple.com/app/id1037589370
@@ -9,7 +9,7 @@
 [URL Rewrite]
 # -------------------------------
 # 屏蔽首页广告/推荐/轮播/策略/活动接口
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(destination|getDestBanners|layout|queryGlobalStrategyData|rec|poi) url reject
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.* url reject
 
 # -------------------------------
 # 推送/广告资源屏蔽
@@ -18,35 +18,40 @@
 
 [Script]
 # -------------------------------
-# 极简首页 + 精简底部Tab 内嵌脚本
+# 极简首页 + 精简底部Tab 内嵌增强脚本
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.* requires-body=1, script-path=inline-script
 
 [MITM]
 hostname=%APPEND% app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
 
 [inline-script]
-// 无忧行 - 极简首页内嵌 JS
-let body = $response.body ? JSON.parse($response.body) : null;
+// 无忧行 - 稳定极简首页 JS
+try {
+    let body = $response.body && $response.body.length > 0 ? JSON.parse($response.body) : null;
 
-if (body && body.data) {
-    const keepKeys = ['home','phone','mine'];
+    if (body && body.data) {
+        const keepKeys = ['home','phone','mine'];
 
-    // 保留首页/电话/我的模块，清空其他
-    for (let key in body.data) {
-        if (!keepKeys.includes(key)) {
-            body.data[key] = [];
+        // 保留首页/电话/我的模块，清空其他
+        for (let key in body.data) {
+            if (!keepKeys.includes(key) && body.data[key] !== null) {
+                body.data[key] = [];
+            }
+        }
+
+        // 模块数组形式处理
+        if (Array.isArray(body.data.moduleList)) {
+            body.data.moduleList = body.data.moduleList.filter(m => keepKeys.includes(m.id || m.type));
+        }
+
+        // 精简底部Tab，仅保留首页/电话/我的
+        if (Array.isArray(body.data.tabList)) {
+            body.data.tabList = body.data.tabList.filter(tab => keepKeys.includes(tab.id || tab.type));
         }
     }
 
-    // 模块数组形式处理
-    if (body.data.moduleList && Array.isArray(body.data.moduleList)) {
-        body.data.moduleList = body.data.moduleList.filter(m => keepKeys.includes(m.id || m.type));
-    }
-
-    // 精简底部Tab，仅保留首页/电话/我的
-    if (body.data.tabList && Array.isArray(body.data.tabList)) {
-        body.data.tabList = body.data.tabList.filter(tab => keepKeys.includes(tab.id || tab.type));
-    }
+    $done({ body: JSON.stringify(body) });
+} catch (e) {
+    // 捕获异常，保证插件不影响正常请求
+    $done({});
 }
-
-$done({ body: JSON.stringify(body) });
