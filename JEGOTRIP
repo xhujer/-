@@ -1,14 +1,19 @@
 /***********************************
  * 
 > 应用名称：无忧行
-> 功能：极简首页 + 精简底部Tab + 终极去广告
-> 作者：zirawell
+> 描述：极简首页 + 精简底部Tab + 终极去广告
+> 作者：明
 > 日期：2025-08-26
+> 适用系统：iOS
+> 插件类型：Loon Script + Rule
+> 版本：1.0
+> 图标：https://raw.githubusercontent.com/zirawell/Git/R-Store/Res/Icon/App/jegotrip.png
+> AppStore：https://apps.apple.com/app/id1037589370
 
 [rewrite_local]
 
 # -------------------------------
-# 屏蔽首页广告/推荐/轮播/策略/活动接口 - 优化正则
+# 屏蔽首页广告/推荐/轮播/策略/活动接口
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(destination|getDestBanners|layout|queryGlobalStrategyData|rec|poi) url reject
 
 # -------------------------------
@@ -26,7 +31,7 @@ http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.* requ
 hostname=%APPEND% app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
 
 [inline-script]
-// 无忧行 - 稳定版极简首页 JS
+// 无忧行 - 极简首页 Loon 插件脚本
 let body = $response.body ? JSON.parse($response.body) : null;
 
 if (body && body.data) {
