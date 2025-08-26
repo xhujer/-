@@ -1,5 +1,5 @@
-#!name=无忧行去广告 - REJECT+JS
-#!desc=结合 REJECT 和 JS 去广告，彻底屏蔽广告模块，保留首页和我的页面核心功能
+#!name=无忧行去广告 - Loon可用版
+#!desc=彻底屏蔽广告模块，保留首页和我的页面核心功能，底部只保留首页和我的
 #!author=ZenmoFeiShi[https://github.com/ZenmoFeiShi]
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -8,39 +8,44 @@
 #!date=2025-08-26
 
 [Rule]
-# 非核心广告接口直接 REJECT
-DOMAIN,push.it.10086.cn,REJECT
-DOMAIN,oss.jegotrip.com.cn,REJECT
-DOMAIN,app3.jegotrip.com.cn,REJECT  # 如果想彻底屏蔽首页推荐，可加，但可能影响核心功能
+# 非核心广告接口直接 reject-dict
+DOMAIN-SUFFIX,push.it.10086.cn,reject-dict
+DOMAIN-SUFFIX,oss.jegotrip.com.cn,reject-dict
+# 资源类图片可用 reject-img（可选）
+# DOMAIN-SUFFIX,img.jegotrip.com.cn,reject-img
 
 [Rewrite]
-// 核心接口不 REJECT，用 JS 清理广告
+// 核心接口用 JS 清理广告
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById.* script-body=true,requires-body=true,tag=无忧行去广告
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion.* script-body=true,requires-body=true,tag=无忧行去广告
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId.* script-body=true,requires-body=true,tag=无忧行去广告
 
 [MitM]
 hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn
 
 [Script]
-// JS 脚本彻底屏蔽模块，同时保留核心字段
+// JS 脚本彻底屏蔽模块，保留核心字段
 try {
     let body = $response.body ? JSON.parse($response.body) : {};
 
     // -------- 首页模块 --------
     if (body.data) {
-        delete body.data.bannerList;
-        delete body.data.recommend;
-        delete body.data.columnListByRegion;
-        delete body.data.poiList;
+        body.data.bannerList = [];
+        body.data.recommend = [];
+        body.data.columnListByRegion = [];
+        body.data.poiList = [];
 
         // 保留电话模块和必要字段
         body.data.phone = body.data.phone || {};
-        body.data.destinationList = []; // 不显示其他模块
+        body.data.destinationList = [];
     }
 
     // -------- 我的页面 --------
     if (body.data?.userCenter) {
-        delete body.data.userCenter.ads;
+        body.data.userCenter.ads = [];
         body.data.userCenter.extraModules = [];
         body.data.userCenter.profile = body.data.userCenter.profile || {};
         body.data.userCenter.phone = body.data.userCenter.phone || {};
