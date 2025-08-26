@@ -1,3 +1,5 @@
+# 生成最终优化后的 Loon 插件配置文件
+config_text = """\
 #!name=无忧行去广告精简
 #!desc=移除开屏广告、屏蔽首页推荐、去除活动弹窗、精简底部Tab仅保留电话 & 我的
 #!tag=去广告
@@ -8,23 +10,23 @@
 
 [Rewrite]
 # 首页广告/推荐/活动
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners|recommend|rec\/|activity|promotion) reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/queryGlobalStrategyData reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId reject-dict
+^https?:\/\/app3\\.jegotrip\\.com\\.cn\/api\/destination\/v1\/(banner|getDestBanners|recommend|rec\/|activity|promotion) reject-dict
+^https?:\/\/app3\\.jegotrip\\.com\\.cn\/api\/destination\/v1\/queryGlobalStrategyData reject-dict
+^https?:\/\/app3\\.jegotrip\\.com\\.cn\/api\/destination\/v1\/poi\/queryJegoListAndNameByDestinationId reject-dict
 
 # 推送 / badge
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject
+^https?:\/\/push\\.it\\.10086\\.cn\/mc\/receipt\/iosBadge reject
 
 # 广告资源图
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage reject
+^https?:\/\/oss\\.jegotrip\\.com\\.cn\/appSyncimage reject
 
 [Script]
 # 首页接口去广告
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-response-body jegotrip_remove_ads.js
+^https?:\/\/app3\\.jegotrip\\.com\\.cn\/api\/destination\/v1\/destination\/getDestinationById script-response-body jegotrip_remove_ads.js
 # 首页布局精简
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-response-body jegotrip_remove_ads.js
+^https?:\/\/app3\\.jegotrip\\.com\\.cn\/api\/layout\/v1\/init\/destinationModel script-response-body jegotrip_remove_ads.js
 # 精简底部Tab，仅保留 电话 & 我的
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v\d+\/init\/tab script-response-body jegotrip_tab_filter.js
+^https?:\/\/app3\\.jegotrip\\.com\\.cn\/api\/layout\/v\\d+\/init\/tab script-response-body jegotrip_tab_filter.js
 
 [MITM]
 hostname = %APPEND% app3.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
@@ -62,3 +64,10 @@ if (body && body.data && body.data.tabList) {
 }
 
 $done({ body: JSON.stringify(body) });
+"""
+
+out_path = "/mnt/data/jegotrip_remove_ads.plugin"
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(config_text)
+
+out_path
