@@ -1,0 +1,58 @@
+#!name=中国联通去广告
+#!desc=屏蔽开屏广告、首页推荐、活动推广、弹窗广告，精简页面
+#!tag=去广告
+#!author=zirawell
+#!icon=https://imgtolinkx.com/i/zDTlC8gR
+#!openUrl=https://apps.apple.com/app/id416457422
+#!bundleId=com.chinaUnicom.mobileBusinessHall
+#!date=2025-08-28
+
+[Rewrite]
+# 开屏广告 / 启动页
+^https?:\/\/m\.client\.10010\.com\/mobileService\/onLine.htm script-response-body unicom_remove_ads.js
+^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/getLaunchAd url reject-dict
+
+# 首页推荐流 / banner / 活动
+^https?:\/\/m\.client\.10010\.com\/.*\/home\/.* script-response-body unicom_remove_ads.js
+^https?:\/\/res\.mall\.10010\.cn\/mall\/banner\/.* url reject-dict
+^https?:\/\/res\.mall\.10010\.cn\/mall\/activity\/.* url reject-dict
+
+# 弹窗 / 浮层
+^https?:\/\/m\.client\.10010\.com\/.*\/popup.* script-response-body unicom_remove_ads.js
+^https?:\/\/res\.mall\.10010\.cn\/popup\/.* url reject-dict
+
+[Script]
+unicom_remove_ads.js = type=http-response, pattern=^https?:\/\/, requires-body=1, script-update-interval=0, script-content=`
+  let body = JSON.parse($response.body);
+
+  function removeAds(obj) {
+    if (!obj) return;
+    delete obj.ad;
+    delete obj.ads;
+    delete obj.advert;
+    delete obj.advertList;
+    delete obj.adInfo;
+    delete obj.banner;
+    delete obj.bannerList;
+    delete obj.popup;
+    delete obj.activity;
+    delete obj.feed;
+    delete obj.recommend;
+    delete obj.recommendList;
+    delete obj.promotion;
+
+    if (obj.data) removeAds(obj.data);
+    if (Array.isArray(obj)) obj.forEach(removeAds);
+    if (typeof obj === "object") {
+      for (let k in obj) {
+        if (typeof obj[k] === "object") removeAds(obj[k]);
+      }
+    }
+  }
+
+  removeAds(body);
+  $done({ body: JSON.stringify(body) });
+`
+
+[MITM]
+hostname = m.client.10010.com, res.mall.10010.cn
