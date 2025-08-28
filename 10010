@@ -1,41 +1,33 @@
 #!name=中国联通去广告
-#!desc=屏蔽开屏广告、首页推荐、活动推广、弹窗广告与商城广告脚本（Loon）
+#!desc=精细化去广告规则，屏蔽开屏广告、首页推荐流、活动广告、弹窗广告、商城广告脚本，保留正常功能
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/zDTlC8gR
 #!openUrl=https://apps.apple.com/app/id416457422
 #!bundleId=com.chinaUnicom.mobileBusinessHall
 #!date=2025-08-29
 
-[Rule]
-# 第三方广告域名（分流级拦截）
-DOMAIN-SUFFIX,adms.10010.com,REJECT
-DOMAIN-SUFFIX,midas.gtimg.cn,REJECT
-DOMAIN-SUFFIX,adimg.uve.weibo.com,REJECT
-
 [Rewrite]
-# --- 开屏/欢迎广告 ---
-^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/(getLaunchAd|getWelcomeAd|getHomePageAd)$ reject-dict
-# 部分版本的在线/启动探测（常见用于引导&下发）
-^https?:\/\/m\.client\.10010\.com\/mobileService\/onLine\.htm$ reject-200
+# --- 开屏广告 --- 
+^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/(getLaunchAd|getWelcomeAd)$ reject-dict
 
-# --- 首页推荐 & 活动广告 ---
-^https?:\/\/m\.client\.10010\.com\/mobileService\/(activity|customer)\/(accountListData|get_client_adv|get_startadv)$ reject-dict
+# --- 首页推荐 & 活动广告 --- 
+^https?:\/\/m\.client\.10010\.com\/mobileService\/(activity|customer)\/(get_client_adv|get_startadv)$ reject-dict
+# 排除与账户/流量查询相关的接口
 ^https?:\/\/m\.client\.10010\.com\/mobileService\/customer\/getclientconfig\.htm$ reject-dict
 
 # --- 弹窗广告 ---
 ^https?:\/\/m\.client\.10010\.com\/.*\/popup.*$ reject-dict
 ^https?:\/\/res\.mall\.10010\.cn\/popup\/.*$ reject-dict
 
-# --- 商城广告/活动/脚本 ---
-^https?:\/\/res\.mall\.10010\.cn\/mall\/(banner|activity)\/.*$ reject-dict
-^https?:\/\/res\.mall\.10010\.cn\/mall\/common\/js\/fa\.js(?:\?.*)?$ reject-200
+# --- 商城广告 Banner / 活动 ---
+^https?:\/\/res\.mall\.10010\.cn\/mall\/banner\/.*$ reject-dict
+^https?:\/\/res\.mall\.10010\.cn\/mall\/activity\/.*$ reject-dict
+
+# --- 商城广告 JS （只拦截 fa.js） ---
+^https?:\/\/res\.mall\.10010\.cn\/mall\/common\/js\/fa\.js$ reject-200
 
 # --- 广告图片资源 ---
 ^https?:\/\/m1\.ad\.10010\.com\/noticeMag\/images\/imageUpload\/2\d{3}.*$ reject-img
-
-# 说明：
-# 1) Loon 使用 RE2 正则，不支持 (?!) 等前瞻/回溯；已移除不兼容写法。
-# 2) *_dict 返回 {}，适合 JSON 接口；reject-200 返回空 200；reject-img 返回 1x1 像素。
 
 [MitM]
 hostname = m.client.10010.com, m1.ad.10010.com, res.mall.10010.cn
