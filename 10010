@@ -7,24 +7,21 @@
 #!date=2025-08-28
 
 [Rule]
-# 开屏广告
-DOMAIN-SUFFIX,adms.10010.com,REJECT
-^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/getLaunchAd$ REJECT
+# --- 开屏广告 ---
+^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/(getLaunchAd|getWelcomeAd) url reject-img
 ^https?:\/\/m\.client\.10010\.com\/mobileService\/onLine\.htm$ REJECT
 
-# 首页推荐流 & banner
-^https?:\/\/m\.client\.10010\.com\/.*\/home\/.* REJECT
-^https?:\/\/res\.mall\.10010\.cn\/mall\/banner\/.* REJECT
-^https?:\/\/res\.mall\.10010\.cn\/mall\/activity\/.* REJECT
+# --- 首页广告与推广 ---
+^https?:\/\/m\.client\.10010\.com\/mobileService\/(activity|customer)\/(accountListData|get_client_adv|get_startadv) url reject-img
+^https?:\/\/m\.client\.10010\.com\/mobileService\/customer\/getclientconfig\.htm url reject-dict
+^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/(getHomePageAd|getWelcomeAd) url reject-img
 
-# 弹窗广告
-^https?:\/\/m\.client\.10010\.com\/.*\/popup.* REJECT
-^https?:\/\/res\.mall\.10010\.cn\/popup\/.* REJECT
+# --- 通用广告脚本拦截 ---
+^https?:\/\/[^(apple|10010)]+\.(com|cn)\/(a|A)d(s|v)?(\/|\.js) url reject-img
 
-# 其他广告资源
-DOMAIN-SUFFIX,res.mall.10010.cn,REJECT
-DOMAIN-SUFFIX,midas.gtimg.cn,REJECT
-DOMAIN-SUFFIX,adimg.uve.weibo.com,REJECT
+# --- 广告资源拦截 ---
+^https?:\/\/m1\.ad\.10010\.com\/noticeMag\/images\/imageUpload\/2\d{3} url reject-img
+^https?:\/\/res\.mall\.10010\.cn\/mall\/common\/js\/fa\.js?referer= url reject-img
 
 [MITM]
-hostname = m.client.10010.com, res.mall.10010.cn
+hostname = m.client.10010.com, m1.ad.10010.com, res.mall.10010.cn
