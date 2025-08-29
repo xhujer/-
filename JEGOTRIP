@@ -1,22 +1,19 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广及POI广告
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广及我的页面广告入口
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
-#!date=2025-08-27
+#!date=2025-08-29
 
 [Rule]
-# 屏蔽广告接口和推荐
-DOMAIN,app3.jegotrip.com.cn,REJECT
-# 屏蔽推送和广告资源
+# 屏蔽广告资源/推送
 DOMAIN,push.it.10086.cn,REJECT
 DOMAIN,oss.jegotrip.com.cn,REJECT
 
 [Rewrite]
-# --- 首页广告/推荐/推广 ---
+# --- 首页广告/推荐 ---
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/(columnListByRegion|queryData|sceneQuery) reject-dict
 
@@ -36,35 +33,8 @@ DOMAIN,oss.jegotrip.com.cn,REJECT
 ^https?:\/\/bugly\.qq\.com reject
 
 [Script]
-// 清理首页和我的页面广告模块
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
+# 精准清理首页 & 我的页面广告入口
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/.* script-content=!!js_start!!let body;try{body=JSON.parse($response.body);}catch(e){$done({});}// 首页广告删除if(body?.data){delete body.data.bannerList;delete body.data.recommend;delete body.data.columnListByRegion;delete body.data.poiList;delete body.data.promotionList;delete body.data.strategyList;if(body.data.tabList){body.data.tabList=body.data.tabList.filter(tab=>!/广告|推广|推荐|活动/.test(JSON.stringify(tab)));}if(body.data.modules){body.data.modules=body.data.modules.filter(m=>!/广告|推广|推荐|活动/.test(JSON.stringify(m)));}}// 我的页面广告删除if(body?.data?.userCenter){delete body.data.userCenter.ads;delete body.data.userCenter.bannerList;if(body.data.userCenter.menuList){body.data.userCenter.menuList=body.data.userCenter.menuList.filter(item=>!/广告|推广|活动/.test(JSON.stringify(item)));}}$done({body:JSON.stringify(body)});!!js_end!!,requires-body=true,tag=无忧行去广告
 
 [MitM]
 hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn,umeng.com,bugly.qq.com
-
-// -------- 内置 JS 脚本内容 --------
-let body;
-try {
-    body = JSON.parse($response.body);
-} catch(e) {
-    $done({});
-}
-
-// 删除首页广告模块
-if (body && body.data) {
-    delete body.data.bannerList;
-    delete body.data.recommend;
-    delete body.data.columnListByRegion;
-    delete body.data.poiList;
-    delete body.data.promotionList;
-    delete body.data.strategyList;
-}
-
-// 删除“我的页面”广告
-if (body && body.data && body.data.userCenter) {
-    delete body.data.userCenter.ads;
-    delete body.data.userCenter.bannerList;
-}
-
-$done({ body: JSON.stringify(body) });
