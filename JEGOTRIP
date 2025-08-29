@@ -1,5 +1,5 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广及我的页面广告入口
+#!desc=移除开屏广告、屏蔽首页推荐/推广，精确清理我的页面广告入口（加强版）
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
@@ -7,34 +7,124 @@
 #!date=2025-08-29
 
 [Rule]
-# 屏蔽广告资源/推送
+# 屏蔽广告资源/推送（资源类仍直接拒绝）
 DOMAIN,push.it.10086.cn,REJECT
 DOMAIN,oss.jegotrip.com.cn,REJECT
 
 [Rewrite]
-# --- 首页广告/推荐 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/(columnListByRegion|queryData|sceneQuery) reject-dict
+# --- 精确拦截已知广告/推荐接口（返回空字典） ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners|getBanners|banners) reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend|recommendList|queryRecommendList) reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(queryGlobalStrategyData|activity|promotion|topic|strategy|promotionList) reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/(queryRecommendList|queryAdsPoiList) reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.*(Ads|Ad|ads|advertisement|advert) reject-dict
 
-# --- 活动/专题/策略推广 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(queryGlobalStrategyData|activity|promotion|topic|strategy) reject-dict
-
-# --- 目的地/POI 推荐广告 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/(queryJegoListAndNameByDestinationId|queryRecommendList|queryAdsPoiList) reject-dict
-
-# --- 广告资源 ---
+# 资源图片静态拒绝
 ^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage reject
 ^https?:\/\/oss\.jegotrip\.com\.cn\/img\/ reject
 
-# --- 推送/埋点 ---
+# 推送/埋点（维持拒绝）
 ^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject
 ^https?:\/\/umeng\.com reject
 ^https?:\/\/bugly\.qq\.com reject
 
 [Script]
-# 精准清理首页 & 我的页面广告入口
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/.* script-content=!!js_start!!let body;try{body=JSON.parse($response.body);}catch(e){$done({});}// 首页广告删除if(body?.data){delete body.data.bannerList;delete body.data.recommend;delete body.data.columnListByRegion;delete body.data.poiList;delete body.data.promotionList;delete body.data.strategyList;if(body.data.tabList){body.data.tabList=body.data.tabList.filter(tab=>!/广告|推广|推荐|活动/.test(JSON.stringify(tab)));}if(body.data.modules){body.data.modules=body.data.modules.filter(m=>!/广告|推广|推荐|活动/.test(JSON.stringify(m)));}}// 我的页面广告删除if(body?.data?.userCenter){delete body.data.userCenter.ads;delete body.data.userCenter.bannerList;if(body.data.userCenter.menuList){body.data.userCenter.menuList=body.data.userCenter.menuList.filter(item=>!/广告|推广|活动/.test(JSON.stringify(item)));}}$done({body:JSON.stringify(body)});!!js_end!!,requires-body=true,tag=无忧行去广告
+# 只在必须返回页面主体的接口上运行精确清理脚本（不泛匹配）
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-content=!!js_start!!
+/* 精确版：深度过滤广告/推广/推荐项，保留核心内容 */
+let body;
+try{ body = JSON.parse($response.body);}catch(e){ $done({}); }
+
+const AD_RE = /广告|推广|推荐|活动|sponsor|sponsored|promo|ad|advert/i;
+
+function isAdItem(item){
+  if(!item) return false;
+  try{
+    if (typeof item === 'string') return AD_RE.test(item);
+    if (item.ad === true || item.isAd === true || item.is_ad === true) return true;
+    if (item.type && AD_RE.test(String(item.type))) return true;
+    if (item.title && AD_RE.test(String(item.title))) return true;
+    if (item.name && AD_RE.test(String(item.name))) return true;
+    if (item.desc && AD_RE.test(String(item.desc))) return true;
+    // 某些对象里会包含明显的广告字段
+    if (item.adType || item.adId || item.advertisement) return true;
+    // 最后保险开关：整体序列化查关键词（防止漏网）
+    if (AD_RE.test(JSON.stringify(item))) return true;
+  }catch(e){}
+  return false;
+}
+
+function deepFilter(obj){
+  if(Array.isArray(obj)){
+    return obj.filter(i => !isAdItem(i)).map(i => deepFilter(i));
+  }
+  if(obj && typeof obj === 'object'){
+    for(let k of Object.keys(obj)){
+      if(Array.isArray(obj[k])) obj[k] = deepFilter(obj[k]);
+      else if(obj[k] && typeof obj[k] === 'object') obj[k] = deepFilter(obj[k]);
+      // 对明显命名的广告字段直接删除
+      if(/bannerList|recommend|promotionList|strategyList|adList|ads|advertisements|columnListByRegion|poiList/i.test(k)){
+        try{ delete obj[k]; }catch(e){}
+      }
+    }
+  }
+  return obj;
+}
+
+if(body && body.data){
+  // 先删除常见的直出广告字段
+  ['bannerList','recommend','columnListByRegion','poiList','promotionList','strategyList','ads','adList','advertisements'].forEach(k=>{
+    if(body.data[k]) delete body.data[k];
+  });
+
+  // 过滤 tabList / modules / blocks / cards 等常见容器
+  if (Array.isArray(body.data.tabList)) body.data.tabList = body.data.tabList.filter(i=>!isAdItem(i));
+  if (Array.isArray(body.data.modules)) {
+    body.data.modules = body.data.modules.map(m=>{
+      if(m.items) m.items = Array.isArray(m.items)? m.items.filter(i=>!isAdItem(i)) : m.items;
+      if(m.list) m.list = Array.isArray(m.list)? m.list.filter(i=>!isAdItem(i)) : m.list;
+      return m;
+    }).filter(m => !isAdItem(m));
+  }
+  if (Array.isArray(body.data.blocks)) body.data.blocks = body.data.blocks.filter(b=>!isAdItem(b));
+  if (Array.isArray(body.data.cards)) body.data.cards = body.data.cards.filter(c=>!isAdItem(c));
+
+  // 最后做深度过滤以防遗漏
+  body.data = deepFilter(body.data);
+}
+
+$done({ body: JSON.stringify(body) });
+!!js_end!!,requires-body=true,tag=首页去广告
+
+# 我的页面初始化（只清理 userCenter 相关广告入口）
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-content=!!js_start!!
+let body;
+try{ body = JSON.parse($response.body);}catch(e){ $done({}); }
+const AD_RE = /广告|推广|推荐|活动|sponsor|promo|ad|advert/i;
+function isAdItem(item){
+  if(!item) return false;
+  try{
+    if (typeof item === 'string') return AD_RE.test(item);
+    if (item.title && AD_RE.test(String(item.title))) return true;
+    if (item.name && AD_RE.test(String(item.name))) return true;
+    if (item.ad === true || item.isAd === true) return true;
+    if (AD_RE.test(JSON.stringify(item))) return true;
+  }catch(e){}
+  return false;
+}
+if(body?.data?.userCenter){
+  // 删除直出广告字段
+  delete body.data.userCenter.ads;
+  delete body.data.userCenter.bannerList;
+  // 过滤 menuList / modules / cardList
+  if (Array.isArray(body.data.userCenter.menuList)) body.data.userCenter.menuList = body.data.userCenter.menuList.filter(i=>!isAdItem(i));
+  if (Array.isArray(body.data.userCenter.modules)) body.data.userCenter.modules = body.data.userCenter.modules.filter(i=>!isAdItem(i));
+  if (Array.isArray(body.data.userCenter.cardList)) body.data.userCenter.cardList = body.data.userCenter.cardList.filter(i=>!isAdItem(i));
+  // 对 menuList 内部可能的 items 做二次过滤
+  body.data.userCenter.menuList = body.data.userCenter.menuList.map(m=>{ if(m.items && Array.isArray(m.items)) m.items = m.items.filter(i=>!isAdItem(i)); return m; });
+}
+$done({ body: JSON.stringify(body) });
+!!js_end!!,requires-body=true,tag=我的页面去广告
 
 [MitM]
 hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn,umeng.com,bugly.qq.com
