@@ -1,10 +1,10 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广及POI广告
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广及指定模块（推荐、周边、玩转大湾区、全球景点、香港新鲜事）
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
-#!date=2025-08-27
+#!date=2025-08-29
 
 [Rule]
 # 屏蔽广告接口和推荐
@@ -36,7 +36,7 @@ DOMAIN,oss.jegotrip.com.cn,REJECT
 ^https?:\/\/bugly\.qq\.com reject
 
 [Script]
-// 清理首页和我的页面广告模块
+// 劫持首页 & 我的页面接口，删除广告和指定模块
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
 
@@ -51,7 +51,7 @@ try {
     $done({});
 }
 
-// 删除首页广告模块
+// ----------------- 首页 -----------------
 if (body && body.data) {
     delete body.data.bannerList;
     delete body.data.recommend;
@@ -59,12 +59,43 @@ if (body && body.data) {
     delete body.data.poiList;
     delete body.data.promotionList;
     delete body.data.strategyList;
+
+    if (body.data.modules) {
+        const removeModules = ["推荐", "周边", "玩转大湾区", "全球景点", "香港新鲜事"];
+        body.data.modules = removeModulesRecursively(body.data.modules, removeModules);
+    }
+
+    // 处理 layout 或 tabs 中的模块（如果存在）
+    if (body.data.layout && Array.isArray(body.data.layout.modules)) {
+        const removeModules = ["推荐", "周边", "玩转大湾区", "全球景点", "香港新鲜事"];
+        body.data.layout.modules = removeModulesRecursively(body.data.layout.modules, removeModules);
+    }
 }
 
-// 删除“我的页面”广告
+// ----------------- 我的页面 -----------------
 if (body && body.data && body.data.userCenter) {
     delete body.data.userCenter.ads;
     delete body.data.userCenter.bannerList;
+
+    if (body.data.userCenter.modules) {
+        const removeModules = ["推荐", "周边", "玩转大湾区", "全球景点", "香港新鲜事"];
+        body.data.userCenter.modules = removeModulesRecursively(body.data.userCenter.modules, removeModules);
+    }
 }
 
+// 输出修改后的响应
 $done({ body: JSON.stringify(body) });
+
+// ----------------- 辅助函数 -----------------
+function removeModulesRecursively(container, removeList) {
+    if (!container || !Array.isArray(container)) return [];
+    return container.filter(module => {
+        // 删除 title 或 name 在 removeList 中的模块
+        if (removeList.includes(module.title) || removeList.includes(module.name)) return false;
+        // 递归处理子模块
+        if (module.modules) {
+            module.modules = removeModulesRecursively(module.modules, removeList);
+        }
+        return true;
+    });
+}
