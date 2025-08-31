@@ -1,5 +1,5 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广及POI广告，并屏蔽区域商品分页查询及枚举查询接口
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广、POI广告
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
@@ -14,7 +14,6 @@ DOMAIN,push.it.10086.cn,REJECT
 DOMAIN,oss.jegotrip.com.cn,REJECT
 DOMAIN,umeng.com,REJECT
 DOMAIN,bugly.qq.com,REJECT
-DOMAIN,mapi.jegotrip.com.cn,REJECT   # 硬屏蔽功能接口域名
 
 [Rewrite]
 # --- 首页广告 Banner ---
@@ -22,16 +21,10 @@ DOMAIN,mapi.jegotrip.com.cn,REJECT   # 硬屏蔽功能接口域名
 
 # --- 首页推荐/资讯/活动/攻略 ---
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/content\/v1\/home\/list reject-dict
+^https?:\/\/app\.jegotrip\.com\.cn\/api/content\/v1\/home\/list reject-dict
 
 # --- 楼层模块 / 活动 / 优惠券 ---
 ^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData reject-dict
-
-# --- 区域商品分页查询 ---
-^https?:\/\/mapi\.jegotrip\.com\.cn\/api\/jtp\/commodity\/region\/findPage reject-dict
-
-# --- 枚举类型查询接口（功能接口） ---
-^https?:\/\/mapi\.jegotrip\.com\.cn\/api\/jtp\/commodity\/public\/enumList reject-dict
 
 # --- 社区帖子 / 点赞 / 功能接口 ---
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api/community\/v1\/post/.* reject-dict
@@ -44,4 +37,4 @@ DOMAIN,mapi.jegotrip.com.cn,REJECT   # 硬屏蔽功能接口域名
 ^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject
 
 [MitM]
-hostname=app3.jegotrip.com.cn,app.jegotrip.com.cn,mapi.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn,umeng.com,bugly.qq.com
+hostname=app3.jegotrip.com.cn,app.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn,umeng.com,bugly.qq.com
