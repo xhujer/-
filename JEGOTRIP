@@ -1,5 +1,5 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广及POI广告
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广及POI广告，同时屏蔽目的地页优惠券
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
@@ -36,7 +36,7 @@ DOMAIN,oss.jegotrip.com.cn,REJECT
 ^https?:\/\/bugly\.qq\.com reject
 
 [Script]
-// 清理首页和我的页面广告模块
+// 清理首页和我的页面广告模块 + 目的地页优惠券
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
 
@@ -65,6 +65,11 @@ if (body && body.data) {
 if (body && body.data && body.data.userCenter) {
     delete body.data.userCenter.ads;
     delete body.data.userCenter.bannerList;
+}
+
+// 删除目的地页优惠券模块
+if (body && body.body && body.body.componentResourceVos) {
+    body.body.componentResourceVos = body.body.componentResourceVos.filter(item => item.componentType !== 8);
 }
 
 $done({ body: JSON.stringify(body) });
