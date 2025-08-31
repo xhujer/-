@@ -1,5 +1,5 @@
-#!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广、POI广告及无忧榜单/攻略（全局清理，刷新也不会再出现）
+#!name=无忧行去广告（终极版）
+#!desc=移除开屏广告、首页推荐、活动推广、POI广告，以及无忧榜单/攻略/达人推荐，全局清理，刷新也有效
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
@@ -34,13 +34,31 @@ DOMAIN,oss.jegotrip.com.cn,REJECT
 ^https?:\/\/bugly\.qq\.com reject
 
 [Script]
-// 全局清理首页、我的页面及无忧榜单/攻略
+// 全局递归清理首页、我的页面及榜单/攻略/达人推荐
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.* script-body=true,requires-body=true,tag=无忧行去广告
 
 [MitM]
 hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn,umeng.com,bugly.qq.com
 
 // -------- 内置 JS 脚本内容 --------
+function removeAds(obj) {
+    if (!obj) return obj;
+    if (Array.isArray(obj)) {
+        return obj.filter(item => {
+            if (item && item.title) {
+                // 删除包含“无忧”、“达人”、“推荐”的模块
+                return !(/无忧|达人|推荐/.test(item.title));
+            }
+            return true;
+        });
+    } else if (typeof obj === 'object') {
+        for (let key in obj) {
+            obj[key] = removeAds(obj[key]);
+        }
+    }
+    return obj;
+}
+
 let body;
 try {
     body = JSON.parse($response.body);
@@ -48,18 +66,8 @@ try {
     $done({});
 }
 
-// 遍历所有一级字段，删除数组中包含“无忧”的条目
-for (let key in body) {
-    if (Array.isArray(body[key])) {
-        body[key] = body[key].filter(item => !(/无忧/.test(item.title)));
-    } else if (typeof body[key] === "object" && body[key] !== null) {
-        for (let subKey in body[key]) {
-            if (Array.isArray(body[key][subKey])) {
-                body[key][subKey] = body[key][subKey].filter(item => !(/无忧/.test(item.title)));
-            }
-        }
-    }
-}
+// 遍历所有返回字段，递归删除广告/榜单/攻略/达人模块
+body = removeAds(body);
 
 // 删除已知广告模块字段
 if (body.data) {
