@@ -1,13 +1,14 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广及POI广告，同时屏蔽目的地页优惠券
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广及POI广告，同时拦截目的地页优惠券
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
-#!date=2025-08-27
+#!date=2025-08-31
 
 [Rule]
 # 屏蔽广告接口和推荐
+DOMAIN,app.jegotrip.com.cn,REJECT
 DOMAIN,app3.jegotrip.com.cn,REJECT
 # 屏蔽推送和广告资源
 DOMAIN,push.it.10086.cn,REJECT
@@ -36,12 +37,13 @@ DOMAIN,oss.jegotrip.com.cn,REJECT
 ^https?:\/\/bugly\.qq\.com reject
 
 [Script]
-// 清理首页和我的页面广告模块 + 目的地页优惠券
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
+// 清理首页、我的页面广告 + assembly floor 数据里的优惠券
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
+http-response ^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData script-body=true,requires-body=true,tag=无忧行去广告
 
 [MitM]
-hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn,umeng.com,bugly.qq.com
+hostname=app.jegotrip.com.cn,app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn,umeng.com,bugly.qq.com
 
 // -------- 内置 JS 脚本内容 --------
 let body;
@@ -67,7 +69,7 @@ if (body && body.data && body.data.userCenter) {
     delete body.data.userCenter.bannerList;
 }
 
-// 删除目的地页优惠券模块
+// 删除 assembly floor / 目的地页优惠券模块
 if (body && body.body && body.body.componentResourceVos) {
     body.body.componentResourceVos = body.body.componentResourceVos.filter(item => item.componentType !== 8);
 }
