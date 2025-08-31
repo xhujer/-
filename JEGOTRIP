@@ -1,10 +1,10 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广及POI广告
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广及POI广告，彻底屏蔽指定模块
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
-#!date=2025-08-27
+#!date=2025-08-31
 
 [Rule]
 # 屏蔽广告接口和推荐
@@ -15,7 +15,7 @@ DOMAIN,oss.jegotrip.com.cn,REJECT
 
 [Rewrite]
 # --- 首页广告/推荐/推广 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners)\/? reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/(columnListByRegion|queryData|sceneQuery) reject-dict
@@ -36,7 +36,7 @@ DOMAIN,oss.jegotrip.com.cn,REJECT
 ^https?:\/\/bugly\.qq\.com reject
 
 [Script]
-// 清理首页和我的页面广告模块
+// 清理首页、我的页面广告模块 & 屏蔽指定模块
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
 
@@ -51,20 +51,49 @@ try {
     $done({});
 }
 
-// 删除首页广告模块
-if (body && body.data) {
-    delete body.data.bannerList;
-    delete body.data.recommend;
-    delete body.data.columnListByRegion;
-    delete body.data.poiList;
-    delete body.data.promotionList;
-    delete body.data.strategyList;
+// 如果 body 或 data 不存在，直接返回
+if (!body || typeof body !== 'object' || !body.data) {
+    $done({});
 }
 
-// 删除“我的页面”广告
-if (body && body.data && body.data.userCenter) {
-    delete body.data.userCenter.ads;
-    delete body.data.userCenter.bannerList;
+// --- 删除首页广告模块 ---
+const topLevelFields = [
+    'bannerList',
+    'recommend',
+    'columnListByRegion',
+    'poiList',
+    'promotionList',
+    'strategyList'
+];
+topLevelFields.forEach(field => delete body.data[field]);
+
+// --- 删除“我的页面”广告 ---
+if (body.data.userCenter) {
+    ['ads', 'bannerList'].forEach(field => delete body.data.userCenter[field]);
 }
+
+// --- 删除包含指定模块的逻辑 ---
+// 可以根据图片 URL、模块 ID 或标题关键字来删除整条模块
+const blockedKeys = [
+    "9dea52dd-d6e9-41be-9a49-b67524129d60",
+    "zDXXz-1631095172842"
+];
+
+function filterModules(list) {
+    if (!Array.isArray(list)) return list;
+    return list.filter(item => {
+        if (!item) return true;
+        return !blockedKeys.some(key =>
+            (item.imageUrl && item.imageUrl.includes(key)) ||
+            (item.id && String(item.id).includes(key)) ||
+            (item.title && item.title.includes(key))
+        );
+    });
+}
+
+// 应用到各类可能包含模块的列表
+if (body.data.poiList) body.data.poiList = filterModules(body.data.poiList);
+if (body.data.recommend) body.data.recommend = filterModules(body.data.recommend);
+if (body.data.promotionList) body.data.promotionList = filterModules(body.data.promotionList);
 
 $done({ body: JSON.stringify(body) });
