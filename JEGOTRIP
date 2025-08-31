@@ -1,5 +1,5 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广、POI广告
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广、POI广告及无忧榜单/攻略
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
@@ -7,9 +7,7 @@
 #!date=2025-08-31
 
 [Rule]
-# 屏蔽广告接口和推荐
-DOMAIN,app3.jegotrip.com.cn,REJECT
-# 屏蔽推送和广告资源
+# 推送和广告资源域名
 DOMAIN,push.it.10086.cn,REJECT
 DOMAIN,oss.jegotrip.com.cn,REJECT
 
@@ -51,22 +49,27 @@ try {
     $done({});
 }
 
+// 确保必要字段存在
+if (!body.data) body.data = {};
+if (!body.data.userCenter) body.data.userCenter = {};
+if (!body.body) body.body = {};
+if (!body.body.models) body.body.models = [];
+
 // 删除首页广告模块
-if (body && body.data) {
-    delete body.data.bannerList;
-    delete body.data.recommend;
-    delete body.data.columnListByRegion;
-    delete body.data.poiList;
-    delete body.data.promotionList;
-    delete body.data.strategyList;
-    delete body.data.destinationGlobalGroupResp; // 删除无忧榜单/攻略
-}
+delete body.data.bannerList;
+delete body.data.recommend;
+delete body.data.columnListByRegion;
+delete body.data.poiList;
+delete body.data.promotionList;
+delete body.data.strategyList;
+delete body.data.destinationGlobalGroupResp;
 
 // 删除“我的页面”广告
-if (body && body.data && body.data.userCenter) {
-    delete body.data.userCenter.ads;
-    delete body.data.userCenter.bannerList;
-    delete body.data.userCenter.models; // 删除无忧攻略/榜单模块
-}
+delete body.data.userCenter.ads;
+delete body.data.userCenter.bannerList;
+delete body.data.userCenter.models;
+
+// 删除无忧榜单/攻略
+body.body.models = body.body.models.filter(item => !(/无忧/.test(item.title)));
 
 $done({ body: JSON.stringify(body) });
