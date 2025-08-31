@@ -1,5 +1,5 @@
-#!name=无忧行去广告（终极版）
-#!desc=移除开屏广告、首页推荐、活动推广、POI广告，以及无忧榜单/攻略/达人推荐，全局清理，刷新也有效
+#!name=无忧行去广告（全V1拦截版）
+#!desc=拦截 /destination/v1/ 所有接口，屏蔽无忧榜单/攻略/达人推荐及广告模块，刷新一次即可生效
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
@@ -12,16 +12,11 @@ DOMAIN,push.it.10086.cn,REJECT
 DOMAIN,oss.jegotrip.com.cn,REJECT
 
 [Rewrite]
-# 首页广告/推荐/推广
+# 屏蔽已知广告接口
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/(columnListByRegion|queryData|sceneQuery) reject-dict
-
-# 活动/专题/策略推广
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(queryGlobalStrategyData|activity|promotion|topic|strategy) reject-dict
-
-# 目的地/POI 广告
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/(queryJegoListAndNameByDestinationId|queryRecommendList|queryAdsPoiList) reject-dict
 
 # 广告资源
@@ -34,7 +29,7 @@ DOMAIN,oss.jegotrip.com.cn,REJECT
 ^https?:\/\/bugly\.qq\.com reject
 
 [Script]
-// 全局递归清理首页、我的页面及榜单/攻略/达人推荐
+// 全局拦截 /destination/v1/ 接口，递归清理无忧榜单/攻略/达人推荐
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.* script-body=true,requires-body=true,tag=无忧行去广告
 
 [MitM]
@@ -46,8 +41,7 @@ function removeAds(obj) {
     if (Array.isArray(obj)) {
         return obj.filter(item => {
             if (item && item.title) {
-                // 删除包含“无忧”、“达人”、“推荐”的模块
-                return !(/无忧|达人|推荐/.test(item.title));
+                return !(/无忧|攻略|达人/.test(item.title));
             }
             return true;
         });
@@ -66,7 +60,7 @@ try {
     $done({});
 }
 
-// 遍历所有返回字段，递归删除广告/榜单/攻略/达人模块
+// 全字段递归删除
 body = removeAds(body);
 
 // 删除已知广告模块字段
