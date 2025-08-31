@@ -1,5 +1,5 @@
-#!name=无忧行去广告 - 精简硬屏蔽版（全 content/v1 拦截）
-#!desc=移除开屏广告、首页 banner、活动推广、首页内容流（content/v1 全拦截），避免误杀功能接口
+#!name=无忧行去广告 - 完全硬屏蔽版
+#!desc=彻底屏蔽首页所有内容流、推荐、资讯、楼层模块及广告资源，功能接口也屏蔽
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
@@ -7,7 +7,9 @@
 #!date=2025-08-31
 
 [Rule]
-# 屏蔽纯广告域名
+# 屏蔽广告域名及推送
+DOMAIN,app3.jegotrip.com.cn,REJECT
+DOMAIN,app.jegotrip.com.cn,REJECT
 DOMAIN,push.it.10086.cn,REJECT
 DOMAIN,oss.jegotrip.com.cn,REJECT
 DOMAIN,umeng.com,REJECT
@@ -17,16 +19,17 @@ DOMAIN,bugly.qq.com,REJECT
 # --- 首页广告 Banner ---
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-dict
 
-# --- 首页活动/专题/推广 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(activity|promotion|topic|strategy) reject-dict
+# --- 首页推荐/资讯/活动/攻略 ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
+^https?:\/\/app\.jegotrip\.com\.cn\/api/content\/v1\/home\/list reject-dict
 
-# --- POI 广告推荐 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/(queryAdsPoiList) reject-dict
+# --- 楼层模块 / 活动 / 优惠券 ---
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData reject-dict
 
-# --- 首页内容流（content/v1 全拦截） ---
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/content\/v1\/.* reject-dict
+# --- 社区帖子 / 点赞 / 功能接口 ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api/community\/v1\/post/.* reject-dict
 
-# --- 纯广告资源 ---
+# --- 广告资源 ---
 ^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage reject
 ^https?:\/\/oss\.jegotrip\.com\.cn\/img\/ reject
 
