@@ -1,5 +1,5 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广、POI广告及无忧榜单/攻略
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广、POI广告及无忧榜单/攻略（全局清理，刷新也不会再出现）
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
@@ -7,36 +7,35 @@
 #!date=2025-08-31
 
 [Rule]
-# 推送和广告资源域名
+# 屏蔽推送和广告资源
 DOMAIN,push.it.10086.cn,REJECT
 DOMAIN,oss.jegotrip.com.cn,REJECT
 
 [Rewrite]
-# --- 首页广告/推荐/推广 ---
+# 首页广告/推荐/推广
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/(columnListByRegion|queryData|sceneQuery) reject-dict
 
-# --- 活动/专题/策略推广 ---
+# 活动/专题/策略推广
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(queryGlobalStrategyData|activity|promotion|topic|strategy) reject-dict
 
-# --- 目的地/POI 推荐广告 ---
+# 目的地/POI 广告
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/poi\/(queryJegoListAndNameByDestinationId|queryRecommendList|queryAdsPoiList) reject-dict
 
-# --- 广告资源 ---
+# 广告资源
 ^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage reject
 ^https?:\/\/oss\.jegotrip\.com\.cn\/img\/ reject
 
-# --- 推送/埋点 ---
+# 推送/埋点
 ^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject
 ^https?:\/\/umeng\.com reject
 ^https?:\/\/bugly\.qq\.com reject
 
 [Script]
-// 清理首页、我的页面及无忧榜单/攻略
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
-http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
+// 全局清理首页、我的页面及无忧榜单/攻略
+http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/.* script-body=true,requires-body=true,tag=无忧行去广告
 
 [MitM]
 hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn,umeng.com,bugly.qq.com
@@ -49,27 +48,34 @@ try {
     $done({});
 }
 
-// 确保必要字段存在
-if (!body.data) body.data = {};
-if (!body.data.userCenter) body.data.userCenter = {};
-if (!body.body) body.body = {};
-if (!body.body.models) body.body.models = [];
+// 遍历所有一级字段，删除数组中包含“无忧”的条目
+for (let key in body) {
+    if (Array.isArray(body[key])) {
+        body[key] = body[key].filter(item => !(/无忧/.test(item.title)));
+    } else if (typeof body[key] === "object" && body[key] !== null) {
+        for (let subKey in body[key]) {
+            if (Array.isArray(body[key][subKey])) {
+                body[key][subKey] = body[key][subKey].filter(item => !(/无忧/.test(item.title)));
+            }
+        }
+    }
+}
 
-// 删除首页广告模块
-delete body.data.bannerList;
-delete body.data.recommend;
-delete body.data.columnListByRegion;
-delete body.data.poiList;
-delete body.data.promotionList;
-delete body.data.strategyList;
-delete body.data.destinationGlobalGroupResp;
+// 删除已知广告模块字段
+if (body.data) {
+    delete body.data.bannerList;
+    delete body.data.recommend;
+    delete body.data.columnListByRegion;
+    delete body.data.poiList;
+    delete body.data.promotionList;
+    delete body.data.strategyList;
+    delete body.data.destinationGlobalGroupResp;
+}
 
-// 删除“我的页面”广告
-delete body.data.userCenter.ads;
-delete body.data.userCenter.bannerList;
-delete body.data.userCenter.models;
-
-// 删除无忧榜单/攻略
-body.body.models = body.body.models.filter(item => !(/无忧/.test(item.title)));
+if (body.data && body.data.userCenter) {
+    delete body.data.userCenter.ads;
+    delete body.data.userCenter.bannerList;
+    delete body.data.userCenter.models;
+}
 
 $done({ body: JSON.stringify(body) });
