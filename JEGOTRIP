@@ -1,10 +1,10 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广及POI广告
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广、POI广告
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
-#!date=2025-08-27
+#!date=2025-08-31
 
 [Rule]
 # 屏蔽广告接口和推荐
@@ -36,26 +36,19 @@ DOMAIN,oss.jegotrip.com.cn,REJECT
 ^https?:\/\/bugly\.qq\.com reject
 
 [Script]
-// 清理首页和我的页面广告模块
+// 清理首页、我的页面及无忧榜单/攻略
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/destination\/getDestinationById script-body=true,requires-body=true,tag=无忧行去广告
 http-response ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel script-body=true,requires-body=true,tag=无忧行去广告
 
 [MitM]
 hostname=app3.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn,umeng.com,bugly.qq.com
 
-[Script-Body]
 // -------- 内置 JS 脚本内容 --------
 let body;
 try {
     body = JSON.parse($response.body);
 } catch(e) {
     $done({});
-}
-
-// 按 title 删除特定模块
-function removeByTitle(list, titles) {
-    if (!list || !Array.isArray(list)) return [];
-    return list.filter(item => !titles.includes(item.title));
 }
 
 // 删除首页广告模块
@@ -66,23 +59,14 @@ if (body && body.data) {
     delete body.data.poiList;
     delete body.data.promotionList;
     delete body.data.strategyList;
+    delete body.data.destinationGlobalGroupResp; // 删除无忧榜单/攻略
 }
 
 // 删除“我的页面”广告
 if (body && body.data && body.data.userCenter) {
     delete body.data.userCenter.ads;
     delete body.data.userCenter.bannerList;
-}
-
-// 精准屏蔽无忧攻略/无忧榜单
-if (body.models) {
-    body.models = removeByTitle(body.models, ["无忧攻略", "无忧榜单"]);
-}
-if (body.pageFloorVos) {
-    body.pageFloorVos = removeByTitle(body.pageFloorVos, ["无忧攻略", "无忧榜单"]);
-}
-if (body.destinationGlobalGroupResp) {
-    body.destinationGlobalGroupResp = removeByTitle(body.destinationGlobalGroupResp, ["无忧攻略", "无忧榜单"]);
+    delete body.data.userCenter.models; // 删除无忧攻略/榜单模块
 }
 
 $done({ body: JSON.stringify(body) });
