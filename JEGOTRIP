@@ -23,7 +23,7 @@ DOMAIN,bugly.qq.com,REJECT
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
 ^https?:\/\/app\.jegotrip\.com\.cn\/api/content\/v1\/home\/list reject-dict
 
-# --- 楼层模块 / 活动 / 优惠券 ---
+# --- 目的地推荐 / 活动 / 优惠券 ---
 ^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData reject-dict
 
 # --- 社区帖子 / 点赞 / 功能接口 ---
