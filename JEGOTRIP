@@ -27,11 +27,11 @@ DOMAIN,bugly.qq.com,REJECT
 ^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData reject-dict
 
 # --- 社区帖子 / 点赞 / 功能接口 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api/community\/v1\/post/.* reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/v1\/post/.* reject-dict
 
 # --- 广告资源 OSS 图片 ---
-^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage\/.* reject
-^https?:\/\/oss\.jegotrip\.com\.cn\/img\/.* reject
+^https?:\/\/oss\.jegotrip\.com\.cn\/+appSyncimage\/.* reject
+^https?:\/\/oss\.jegotrip\.com\.cn\/+img\/.* reject
 
 # --- 推送/埋点 ---
 ^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject
