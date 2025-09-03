@@ -1,18 +1,16 @@
-[General]
-# Loon 优酷去广告插件（全面版）
-name = 优酷 - YOUKU
-description = 优酷视频 去广告优化（全面版，含动态广告URL）
-open-url = https://apps.apple.com/app/id336141475
-bundle-id = com.youku.YouKu
-author = zirawell[https://github.com/zirawell]
-tag = 去广告
-icon = https://raw.githubusercontent.com/zirawell/Git/R-Store/Res/Icon/App/youku.png
-date = 2025-09-03
-system = iOS
-homepage = https://github.com/zirawell/R-Store/tree/main/Rule/Surge/README.md
+#!name=优酷 - YOUKU
+#!desc=优酷视频 去广告优化（全面版，含动态广告URL）
+#!openUrl=https://apps.apple.com/app/id336141475
+#!bundleId=com.youku.YouKu
+#!author=zirawell[https://github.com/zirawell]
+#!tag=去广告
+#!system=iOS
+#!homepage=https://github.com/zirawell/R-Store/tree/main/Rule/Surge/README.md
+#!icon=https://raw.githubusercontent.com/zirawell/Git/R-Store/Res/Icon/App/youku.png
+#!date=2025-09-03
 
 [Rule]
-# 核心广告投放
+# --- 核心广告投放 ---
 DOMAIN-SUFFIX,ad.youku.com,REJECT
 DOMAIN-SUFFIX,ad.api.3g.youku.com,REJECT
 DOMAIN-SUFFIX,ad.api.mobile.youku.com,REJECT
@@ -20,24 +18,24 @@ DOMAIN-SUFFIX,ad.mobile.youku.com,REJECT
 DOMAIN,ykad-data.youku.com,REJECT
 DOMAIN,atm.youku.com,REJECT
 
-# 埋点统计
+# --- 埋点统计 ---
 DOMAIN-SUFFIX,stat.youku.com,REJECT
 DOMAIN-SUFFIX,lstat.youku.com,REJECT
 DOMAIN-SUFFIX,msg.youku.com,REJECT
 DOMAIN-SUFFIX,sdk.m.youku.com,REJECT
 
-# 推荐/推送
+# --- 推荐/推送 ---
 DOMAIN-SUFFIX,ykrec.youku.com,REJECT
 DOMAIN-SUFFIX,ykatr.youku.com,REJECT
 DOMAIN-KEYWORD,push.m.youku.com,REJECT
 
-# 活动/营销
+# --- 活动/营销 ---
 DOMAIN-SUFFIX,actives.youku.com,REJECT
 DOMAIN-SUFFIX,huodong.pl.youku.com,REJECT
 DOMAIN-SUFFIX,huodong.vip.youku.com,REJECT
 DOMAIN,sealine.youku.com,REJECT
 
-# 通用广告/埋点
+# --- 通用广告/埋点 ---
 DOMAIN-KEYWORD,yt.gif,REJECT
 DOMAIN-KEYWORD,sdk_log,REJECT
 DOMAIN-KEYWORD,xspeed,REJECT
@@ -45,7 +43,7 @@ DOMAIN-KEYWORD,mediations,REJECT
 DOMAIN-SUFFIX,image.9xsecndns.cn,REJECT
 DOMAIN-SUFFIX,pcdn,REJECT
 
-# 动态广告 URL 拦截
+# --- 动态广告 URL 拦截 ---
 DOMAIN-KEYWORD,ad.youku,REJECT
 DOMAIN-KEYWORD,push.youku,REJECT
 DOMAIN-KEYWORD,huodong,REJECT
@@ -54,7 +52,7 @@ DOMAIN-KEYWORD,preloadAd,REJECT
 DOMAIN-KEYWORD,popLayer,REJECT
 DOMAIN-KEYWORD,banner,REJECT
 
-[URL Rewrite]
+[Rewrite]
 # 播放页弹窗动图
 ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.(pisp\.scripts\.get|xspace\.play\.position\.preload\.query|xspace\.poplayer\.position\.query) url reject-dict
 
