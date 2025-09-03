@@ -1,4 +1,6 @@
-#name = 优酷 - YOUKU
+[General]
+# Loon 优酷去广告插件（全面版）
+name = 优酷 - YOUKU
 description = 优酷视频 去广告优化（全面版，含动态广告URL）
 open-url = https://apps.apple.com/app/id336141475
 bundle-id = com.youku.YouKu
