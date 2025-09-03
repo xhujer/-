@@ -1,5 +1,5 @@
 #!name=优酷 - YOUKU
-#!desc=优酷视频 去广告优化（全面版，含动态广告URL）
+#!desc=优酷视频 去广告优化（Loon 版，含动态广告URL）
 #!openUrl=https://apps.apple.com/app/id336141475
 #!bundleId=com.youku.YouKu
 #!author=zirawell[https://github.com/zirawell]
@@ -10,7 +10,7 @@
 #!date=2025-09-03
 
 [Rule]
-# --- 核心广告投放 ---
+# 核心广告投放
 DOMAIN-SUFFIX,ad.youku.com,REJECT
 DOMAIN-SUFFIX,ad.api.3g.youku.com,REJECT
 DOMAIN-SUFFIX,ad.api.mobile.youku.com,REJECT
@@ -18,24 +18,24 @@ DOMAIN-SUFFIX,ad.mobile.youku.com,REJECT
 DOMAIN,ykad-data.youku.com,REJECT
 DOMAIN,atm.youku.com,REJECT
 
-# --- 埋点统计 ---
+# 埋点统计
 DOMAIN-SUFFIX,stat.youku.com,REJECT
 DOMAIN-SUFFIX,lstat.youku.com,REJECT
 DOMAIN-SUFFIX,msg.youku.com,REJECT
 DOMAIN-SUFFIX,sdk.m.youku.com,REJECT
 
-# --- 推荐/推送 ---
+# 推荐/推送
 DOMAIN-SUFFIX,ykrec.youku.com,REJECT
 DOMAIN-SUFFIX,ykatr.youku.com,REJECT
 DOMAIN-KEYWORD,push.m.youku.com,REJECT
 
-# --- 活动/营销 ---
+# 活动/营销
 DOMAIN-SUFFIX,actives.youku.com,REJECT
 DOMAIN-SUFFIX,huodong.pl.youku.com,REJECT
 DOMAIN-SUFFIX,huodong.vip.youku.com,REJECT
 DOMAIN,sealine.youku.com,REJECT
 
-# --- 通用广告/埋点 ---
+# 通用广告/埋点
 DOMAIN-KEYWORD,yt.gif,REJECT
 DOMAIN-KEYWORD,sdk_log,REJECT
 DOMAIN-KEYWORD,xspeed,REJECT
@@ -43,7 +43,7 @@ DOMAIN-KEYWORD,mediations,REJECT
 DOMAIN-SUFFIX,image.9xsecndns.cn,REJECT
 DOMAIN-SUFFIX,pcdn,REJECT
 
-# --- 动态广告 URL 拦截 ---
+# 动态广告 URL 拦截
 DOMAIN-KEYWORD,ad.youku,REJECT
 DOMAIN-KEYWORD,push.youku,REJECT
 DOMAIN-KEYWORD,huodong,REJECT
@@ -52,23 +52,16 @@ DOMAIN-KEYWORD,preloadAd,REJECT
 DOMAIN-KEYWORD,popLayer,REJECT
 DOMAIN-KEYWORD,banner,REJECT
 
-[Rewrite]
-# 播放页弹窗动图
+[URL Rewrite]
 ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.(pisp\.scripts\.get|xspace\.play\.position\.preload\.query|xspace\.poplayer\.position\.query) url reject-dict
 
 [Script]
-# 播放详情页、首页信息流、顶部tab、我的页面、评论区
-http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.columbus\.(gateway\.new\.execute|home\.feed|home\.query|uc\.query|ycp\.query) requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js,tag=youku
-# 底部tab
-http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.haidai\.lantern\.appconfig\.get requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js,tag=youku
-# 青少年模式弹窗
-http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.huluwa\.dispatcher\.youthmode\.config2 requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js,tag=youku
-# 搜索列表
-http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.soku\.yksearch requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js,tag=youku
-# 热剧弹窗
-http-response ^https?:\/\/push\.m\.youku\.com\/collect-api\/get_push_interval_config_wx\? requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js,tag=youku
-# 开屏广告
-http-response ^https?:\/\/un-acs\.youku\.com\/gw\/mtop\.youku\.play\.ups\.appinfo\.get requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js,tag=youku
+http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.columbus\.(gateway\.new\.execute|home\.feed|home\.query|uc\.query|ycp\.query) requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js
+http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.haidai\.lantern\.appconfig\.get requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js
+http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.huluwa\.dispatcher\.youthmode\.config2 requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js
+http-response ^https?:\/\/acs\.youku\.com\/gw\/mtop\.youku\.soku\.yksearch requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js
+http-response ^https?:\/\/push\.m\.youku\.com\/collect-api\/get_push_interval_config_wx\? requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js
+http-response ^https?:\/\/un-acs\.youku\.com\/gw\/mtop\.youku\.play\.ups\.appinfo\.get requires-body=1,script-path=https://raw.githubusercontent.com/zirawell/R-Store/main/Res/Scripts/AntiAd/cntv.js
 
 [MITM]
 hostname = %APPEND% acs.youku.com, push.m.youku.com, un-acs.youku.com, ad.api.mobile.youku.com
