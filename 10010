@@ -1,33 +1,18 @@
-#!name=中国联通去广告
-#!desc=精细化去广告规则，屏蔽开屏广告、首页推荐流、活动广告、弹窗广告、商城广告脚本，保留正常功能
-#!tag=去广告
-#!icon=https://imgtolinkx.com/i/zDTlC8gR
-#!openUrl=https://apps.apple.com/app/id416457422
-#!bundleId=com.chinaUnicom.mobileBusinessHall
-#!date=2025-08-29
+#!name=local
+#!desc=local
+#!icon=https://github.com/Toperlock/Quantumult/raw/main/icon/Doraemon/Doraemon-1055.png
+
+[Rule]
+
+移除开屏广告
+
+DOMAIN,m1.ad.10010.com,REJECT
 
 [Rewrite]
-# --- 开屏广告 --- 
-^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/(getLaunchAd|getWelcomeAd)$ reject-dict
+^https:\/\/m\.client\.10010\.com\/clientIndex\/v1\/api\/navHome response-body-json-jq '.datas.homeTopMenuItems |= map(select(.menuName != "通通" and .menuName != "签到"))'
+^https:\/\/m\.client\.10010\.com\/clientIndex\/homefusion\/fuInter response-body-json-jq 'del(.[ "HomeFusion.fuchuangAdv_A8"], .[ "HomeFusion.bottomLabel"])'
+^https:\/\/m\.client\.10010\.com\/search_service\/tyfbSearch\/searchDiscoverListExpress response-body-json-jq '.data = []'
+^https:\/\/m\.client\.10010\.com\/search_service\/search\/searchScrollWord response-body-json-jq '.["113000004"] = []'
 
-# --- 首页推荐 & 活动广告 --- 
-^https?:\/\/m\.client\.10010\.com\/mobileService\/(activity|customer)\/(get_client_adv|get_startadv)$ reject-dict
-# 排除与账户/流量查询相关的接口
-^https?:\/\/m\.client\.10010\.com\/mobileService\/customer\/getclientconfig\.htm$ reject-dict
-
-# --- 弹窗广告 ---
-^https?:\/\/m\.client\.10010\.com\/.*\/popup.*$ reject-dict
-^https?:\/\/res\.mall\.10010\.cn\/popup\/.*$ reject-dict
-
-# --- 商城广告 Banner / 活动 ---
-^https?:\/\/res\.mall\.10010\.cn\/mall\/banner\/.*$ reject-dict
-^https?:\/\/res\.mall\.10010\.cn\/mall\/activity\/.*$ reject-dict
-
-# --- 商城广告 JS （只拦截 fa.js） ---
-^https?:\/\/res\.mall\.10010\.cn\/mall\/common\/js\/fa\.js$ reject-200
-
-# --- 广告图片资源 ---
-^https?:\/\/m1\.ad\.10010\.com\/noticeMag\/images\/imageUpload\/2\d{3}.*$ reject-img
-
-[MitM]
-hostname = m.client.10010.com, m1.ad.10010.com, res.mall.10010.cn
+[MITM]
+hostname = m.client.10010.com
