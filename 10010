@@ -1,18 +1,24 @@
-#!name=local
-#!desc=local
-#!icon=https://github.com/Toperlock/Quantumult/raw/main/icon/Doraemon/Doraemon-1055.png
+#!name=中国联通去广告
+#!desc=移除开屏广告、主页按钮、搜索框推广
+#!tag=去广告
+#!icon=https://imgtolinkx.com/i/zDTlC8gR
+#!openUrl=https://apps.apple.com/app/id416457422
+#!bundleId=com.chinaUnicom.mobileBusinessHall
+#!date=2025-08-29
 
 [Rule]
-
-移除开屏广告
-
+# 移除开屏广告
 DOMAIN,m1.ad.10010.com,REJECT
 
-[Rewrite]
+# 移除主页几个小按钮
 ^https:\/\/m\.client\.10010\.com\/clientIndex\/v1\/api\/navHome response-body-json-jq '.datas.homeTopMenuItems |= map(select(.menuName != "通通" and .menuName != "签到"))'
-^https:\/\/m\.client\.10010\.com\/clientIndex\/homefusion\/fuInter response-body-json-jq 'del(.[ "HomeFusion.fuchuangAdv_A8"], .[ "HomeFusion.bottomLabel"])'
+
+# 移除主页浮窗和底部推广
+^https:\/\/m\.client\.10010\.com\/clientIndex\/homefusion\/fuInter response-body-json-jq 'del(.["HomeFusion.fuchuangAdv_A8"], .["HomeFusion.bottomLabel"])'
+
+# 移除搜索框推广
 ^https:\/\/m\.client\.10010\.com\/search_service\/tyfbSearch\/searchDiscoverListExpress response-body-json-jq '.data = []'
 ^https:\/\/m\.client\.10010\.com\/search_service\/search\/searchScrollWord response-body-json-jq '.["113000004"] = []'
 
-[MITM]
+[MitM]
 hostname = m.client.10010.com
