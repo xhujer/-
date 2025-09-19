@@ -13,7 +13,6 @@ DOMAIN,app.jegotrip.com.cn,REJECT
 DOMAIN,push.it.10086.cn,REJECT
 DOMAIN,oss.jegotrip.com.cn,REJECT
 DOMAIN,umeng.com,REJECT
-DOMAIN,bugly.qq.com,REJECT
 
 [Rewrite]
 # --- 首页广告 Banner ---
