@@ -1,5 +1,5 @@
-#!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广
+#!name=无忧行去广告（Loon）
+#!desc=移除开屏广告、屏蔽首页推荐/活动推广（稳健版，保留核心接口）
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
@@ -7,32 +7,29 @@
 #!date=2025-08-31
 
 [Rule]
-# 屏蔽广告域名及推送
-DOMAIN,app3.jegotrip.com.cn,REJECT
-DOMAIN,app.jegotrip.com.cn,REJECT
+# 仅屏蔽运营商推送域名（保留 app/app3/oss 主域，避免误伤）
 DOMAIN,push.it.10086.cn,REJECT
-DOMAIN,oss.jegotrip.com.cn,REJECT
 
 [Rewrite]
 # --- 首页广告 Banner ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-dict
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-array
 
-# --- 首页推荐/资讯/活动/攻略 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
-^https?:\/\/app\.jegotrip\.com\.cn\/api/content\/v1\/home\/list reject-dict
+# --- 首页推荐 / 资讯 / 活动 / 攻略 ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-array
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/content\/v1\/home\/list reject-array
 
 # --- 目的地推荐 / 活动 / 优惠券 ---
 ^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData reject-dict
 
-# --- 社区帖子 / 点赞 / 功能接口 ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/v1\/post/.* reject-dict
+# --- 社区帖子 / 点赞 / 功能接口（统一拦截） ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/v1\/post\/.* reject-200
 
-# --- 广告资源 OSS 图片 ---
-^https?:\/\/oss\.jegotrip\.com\.cn\/+appSyncimage\/.* reject
-^https?:\/\/oss\.jegotrip\.com\.cn\/+img\/.* reject
+# --- 广告资源 OSS 图片（广告位素材常见路径） ---
+^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage\/.* reject
+^https?:\/\/oss\.jegotrip\.com\.cn\/img\/.* reject
 
-# --- 推送/埋点 ---
+# --- 推送/埋点回执 ---
 ^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject
 
-[MitM]
-hostname=app3.jegotrip.com.cn,app.jegotrip.com.cn,push.it.10086.cn,oss.jegotrip.com.cn
+[MITM]
+hostname = app3.jegotrip.com.cn, app.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
