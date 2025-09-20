@@ -1,43 +1,38 @@
 #!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐/活动/文章列表（按抓包收口优化）
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
-#!date=2025-09-20
+#!date=2025-08-31
 
 [Rule]
-# —— 埋点/推送：拦了不影响核心功能 ——
-DOMAIN,analysis.tratao.com,REJECT
-DOMAIN,dnlog.cmpassport.com,REJECT
+# 屏蔽广告域名及推送
+DOMAIN,app3.jegotrip.com.cn,REJECT
+DOMAIN,app.jegotrip.com.cn,REJECT
 DOMAIN,push.it.10086.cn,REJECT
-
-# 不建议全域封 app/app3/oss，会导致首页/登录/图片挂掉
-# DOMAIN,app3.jegotrip.com.cn,REJECT
-# DOMAIN,app.jegotrip.com.cn,REJECT
-# DOMAIN,oss.jegotrip.com.cn,REJECT
+DOMAIN,oss.jegotrip.com.cn,REJECT
 
 [Rewrite]
-# --- 首页 Banner / 推荐（常见在 app3 域） ---
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(?:banner|getDestBanners)(?:\?.*)?$ reject-array
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(?:rec|recommend)(?:\?.*)?$ reject-array
+# --- 首页广告 Banner ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-dict
 
-# --- 首页文章/图文列表（覆盖 app 与 app3 两域；含所有以 /list 结尾的列表） ---
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/content\/v1\/home\/list(?:\?.*)?$ reject-array
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/content\/v1\/.+\/list(?:\?.*)?$ reject-array
+# --- 首页推荐/资讯/活动/攻略 ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/content\/v1\/home\/list reject-dict
 
-# --- 首页楼层聚合（活动/优惠券等，常为对象结构） ---
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData(?:\?.*)?$ reject-dict
+# --- 目的地推荐 / 活动 / 优惠券 ---
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData reject-dict
 
-# --- H5“socialapp”页：只拦图片静态资源（不动 JS/CSS/HTML） ---
-^https?:\/\/cp\.jegotrip\.com\.cn\/partners\/social\/produce\/socialapp\/.*\.(?:png|jpe?g|webp|gif|svg|avif)(?:\?.*)?$ reject
+# --- 社区帖子 / 点赞 / 功能接口 ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/v1\/post\/.* reject-dict
 
-# --- 广告资源 OSS 图片：兼容多斜杠路径 + 常见图片后缀 ---
-^https?:\/\/oss\.jegotrip\.com\.cn\/+(?:appSyncimage|img)\/.*\.(?:png|jpe?g|webp|gif|svg|avif)(?:\?.*)?$ reject
+# --- 广告资源 OSS 图片 ---
+^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage\/.* reject
+^https?:\/\/oss\.jegotrip\.com\.cn\/img\/.* reject
 
-# --- 推送/埋点回执 ---
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge(?:\?.*)?$ reject
+# --- 推送/埋点 ---
+^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject
 
 [MITM]
-# 重写 HTTPS 必须启用 MITM，并信任证书
-hostname = app3.jegotrip.com.cn, app.jegotrip.com.cn, cp.jegotrip.com.cn, oss.jegotrip.com.cn, analysis.tratao.com, dnlog.cmpassport.com, push.it.10086.cn
+hostname = app3.jegotrip.com.cn, app.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
