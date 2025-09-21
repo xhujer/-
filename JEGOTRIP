@@ -1,55 +1,38 @@
 #!name=无忧行去广告
-#!desc=按抓包精准拦截：首页推荐/楼层/策略/布局 & 埋点/H5图，文章流兜底
+#!desc=移除开屏广告、屏蔽首页推荐、活动推广
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
-#!date=2025-09-21
+#!date=2025-08-31
 
 [Rule]
-# —— 埋点/推送：拦了不影响核心 ——
-DOMAIN,analysis.tratao.com,REJECT
-DOMAIN,dnlog.cmpassport.com,REJECT
+# 屏蔽广告域名及推送
+DOMAIN,app3.jegotrip.com.cn,REJECT
+DOMAIN,app.jegotrip.com.cn,REJECT
 DOMAIN,push.it.10086.cn,REJECT
-
-# 不建议全域封 app/app3/oss，否则首页/登录/图片会挂：
-# DOMAIN,app3.jegotrip.com.cn,REJECT
-# DOMAIN,app.jegotrip.com.cn,REJECT
-# DOMAIN,oss.jegotrip.com.cn,REJECT
+DOMAIN,oss.jegotrip.com.cn,REJECT
 
 [Rewrite]
-# ====== 按抓包命中的首页数据源（app.jegotrip.com.cn）======
-# destination 推荐/栏目/目的地列表/全局策略
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/(?:queryRecommendData|columnListByRegion)(?:\?.*)?$ reject-dict
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/destination\/v1\/list\/queryByDestination(?:\?.*)?$ reject-dict
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/destination\/v1\/queryGlobalStrategyData(?:\?.*)?$ reject-dict
+# --- 首页广告 Banner ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(banner|getDestBanners) reject-dict
 
-# layout 初始化（首页布局模型）
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel(?:\?.*)?$ reject-dict
+# --- 首页推荐/资讯/活动/攻略 ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/(rec|recommend) reject-dict
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/content\/v1\/home\/list reject-dict
 
-# assembly 楼层/数据源（热门商品/活动券等）
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/(?:findByPageCode|queryDataSources|queryFloorData)(?:\?.*)?$ reject-dict
+# --- 目的地推荐 / 活动 / 优惠券 ---
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData reject-dict
 
-# 社区分享配置（常用于引导/弹窗）
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/community\/v1\/share\/findConfigInfoByKey(?:\?.*)?$ reject-dict
+# --- 社区帖子 / 点赞 / 功能接口 ---
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/v1\/post\/.* reject-dict
 
-# 埋点（事件上报）
-^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/api\/business\/event\/api\/(?:log\/upload|app\/getInfo\/[^\/]+)(?:\?.*)?$ reject-200
+# --- 广告资源 OSS 图片 ---
+^https?:\/\/oss\.jegotrip\.com\.cn\/appSyncimage\/.* reject
+^https?:\/\/oss\.jegotrip\.com\.cn\/img\/.* reject
 
-# ====== 文章/图文流兜底（防切域/切版本）======
-# 明确的首页文章列表（如出现）
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/content\/v\d+\/home\/list(?:\?.*)?$ reject-array
-# 兜底：content/v*/home/ 下常见的“列表型关键词”
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/content\/v\d+\/home\/.*(?:list|lists|feed|flow|page|pages|recommend|hot|news|topic|topics)(?:\/[^?]*)?(?:\?.*)?$ reject-dict
-
-# ====== H5 社区页仅拦图片静态资源（不动 JS/CSS/HTML）======
-^https?:\/\/cp\.jegotrip\.com\.cn\/partners\/social\/produce\/socialapp\/.*\.(?:png|jpe?g|webp|gif|svg|avif)(?:\?.*)?$ reject
-
-# （可选）OSS 广告素材目录，如遇命中再开启，避免误伤全局图片
-# ^https?:\/\/oss\.jegotrip\.com\.cn\/+(?:appSyncimage|img)\/.*\.(?:png|jpe?g|webp|gif|svg|avif)(?:\?.*)?$ reject
-
-# —— 推送/埋点回执 ——
-^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge(?:\?.*)?$ reject
+# --- 推送/埋点 ---
+^https?:\/\/push\.it\.10086\.cn\/mc\/receipt\/iosBadge reject
 
 [MITM]
-hostname = app.jegotrip.com.cn, app3.jegotrip.com.cn, cp.jegotrip.com.cn, analysis.tratao.com, dnlog.cmpassport.com, push.it.10086.cn
+hostname = app3.jegotrip.com.cn, app.jegotrip.com.cn, push.it.10086.cn, oss.jegotrip.com.cn
