@@ -1,0 +1,183 @@
+############################################
+# HDHive 自动签到（Loon）
+# 每天上午 08:00 自动运行（按手机系统时区）
+############################################
+
+[Script]
+cron "0 8 * * *" script-path=hdhive_checkin.js,tag=HDHive-Checkin,timeout=60,argument="token=你的BearerToken&csrf=你的CSRFToken",enable=true
+
+
+############################################
+# 文件：hdhive_checkin.js
+############################################
+/**
+ * HDHive Check-in Script for Loon (cron)
+ *
+ * Loon config example:
+ * cron "0 8 * * *" script-path=hdhive_checkin.js,tag=HDHive-Checkin,timeout=60,argument="token=xxx&csrf=yyy",enable=true
+ *
+ * Notes:
+ * - token/csrf 优先从 $argument 读取，其次从 $persistentStore 读取
+ * - 如果 argument 传入了 token/csrf，会自动写入 $persistentStore（之后可去掉 argument）
+ */
+
+(function () {
+  var CHECKIN_URL = "https://hdhive.com/api/customer/user/checkin";
+
+  function parseArgs(argStr) {
+    var out = {};
+    if (!argStr) return out;
+
+    var s = String(argStr);
+    var parts = s.split("&");
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      var idx = p.indexOf("=");
+      if (idx > -1) {
+        var k = decodeURIComponent(p.slice(0, idx).trim());
+        var v = decodeURIComponent(p.slice(idx + 1).trim());
+        out[k] = v;
+      }
+    }
+    return out;
+  }
+
+  function todayKey() {
+    var d = new Date();
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1);
+    if (m.length < 2) m = "0" + m;
+    var day = String(d.getDate());
+    if (day.length < 2) day = "0" + day;
+    return y + "-" + m + "-" + day;
+  }
+
+  function notify(title, subtitle, content) {
+    try {
+      $notification.post(title, subtitle || "", content || "");
+    } catch (e) {
+      console.log(title, subtitle || "", content || "");
+    }
+  }
+
+  function done() {
+    try { $done(); } catch (e) {}
+  }
+
+  // 读取参数与本地存储
+  var args = parseArgs(typeof $argument !== "undefined" ? $argument : "");
+  var token = (args.token || "").trim();
+  var csrf = ((args.csrf || args.csrfToken || "") + "").trim();
+
+  // fallback：从持久化读取
+  if (!token) token = ($persistentStore.read("hdhive_token") || "").trim();
+  if (!csrf) csrf = ($persistentStore.read("hdhive_csrf") || "").trim();
+
+  // 如果 argument 提供了新值，写入持久化，方便后续去掉 argument
+  if (args.token) $persistentStore.write(String(args.token).trim(), "hdhive_token");
+  if (args.csrf || args.csrfToken) $persistentStore.write(String(args.csrf || args.csrfToken).trim(), "hdhive_csrf");
+
+  if (!token || !csrf) {
+    notify(
+      "HDHive 自动签到",
+      "缺少 token/csrf",
+      '请在 cron 的 argument 里填写：token=xxx&csrf=yyy（或先跑一次写入本地存储）'
+    );
+    done();
+    return;
+  }
+
+  // 防重复：同一天成功后不再重复运行
+  var today = todayKey();
+  var last = ($persistentStore.read("hdhive_last_checkin") || "").trim();
+  if (last === today) {
+    console.log("[HDHive] already checked in today:", today);
+    done();
+    return;
+  }
+
+  var headers = {
+    "accept": "application/json, text/plain, */*",
+    "authorization": "Bearer " + token,
+    "x-csrf-token": csrf,
+    "origin": "https://hdhive.com",
+    "referer": "https://hdhive.com/user/dashboard"
+  };
+
+  var req = {
+    url: CHECKIN_URL,
+    headers: headers,
+    body: ""
+  };
+
+  $httpClient.post(req, function (err, resp, body) {
+    if (err) {
+      notify("HDHive 自动签到", "请求失败", String(err));
+      done();
+      return;
+    }
+
+    // 兼容不同字段：status / statusCode
+    var status = 0;
+    try {
+      status = resp && (resp.status || resp.statusCode) ? Number(resp.status || resp.statusCode) : 0;
+    } catch (e) {}
+
+    var data = null;
+    try {
+      data = JSON.parse(body);
+    } catch (e) {
+      data = null;
+    }
+
+    // 未授权：token/csrf 过期或无效
+    if (status === 401 || status === 403) {
+      notify("HDHive 自动签到", "未授权/过期", "HTTP " + status + "：请更新 token 与 csrf");
+      done();
+      return;
+    }
+
+    // 尽量从返回里找 message / msg / code / success
+    var msg = "";
+    var code = undefined;
+    var successFlag = undefined;
+
+    if (data && typeof data === "object") {
+      if (typeof data.message !== "undefined") msg = String(data.message);
+      else if (typeof data.msg !== "undefined") msg = String(data.msg);
+
+      if (typeof data.code !== "undefined") code = data.code;
+      if (typeof data.success !== "undefined") successFlag = data.success;
+    }
+
+    // “已签到”关键词
+    var looksAlready = /already|重复|已签到|已经签到/i.test(msg);
+
+    // “成功”判定（启发式）
+    var looksSuccess =
+      (status >= 200 && status < 300) &&
+      (
+        successFlag === true ||
+        code === 0 ||
+        /success|成功|checked|签到/i.test(msg) ||
+        (data !== null && typeof data === "object")
+      );
+
+    if (looksSuccess || looksAlready) {
+      $persistentStore.write(today, "hdhive_last_checkin");
+      notify("HDHive 自动签到", "完成", looksAlready ? "今日已签到（无需重复）" : "签到成功");
+      console.log("[HDHive] response:", body);
+      done();
+      return;
+    }
+
+    // 未确认成功：输出日志方便你对照返回结构调整
+    console.log("[HDHive] not confirmed success. HTTP:", status, "body:", body);
+    notify(
+      "HDHive 自动签到",
+      "未确认成功",
+      "HTTP " + status + (msg ? ("： " + msg) : "。请在日志查看返回并调整判定或更新 token/csrf")
+    );
+    done();
+  });
+})();
