@@ -1,15 +1,16 @@
 /*
-HDHive 自动签到脚本
+HDHive 自动签到脚本（完整功能版）
 Update: 2026-01-16
-Author: ming (final minimal)
+Author: ming
 */
 
 const $ = new Env("HDHive");
 
-// ========= 配置 =========
+// ========= 常量 =========
 const KEY_COOKIE = 'hdhive_cookie_v12';
 const KEY_REFERER = 'hdhive_referer_v12';
 const KEY_UA = 'hdhive_ua_v12';
+const KEY_FLOW = 'hdhive_points_flow_v1';
 const DOMAIN = 'hdhive.com';
 
 // ========= 入口 =========
@@ -44,23 +45,55 @@ async function captureCookie() {
   }
 }
 
-// ========= 主动获取积分=========
-async function activeFetchPoints(headers) {
+// ========= 主动获取积分流水 =========
+async function activeFetchPointsFlow(headers) {
   const url = `https://${DOMAIN}/go-api/customer/points-logs?page=1`;
   try {
     const json = await httpGetJson(url, headers);
     const list = json?.data?.list;
     if (!Array.isArray(list) || !list.length) return null;
 
-    const x = list[0]; // 最新一条
-    return {
-      time: x.created_at,
-      points: x.points,
-      remark: x.remark || x.change_type || "积分变动"
+    const checkins = list.filter(x => (x.change_type || "").includes("签到"));
+    if (!checkins.length) return null;
+
+    const latest = checkins[0];
+
+    const recent = checkins.slice(0, 3).map(x =>
+      `- ${formatTime(x.created_at)}：+${x.points}（${x.remark || "签到"}）`
+    );
+
+    const flow = {
+      user_id: latest.user_id,
+      latest_checkin: {
+        time: latest.created_at,
+        points: latest.points,
+        remark: latest.remark
+      },
+      recent_checkins: recent
     };
+
+    $.setdata(JSON.stringify(flow), KEY_FLOW);
+    return flow;
   } catch {
     return null;
   }
+}
+
+// ========= 构建展示文本 =========
+function buildFlowText(flow) {
+  if (!flow) return "";
+  const l = [];
+  l.push(`用户ID：${flow.user_id}`);
+  l.push(`最近签到：${formatTime(flow.latest_checkin.time)}`);
+  l.push(`上次获得：+${flow.latest_checkin.points} 积分`);
+  if (flow.latest_checkin.remark)
+    l.push(`说明：${flow.latest_checkin.remark}`);
+  if (flow.recent_checkins?.length) {
+    l.push("");
+    l.push("📝 最近记录：");
+    l.push(flow.recent_checkins.join("\n"));
+  }
+  return l.join("\n");
 }
 
 // ========= 签到 =========
@@ -102,18 +135,23 @@ async function checkIn() {
         return;
       }
 
-      let msg = "";
-      try { msg = JSON.parse(data)?.message || ""; } catch {}
+      let res = {};
+      try { res = JSON.parse(data); } catch {}
+      const msg = res.message || "";
+      const checked =
+        msg.includes("已经") || msg.includes("明天") || msg.toLowerCase().includes("checked");
 
-      const p = await activeFetchPoints(headers);
-      const text = p
-        ? `\n\n最近积分：${formatTime(p.time)}\n+${p.points}（${p.remark}）`
-        : "";
+      let flow = await activeFetchPointsFlow(headers);
+      if (!flow) {
+        try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
+      }
+
+      const flowText = flow ? "\n\n" + buildFlowText(flow) : "";
 
       $.msg(
         "HDHive",
-        msg.includes("已") ? "🟢 今日已签到" : "✅ 签到完成",
-        `${msg || ""}${text}`
+        checked ? "🟢 今日已签到" : "✅ 签到成功",
+        `${msg}${flowText}`
       );
       resolve();
     });
