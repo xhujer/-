@@ -3,27 +3,11 @@ const $ = new Env("HDHive");
 const KEY_COOKIE = 'hdhive_cookie_v12';
 const KEY_REFERER = 'hdhive_referer_v12';
 const KEY_UA = 'hdhive_ua_v12';
-const KEY_FLOW = 'hdhive_points_flow_v1'; // 缓存积分流水（含签到记录）
+const KEY_FLOW = 'hdhive_points_flow_v1'; // 缓存签到记录（积分流水）
 const DOMAIN = 'hdhive.com';
 
-/** ===== 通知日志（开关）===== */
-const ENABLE_NOTIFY_LOG = true;  // true=通知附带日志；false=不附带
-const LOG_MAX_LINES = 12;
-let LOGS = [];
-
-function addLog(s) {
-  if (!ENABLE_NOTIFY_LOG) return;
-  const t = new Date().toLocaleString("zh-CN", { hour12: false });
-  LOGS.push(`[${t}] ${s}`);
-  if (LOGS.length > LOG_MAX_LINES) LOGS.shift();
-}
-function logsText() {
-  if (!ENABLE_NOTIFY_LOG || !LOGS.length) return "";
-  return `\n\n📋 日志:\n${LOGS.join("\n")}`;
-}
-
 (async () => {
-  // http-response：抓积分流水（需要 Loon 配置 http-response + requires-body=true）
+  // http-response：抓 points-logs JSON
   if (typeof $request !== "undefined" && typeof $response !== "undefined") {
     await captureFlowFromResponse();
   }
@@ -37,59 +21,77 @@ function logsText() {
   }
 })().catch((e) => $.logErr(e)).finally(() => $.done());
 
-/** ===== 抓 Cookie（http-request）===== */
 async function capture() {
   const url = $request.url || "";
   if (url.indexOf("user/checkin") > -1 || url.indexOf("/api/customer/user/checkin") > -1) return;
   if (url.indexOf(DOMAIN) === -1) return;
 
   const h = $request.headers || {};
-  const cookie = (getHeader(h, 'Cookie') || "").trim();
-  const ua = (getHeader(h, 'User-Agent') || "").trim();
-  const referer = (getHeader(h, 'Referer') || "").trim();
+  const cookie = getHeader(h, 'Cookie');
+  const ua = getHeader(h, 'User-Agent');
+  const referer = getHeader(h, 'Referer');
 
-  if (!cookie) return;
-
-  addLog(`捕获请求: ${url}`);
-
-  // 更稳：token/csrf 任一存在都保存
-  const hasToken = cookie.includes("token=");
-  const hasCsrf = cookie.includes("csrf_access_token=");
-  if (!hasToken && !hasCsrf) return;
-
-  if (cookie.length < 20) return;
-
-  const oldCookie = $.getdata(KEY_COOKIE);
-  if (cookie !== oldCookie) {
-    $.setdata(cookie, KEY_COOKIE);
-    if (ua) $.setdata(ua, KEY_UA);
-    if (referer) $.setdata(referer, KEY_REFERER);
-    addLog("Cookie/UA/Referer 已更新");
-    $.msg("HDHive", "🎉 抓取成功", "Cookie已更新");
+  if (cookie && cookie.indexOf("token=") > -1) {
+    if (cookie.length < 20) return;
+    const oldCookie = $.getdata(KEY_COOKIE);
+    if (cookie !== oldCookie) {
+      $.setdata(cookie, KEY_COOKIE);
+      if (ua) $.setdata(ua, KEY_UA);
+      if (referer) $.setdata(referer, KEY_REFERER);
+      $.msg("HDHive", "🎉 抓取成功", "Cookie已更新");
+    }
   }
 }
 
-/** ===== 抓积分流水（http-response）===== */
+/** ========= 抓 points-logs JSON（http-response） ========= */
 async function captureFlowFromResponse() {
   try {
     const url = $request.url || "";
-    if (!url.includes(`${DOMAIN}/api/`)) return;
 
-    const body = ($response && $response.body) ? $response.body : "";
-    if (!body || body.length < 20) return;
+    // 只处理这个接口（纯净）
+    if (!url.includes("hdhive.com/go-api/customer/points-logs")) return;
+
+    const ct = getHeader($response.headers || {}, "content-type") || "";
+    if (!ct.toLowerCase().includes("application/json")) return;
+
+    const body = $response.body || "";
+    if (!body) return;
 
     let j;
     try { j = JSON.parse(body); } catch (e) { return; }
-    if (!j || typeof j !== "object") return;
 
     const flow = parsePointsFlow(j);
     if (!flow) return;
 
-    $.setdata(JSON.stringify(flow), KEY_FLOW);
-    addLog("已缓存积分流水（含签到记录）");
-    $.msg("HDHive", "📌 已缓存签到记录", `来源接口：${url}`);
+    // 只让 page=1（第一页最新）覆盖缓存；page>1 仅首次缓存时写入
+    cacheFlowPreferPage1($, KEY_FLOW, url, flow);
+
   } catch (e) {
     $.logErr(e);
+  }
+}
+
+function getQueryParam(url, key) {
+  const m = url.match(new RegExp(`[?&]${key}=([^&]+)`));
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
+function cacheFlowPreferPage1($, key, url, flowObj) {
+  const pageStr = getQueryParam(url, "page") || "1";
+  const page = parseInt(pageStr, 10);
+  const hasOld = !!$.getdata(key);
+
+  if (page === 1) {
+    $.setdata(JSON.stringify(flowObj), key);
+    // 可选：想安静就注释掉下一行
+    // $.msg("HDHive", "📌 已缓存签到记录", `命中 page=1（最新）`);
+    return;
+  }
+
+  if (!hasOld) {
+    $.setdata(JSON.stringify(flowObj), key);
+    // 可选：想安静就注释掉下一行
+    // $.msg("HDHive", "📌 已缓存签到记录", `命中 page=${page}（首次缓存）`);
   }
 }
 
@@ -97,10 +99,10 @@ function formatTime(iso) {
   return (iso || "").replace("T", " ").replace(/\+\d\d:\d\d$/, "");
 }
 
-// 兼容：page1 全签到 / page2 混 admin_grant
+// 兼容 page=1 全签到 / page=2 混 admin_grant：永远找“最近一条签到”
 function parsePointsFlow(resJson) {
   const list = resJson?.data?.list;
-  if (!Array.isArray(list) || !list.length) return null;
+  if (!resJson?.success || !Array.isArray(list) || !list.length) return null;
 
   const latestCheckin = list.find(x => x && x.change_type === "签到") || null;
   if (!latestCheckin) return null;
@@ -121,17 +123,14 @@ function parsePointsFlow(resJson) {
   };
 }
 
-// 精简：只显示签到（不显示 admin_grant）
 function buildFlowText(flow) {
   if (!flow) return "";
-
   const lines = [];
   lines.push(`用户ID：${flow.user_id ?? "未知"}`);
   lines.push(`最近签到：${formatTime(flow.latest_checkin?.time) || "未知"}`);
   if (flow.latest_checkin?.points != null) lines.push(`本次获得：+${flow.latest_checkin.points} 积分`);
   if (flow.latest_checkin?.remark) lines.push(`说明：${flow.latest_checkin.remark}`);
-
-  if (flow.recent_checkins && flow.recent_checkins.length) {
+  if (flow.recent_checkins?.length) {
     lines.push("");
     lines.push("最近签到记录：");
     lines.push(flow.recent_checkins.join("\n"));
@@ -139,17 +138,13 @@ function buildFlowText(flow) {
   return lines.join("\n");
 }
 
-/** ===== 签到（cron）===== */
+/** ========= 签到（cron） ========= */
 async function checkIn() {
-  LOGS = [];
-  addLog("开始签到");
-
-  const rawCookie = ($.getdata(KEY_COOKIE) || "").trim();
+  const rawCookie = $.getdata(KEY_COOKIE);
   const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/`;
   const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
 
   if (!rawCookie) {
-    addLog("无Cookie");
     $.msg("HDHive", "❌ 无法签到", `无Cookie，请访问 ${DOMAIN}`);
     return;
   }
@@ -159,7 +154,6 @@ async function checkIn() {
   const csrfToken = cookieObj['csrf_access_token'];
 
   if (!token) {
-    addLog("缺少token");
     $.msg("HDHive", "❌ Cookie失效", "缺少token，请重新登录");
     return;
   }
@@ -167,7 +161,6 @@ async function checkIn() {
   const headers = {
     'User-Agent': ua,
     'Accept': 'application/json, text/plain, */*',
-    'Content-Type': 'application/json',
     'Origin': `https://${DOMAIN}`,
     'Referer': referer,
     'Authorization': `Bearer ${token}`,
@@ -178,35 +171,30 @@ async function checkIn() {
   const req = {
     url: `https://${DOMAIN}/api/customer/user/checkin`,
     method: "POST",
-    headers,
+    headers: headers,
     body: ""
   };
 
-  addLog(`请求接口: ${req.url}`);
+  // 读缓存的签到记录，拼到通知里
+  let flow = null;
+  try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch(e) {}
+  const flowText = flow ? ("\n\n" + buildFlowText(flow)) : "";
 
   return new Promise(resolve => {
     $.post(req, (err, resp, data) => {
-      if (err || !resp) {
-        addLog(`网络错误: ${String(err)}`);
+      if (err) {
         $.msg("HDHive", "❌ 网络错误", "无法连接服务器");
         resolve();
         return;
       }
-
       let resJson = {};
       try { resJson = JSON.parse(data); } catch (e) {}
       const msg = resJson.message || "";
 
-      addLog(`HTTP: ${resp.status}`);
-      addLog(`message: ${msg || "(空)"}`);
-
-      // 读取缓存的签到记录
-      let flow = null;
-      try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch(e) {}
-      const flowText = flow ? ("\n\n" + buildFlowText(flow)) : "";
-
-      // 兼容：已签到时可能 400 或者 success=false
-      const looksChecked = msg.includes("已经签到") || msg.includes("明天再来") || msg.toLowerCase().includes("checked");
+      const looksChecked =
+        msg.includes("已经签到") ||
+        msg.includes("明天再来") ||
+        msg.toLowerCase().includes("checked");
 
       if (resp.status === 200 || resp.status === 201) {
         $.msg("HDHive", "✅ 签到成功", `${msg || "签到成功"}${flowText}`);
@@ -221,7 +209,6 @@ async function checkIn() {
       } else {
         $.msg("HDHive", "❌ 未知错误", `状态码 ${resp.status}${msg ? `：${msg}` : ""}`);
       }
-
       resolve();
     });
   });
@@ -248,13 +235,12 @@ function getHeader(headers, key) {
 
 function Env(name) {
   return {
-    name,
+    name: name,
     getdata: (k) => typeof $persistentStore !== "undefined" ? $persistentStore.read(k) : null,
     setdata: (v, k) => typeof $persistentStore !== "undefined" ? $persistentStore.write(v, k) : null,
     msg: (t, s, b) => {
-      const body = `${b || ""}${logsText()}`; // 自动把日志拼进通知
-      if (typeof $notification !== "undefined") $notification.post(t, s, body);
-      console.log(`===${t}===\n${s}\n${body}`);
+      if (typeof $notification !== "undefined") $notification.post(t, s, b);
+      console.log(`===${t}===\n${s}\n${b}`);
     },
     post: (o, c) => typeof $httpClient !== "undefined" ? $httpClient.post(o, c) : null,
     logErr: (e) => console.log(`❗️${name} Error: ${e}`),
