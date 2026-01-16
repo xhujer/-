@@ -1,5 +1,5 @@
 #!name=HDHive 自动签到
-#!desc=自动抓取Cookie并每日签到（支持抓取资料缓存+通知日志）。
+#!desc=v12.1 纯净版：锁定 hdhive.com，自动抓取Cookie并每日签到。
 #!author=ming
 #!icon=https://hdhive.com/favicon.ico
 #!homepage=https://hdhive.com/
@@ -11,10 +11,10 @@ CaptureCookie = switch,true,tag=[开关] 自动获取Cookie,desc=开启后访问
 [Script]
 cron {RunTime} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/HDHive%20Script, tag=HDHive每日签到, timeout=60, script-update-interval=86400
 
-# 抓Cookie：拦常用入口 + 排除签到接口（避免循环）
-http-request ^https?:\/\/(?:www\.)?hdhive\.com\/(?!api\/customer\/user\/checkin)(?:$|user\b|dashboard\b|api\/customer\b) script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/HDHive%20Script, tag=HDHive获取Cookie, timeout=10, requires-body=false, enable={CaptureCookie}, script-update-interval=86400
+# 抓Cookie：常用入口 + 排除签到接口（避免循环/覆盖）
+http-request ^https?:\/\/(?:www\.)?hdhive\.com\/(?!api\/customer\/user\/checkin)(?:$|user\b|dashboard\b|api\/customer\b|api\b) script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/HDHive%20Script, tag=HDHive获取Cookie, timeout=10, requires-body=false, enable={CaptureCookie}, script-update-interval=86400
 
-# 抓资料：必须 http-response + requires-body=true 才能拿到返回JSON
+# 抓积分流水/签到记录：必须 http-response + requires-body=true 才能拿到返回JSON
 http-response ^https?:\/\/(?:www\.)?hdhive\.com\/api\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/HDHive%20Script, tag=HDHive抓取资料, timeout=10, requires-body=true, enable={CaptureCookie}, script-update-interval=86400
 
 [Mitm]
