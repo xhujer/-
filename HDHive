@@ -1,6 +1,7 @@
 /**
- * HDHive 自动签到 (v3.0 最终修复版)
- * 修复了脚本提前结束导致无响应的问题
+ * HDHive 自动签到 (纯 Cookie 版 v5.0)
+ * 策略：完全抛弃 Token，只使用 Cookie + CSRF 进行验证
+ * 优势：配合浏览器的“记住我”功能，有效期极长
  */
 
 const $ = new Env("HDHive");
@@ -8,81 +9,94 @@ const $ = new Env("HDHive");
 // 配置
 const CFG = {
     apiCheckin: 'https://hdhive.com/api/customer/user/checkin',
-    watchApiPrefix: '/api/', 
 };
 
-const KEY_TOKEN = 'hdhive_token';
-const KEY_CSRF = 'hdhive_csrf';
+// 存储 Key (使用新 Key 防止旧数据干扰)
+const KEY_COOKIE = 'hdhive_cookie_v5';
+const KEY_CSRF = 'hdhive_csrf_v5';
 
 (async () => {
     if (typeof $request !== "undefined") {
-        await captureToken();
+        await captureCookie();
     } else {
         await checkIn();
     }
 })().catch((e) => $.logErr(e)).finally(() => $.done());
 
-// --- 抓取逻辑 ---
-async function captureToken() {
+// ------------------------------------------
+// 1. 抓取逻辑 (只抓 Cookie + CSRF)
+// ------------------------------------------
+async function captureCookie() {
     const url = $request.url;
+    // 排除签到接口本身
     if (url.indexOf("user/checkin") > -1) return;
 
     const h = $request.headers;
-    const auth = h['Authorization'] || h['authorization'];
+    
+    // 必须同时存在 Cookie 和 CSRF 才是有效的用户请求
+    // (静态资源通常没有 CSRF 头)
+    const cookie = h['Cookie'] || h['cookie'];
     const csrf = h['x-csrf-token'] || h['X-Csrf-Token'];
+    const userAgent = h['User-Agent'] || h['user-agent'];
 
-    if (auth && csrf) {
-        // 去掉 Bearer 前缀存储
-        const rawToken = auth.replace(/^Bearer\s+/i, '').trim();
-        const rawCsrf = csrf.trim();
-        const storedToken = $.getdata(KEY_TOKEN);
-        
-        if (rawToken !== storedToken) {
-            $.setdata(rawToken, KEY_TOKEN);
-            $.setdata(rawCsrf, KEY_CSRF);
-            console.log(`[HDHive] 捕获新Token: ${rawToken.substring(0, 10)}...`);
-            $.msg("HDHive", "🎉 抓取成功", "凭证已更新");
+    if (cookie && csrf) {
+        // 简单过滤：Cookie 长度太短通常无效
+        if (cookie.length < 20) return;
+
+        const oldCookie = $.getdata(KEY_COOKIE);
+        const oldCsrf = $.getdata(KEY_CSRF);
+
+        if (cookie !== oldCookie || csrf !== oldCsrf) {
+            $.setdata(cookie, KEY_COOKIE);
+            $.setdata(csrf, KEY_CSRF);
+            
+            // 顺便把 UA 也存一下，模拟得更像
+            if (userAgent) $.setdata(userAgent, 'hdhive_ua_v5');
+
+            console.log(`[HDHive] 捕获新 Cookie (前20位): ${cookie.substring(0, 20)}...`);
+            $.msg("HDHive", "🎉 抓取成功", "Cookie 已更新，请测试运行");
         }
     }
 }
 
-// --- 签到逻辑 (增加 Promise 等待) ---
+// ------------------------------------------
+// 2. 签到逻辑 (纯 Cookie 发包)
+// ------------------------------------------
 async function checkIn() {
-    const token = $.getdata(KEY_TOKEN);
+    const cookie = $.getdata(KEY_COOKIE);
     const csrf = $.getdata(KEY_CSRF);
+    const ua = $.getdata('hdhive_ua_v5') || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
 
-    if (!token || !csrf) {
-        $.msg("HDHive", "❌ 签到失败", "无凭证，请先用浏览器访问 hdhive.com");
+    if (!cookie || !csrf) {
+        $.msg("HDHive", "❌ 无法签到", "无 Cookie，请用浏览器登录 hdhive.com 并勾选[记住我]");
         return;
     }
 
-    // 严格复刻 UserScript 请求构造
-    const finalToken = `Bearer ${token}`;
     const req = {
         url: CFG.apiCheckin,
         method: "POST",
         headers: {
             "accept": "application/json, text/plain, */*",
-            "authorization": finalToken,
             "x-csrf-token": csrf,
             "origin": "https://hdhive.com",
-            "referer": "https://hdhive.com/user/dashboard"
+            "referer": "https://hdhive.com/user/dashboard",
+            "cookie": cookie,     // 核心凭证
+            "user-agent": ua      // 模拟来源
+            // 注意：这里绝对不能加 Authorization 头
         },
-        body: "" // 空字符串 Body
+        body: "" // 保持空 Body，符合 UserScript 逻辑
     };
 
-    // [关键修复] 必须返回 Promise，让 await checkIn() 等待请求完成
     return new Promise((resolve) => {
         $.post(req, (err, resp, data) => {
             if (err) {
-                $.msg("HDHive", "❌ 网络错误", "无法连接");
+                $.msg("HDHive", "❌ 网络错误", "请求失败");
                 console.log(err);
-                resolve(); // 结束等待
+                resolve();
                 return;
             }
 
-            console.log(`[HDHive] 状态码: ${resp.status}`);
-            
+            // 解析响应
             let isJson = false;
             let resJson = {};
             try {
@@ -90,28 +104,31 @@ async function checkIn() {
                 isJson = true;
             } catch (e) {}
 
+            console.log(`[HDHive] 状态码: ${resp.status}`);
+
             if (resp.status === 200 || resp.status === 201) {
                 const msg = (isJson && resJson.message) ? resJson.message : "签到成功";
                 $.msg("HDHive", "✅ 签到成功", msg);
-                console.log(`[HDHive] 响应: ${data}`);
+                console.log(`[HDHive] Success: ${data}`);
             } else {
-                if (resp.status === 401 || resp.status === 403) {
-                    $.msg("HDHive", "⚠️ 凭证失效", "请重新登录网站");
+                if (resp.status === 401 || resp.status === 419) {
+                    // 419 是 Laravel 特有的 CSRF 过期错误
+                    $.msg("HDHive", "⚠️ 会话失效", "Cookie/CSRF 已过期，请重新刷新网页");
                 } else if (resp.status === 400) {
-                     // 400 可能是"已签到"
                     const msg = (isJson && resJson.message) ? resJson.message : "请求被拒绝(400)";
                     $.msg("HDHive", "⚠️ 签到结果", msg);
-                    console.log(`[HDHive] 400详情: ${data}`);
                 } else {
                     $.msg("HDHive", "❌ 签到失败", `状态码 ${resp.status}`);
                 }
             }
-            resolve(); // 结束等待
+            resolve();
         });
     });
 }
 
-// --- Env ---
+// ------------------------------------------
+// 工具类
+// ------------------------------------------
 function Env(name) {
     return {
         name: name,
