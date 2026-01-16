@@ -3,132 +3,254 @@ const $ = new Env("HDHive");
 const KEY_COOKIE = 'hdhive_cookie_v12';
 const KEY_REFERER = 'hdhive_referer_v12';
 const KEY_UA = 'hdhive_ua_v12';
+const KEY_PROFILE = 'hdhive_profile_cache_v1'; // 缓存用户资料
 const DOMAIN = 'hdhive.com';
 
-(async () => {
-    if (typeof $request !== "undefined") {
-        await capture();
-    } else {
-        await checkIn();
-    }
-})().catch((e) => $.logErr(e)).finally(() => $.done());
+/** ====== 通知日志开关 ====== */
+const ENABLE_NOTIFY_LOG = true;     // true=通知里带日志；false=不带
+const LOG_MAX_LINES = 12;           // 最多保留日志行数
+let LOGS = [];
 
-async function capture() {
-    if ($request.url.indexOf("user/checkin") > -1) return;
-    if ($request.url.indexOf(DOMAIN) === -1) return;
-
-    const h = $request.headers;
-    const cookie = getHeader(h, 'Cookie');
-    const ua = getHeader(h, 'User-Agent');
-    const referer = getHeader(h, 'Referer');
-
-    if (cookie && cookie.indexOf("token=") > -1) {
-        if (cookie.length < 20) return;
-        const oldCookie = $.getdata(KEY_COOKIE);
-        if (cookie !== oldCookie) {
-            $.setdata(cookie, KEY_COOKIE);
-            if (ua) $.setdata(ua, KEY_UA);
-            if (referer) $.setdata(referer, KEY_REFERER);
-            $.msg("HDHive", "🎉 抓取成功", "Cookie已更新");
-        }
-    }
+function addLog(s) {
+  if (!ENABLE_NOTIFY_LOG) return;
+  const t = new Date().toLocaleString("zh-CN", { hour12: false });
+  LOGS.push(`[${t}] ${s}`);
+  if (LOGS.length > LOG_MAX_LINES) LOGS.shift();
+}
+function logsText() {
+  if (!ENABLE_NOTIFY_LOG || !LOGS.length) return "";
+  return `\n\n📋 日志:\n${LOGS.join("\n")}`;
 }
 
+(async () => {
+  // 处理 http-response：抓资料
+  if (typeof $request !== "undefined" && typeof $response !== "undefined") {
+    await captureProfileFromResponse();
+  }
+  // 处理 http-request：抓 cookie
+  else if (typeof $request !== "undefined") {
+    await capture();
+  }
+  // 定时任务：签到
+  else {
+    await checkIn();
+  }
+})().catch((e) => $.logErr(e)).finally(() => $.done());
+
+/** ====== 抓 Cookie（http-request） ====== */
+async function capture() {
+  const url = $request.url || "";
+  if (url.indexOf("user/checkin") > -1 || url.indexOf("/api/customer/user/checkin") > -1) return;
+  if (url.indexOf(DOMAIN) === -1) return;
+
+  const h = $request.headers || {};
+  const cookie = (getHeader(h, 'Cookie') || "").trim();
+  const ua = (getHeader(h, 'User-Agent') || "").trim();
+  const referer = (getHeader(h, 'Referer') || "").trim();
+
+  if (!cookie) return;
+
+  addLog(`捕获请求: ${url}`);
+  addLog(`Cookie字段存在: ${cookie.length > 0 ? "是" : "否"}`);
+
+  // 更稳：token/csrf 任一存在都保存（避免站点改名抓不到）
+  const hasToken = cookie.includes("token=");
+  const hasCsrf = cookie.includes("csrf_access_token=");
+  if (!hasToken && !hasCsrf) return;
+
+  if (cookie.length < 20) return;
+
+  const oldCookie = $.getdata(KEY_COOKIE);
+  if (cookie !== oldCookie) {
+    $.setdata(cookie, KEY_COOKIE);
+    if (ua) $.setdata(ua, KEY_UA);
+    if (referer) $.setdata(referer, KEY_REFERER);
+    addLog("Cookie/UA/Referer 已写入持久化");
+    $.msg("HDHive", "🎉 抓取成功", "Cookie已更新");
+  }
+}
+
+/** ====== 抓用户资料（http-response） ====== */
+async function captureProfileFromResponse() {
+  try {
+    const url = $request.url || "";
+    if (!url.includes(`${DOMAIN}/api/`)) return;
+
+    const body = ($response && $response.body) ? $response.body : "";
+    if (!body || body.length < 20) return;
+
+    let j;
+    try { j = JSON.parse(body); } catch (e) { return; }
+    if (!j || typeof j !== "object") return;
+
+    // 宽松特征匹配：命中>=2个关键字段就认为是“资料类JSON”
+    const s = body;
+    let hit = 0;
+    if (s.includes("username") || s.includes("\"name\"")) hit++;
+    if (s.includes("userId") || s.includes("\"id\"")) hit++;
+    if (s.includes("level")) hit++;
+    if (s.includes("points") || s.includes("score")) hit++;
+    if (s.includes("checkin")) hit++;
+    if (s.includes("join") || s.includes("created_at")) hit++;
+
+    if (hit < 2) return;
+
+    const profile = j.user || j.data?.user || j.data?.profile || j.profile || j.data || j;
+    $.setdata(JSON.stringify(profile), KEY_PROFILE);
+
+    addLog(`已缓存用户资料，命中字段数=${hit}`);
+    $.msg("HDHive", "📌 已缓存用户资料", `来源接口：${url}`);
+  } catch (e) {
+    $.logErr(e);
+  }
+}
+
+/** ====== 签到（定时任务） ====== */
 async function checkIn() {
-    const rawCookie = $.getdata(KEY_COOKIE);
-    const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/`;
-    const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+  LOGS = []; // 每次签到清空日志，避免上次残留
+  addLog("开始签到");
 
-    if (!rawCookie) {
-        $.msg("HDHive", "❌ 无法签到", `无Cookie，请访问 ${DOMAIN}`);
+  const rawCookie = ($.getdata(KEY_COOKIE) || "").trim();
+  const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/`;
+  const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+
+  if (!rawCookie) {
+    addLog("未找到Cookie");
+    $.msg("HDHive", "❌ 无法签到", `无Cookie，请访问 ${DOMAIN}`);
+    return;
+  }
+
+  const cookieObj = parseCookie(rawCookie);
+  const token = cookieObj['token'];
+  const csrfToken = cookieObj['csrf_access_token'];
+
+  addLog(`token存在: ${token ? "是" : "否"}`);
+  addLog(`csrf存在: ${csrfToken ? "是" : "否"}`);
+
+  if (!token) {
+    $.msg("HDHive", "❌ Cookie失效", "缺少token，请重新登录");
+    return;
+  }
+
+  const headers = {
+    'User-Agent': ua,
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json',
+    'Origin': `https://${DOMAIN}`,
+    'Referer': referer,
+    'Authorization': `Bearer ${token}`,
+    'Cookie': rawCookie
+  };
+  if (csrfToken) headers['x-csrf-token'] = csrfToken;
+
+  const req = {
+    url: `https://${DOMAIN}/api/customer/user/checkin`,
+    method: "POST",
+    headers,
+    body: "" // 如果遇到后端不接受空body，可改成 "{}"
+  };
+
+  addLog(`请求接口: ${req.url}`);
+
+  return new Promise(resolve => {
+    $.post(req, (err, resp, data) => {
+      if (err || !resp) {
+        addLog(`网络错误: ${String(err)}`);
+        $.msg("HDHive", "❌ 网络错误", "无法连接服务器");
+        resolve();
         return;
-    }
+      }
 
-    const cookieObj = parseCookie(rawCookie);
-    const token = cookieObj['token'];
-    const csrfToken = cookieObj['csrf_access_token'];
+      addLog(`HTTP状态码: ${resp.status}`);
 
-    if (!token) {
-        $.msg("HDHive", "❌ Cookie失效", "缺少token，请重新登录");
-        return;
-    }
+      let resJson = {};
+      try { resJson = JSON.parse(data); } catch (e) {}
+      const msg = resJson.message || "";
+      addLog(`返回message: ${msg || "(空)"}`);
 
-    const headers = {
-        'User-Agent': ua,
-        'Accept': 'application/json, text/plain, */*',
-        'Origin': `https://${DOMAIN}`,
-        'Referer': referer,
-        'Authorization': `Bearer ${token}`,
-        'Cookie': rawCookie
-    };
-    if (csrfToken) headers['x-csrf-token'] = csrfToken;
+      // 从缓存拿资料（因为已签到时接口只回message/success）
+      let cached = {};
+      try { cached = JSON.parse($.getdata(KEY_PROFILE) || "{}"); } catch(e) {}
+      const profileText = (cached && Object.keys(cached).length)
+        ? ("\n\n" + buildProfileText(cached))
+        : "";
 
-    const req = {
-        url: `https://${DOMAIN}/api/customer/user/checkin`,
-        method: "POST",
-        headers: headers,
-        body: ""
-    };
+      // success=false 且 message 像“已签到”，也按已签到处理
+      const success = (typeof resJson.success === "boolean") ? resJson.success : null;
+      const looksChecked = msg.includes("已经签到") || msg.toLowerCase().includes("checked");
 
-    return new Promise(resolve => {
-        $.post(req, (err, resp, data) => {
-            if (err) {
-                $.msg("HDHive", "❌ 网络错误", "无法连接服务器");
-                resolve();
-                return;
-            }
-            let resJson = {};
-            try { resJson = JSON.parse(data); } catch (e) {}
-            const msg = resJson.message || "";
-            
-            if (resp.status === 200 || resp.status === 201) {
-                $.msg("HDHive", "✅ 签到成功", msg);
-            } else if (resp.status === 400) {
-                if (msg.includes("签到") || msg.includes("checked in")) {
-                    $.msg("HDHive", "🟢 今日已签到", "无需重复执行");
-                } else {
-                    $.msg("HDHive", "⚠️ 签到异常", msg);
-                }
-            } else if (resp.status === 401 || resp.status === 403) {
-                $.msg("HDHive", "🔴 Cookie过期", "请重新登录网页");
-            } else {
-                $.msg("HDHive", "❌ 未知错误", `状态码 ${resp.status}`);
-            }
-            resolve();
-        });
+      if (resp.status === 200 || resp.status === 201) {
+        $.msg("HDHive", "✅ 签到成功", `${msg || "签到成功"}${profileText}`);
+      } else if (resp.status === 400) {
+        if (looksChecked) {
+          $.msg("HDHive", "🟢 今日已签到", `${msg || "无需重复执行"}${profileText}`);
+        } else {
+          $.msg("HDHive", "⚠️ 签到异常", `${msg || "未知400错误"}${profileText}`);
+        }
+      } else if (resp.status === 401 || resp.status === 403) {
+        $.msg("HDHive", "🔴 Cookie过期", "请重新登录网页");
+      } else {
+        $.msg("HDHive", "❌ 未知错误", `状态码 ${resp.status}${msg ? `：${msg}` : ""}`);
+      }
+
+      resolve();
     });
+  });
+}
+
+/** ====== 工具：把缓存资料格式化成你想要的样式 ====== */
+function buildProfileText(p = {}) {
+  // 兼容不同字段名（按你实际缓存到的JSON字段自动匹配）
+  const name = p.username || p.user_name || p.name || "未知";
+  const id = p.userId || p.user_id || p.id || "未知";
+  const level = p.level || p.user_level || p.role || "未知";
+  const share = p.shareCount ?? p.share_count ?? p.share ?? "未知";
+  const points = p.points ?? p.score ?? p.credit ?? "未知";
+  const totalCheckin = p.totalCheckin ?? p.total_checkin ?? p.checkin_total ?? "未知";
+  const joinAt = p.joinAt || p.join_time || p.created_at || "未知";
+
+  return [
+    `用户名称：${name}`,
+    `用户ID：${id}`,
+    `用户等级：${level}`,
+    `分享数量：${share}`,
+    `当前积分：${points}`,
+    `累计签到：${totalCheckin}`,
+    `加入时间：${joinAt}`,
+  ].join("\n");
 }
 
 function parseCookie(str) {
-    const list = {};
-    if (!str) return list;
-    str.split(';').forEach(i => {
-        const parts = i.split('=');
-        if (parts.length >= 2) list[parts[0].trim()] = parts.slice(1).join('=').trim();
-    });
-    return list;
+  const list = {};
+  if (!str) return list;
+  str.split(';').forEach(i => {
+    const parts = i.split('=');
+    if (parts.length >= 2) list[parts[0].trim()] = parts.slice(1).join('=').trim();
+  });
+  return list;
 }
 
 function getHeader(headers, key) {
-    if (!headers) return null;
-    const lowerKey = key.toLowerCase();
-    for (const k in headers) {
-        if (k.toLowerCase() === lowerKey) return headers[k];
-    }
-    return null;
+  if (!headers) return null;
+  const lowerKey = key.toLowerCase();
+  for (const k in headers) {
+    if (k.toLowerCase() === lowerKey) return headers[k];
+  }
+  return null;
 }
 
 function Env(name) {
-    return {
-        name: name,
-        getdata: (k) => typeof $persistentStore !== "undefined" ? $persistentStore.read(k) : null,
-        setdata: (v, k) => typeof $persistentStore !== "undefined" ? $persistentStore.write(v, k) : null,
-        msg: (t, s, b) => {
-            if (typeof $notification !== "undefined") $notification.post(t, s, b);
-            console.log(`===${t}===\n${s}\n${b}`);
-        },
-        post: (o, c) => typeof $httpClient !== "undefined" ? $httpClient.post(o, c) : null,
-        logErr: (e) => console.log(`❗️${name} Error: ${e}`),
-        done: () => typeof $done !== "undefined" ? $done({}) : null
-    };
+  return {
+    name,
+    getdata: (k) => typeof $persistentStore !== "undefined" ? $persistentStore.read(k) : null,
+    setdata: (v, k) => typeof $persistentStore !== "undefined" ? $persistentStore.write(v, k) : null,
+    msg: (t, s, b) => {
+      const body = `${b || ""}${logsText()}`; // 通知里自动追加日志
+      if (typeof $notification !== "undefined") $notification.post(t, s, body);
+      console.log(`===${t}===\n${s}\n${body}`);
+    },
+    post: (o, c) => typeof $httpClient !== "undefined" ? $httpClient.post(o, c) : null,
+    logErr: (e) => console.log(`❗️${name} Error: ${e}`),
+    done: () => typeof $done !== "undefined" ? $done({}) : null
+  };
 }
