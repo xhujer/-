@@ -1,28 +1,18 @@
-/**
- * HDHive 自动签到 (v15.0 混合技术版)
- * 核心升级：API 路不通，改走页面分析路。
- * 1. 本地解码 Token 获取用户 ID (100% 成功)
- * 2. 模拟访问 Dashboard 页面，正则提取积分、等级、用户名
- */
-
 const $ = new Env("HDHive");
 
-const KEY_COOKIE = 'hdhive_cookie_v15'; // 升级 Key
-const KEY_REFERER = 'hdhive_referer_v15'; 
-const KEY_UA = 'hdhive_ua_v15';
-const DOMAIN = 'hdhive.com'; // 锁定域名
+const KEY_COOKIE = 'hdhive_cookie_v12';
+const KEY_REFERER = 'hdhive_referer_v12';
+const KEY_UA = 'hdhive_ua_v12';
+const DOMAIN = 'hdhive.com';
 
 (async () => {
     if (typeof $request !== "undefined") {
         await capture();
     } else {
-        await main();
+        await checkIn();
     }
 })().catch((e) => $.logErr(e)).finally(() => $.done());
 
-// ------------------------------------------
-// 1. 抓取逻辑
-// ------------------------------------------
 async function capture() {
     if ($request.url.indexOf("user/checkin") > -1) return;
     if ($request.url.indexOf(DOMAIN) === -1) return;
@@ -39,47 +29,29 @@ async function capture() {
             $.setdata(cookie, KEY_COOKIE);
             if (ua) $.setdata(ua, KEY_UA);
             if (referer) $.setdata(referer, KEY_REFERER);
-            $.msg("HDHive", "🎉 抓取成功", "Cookie已更新，准备执行混合解析");
+            $.msg("HDHive", "🎉 抓取成功", "Cookie已更新");
         }
     }
 }
 
-// ------------------------------------------
-// 2. 主流程
-// ------------------------------------------
-async function main() {
+async function checkIn() {
     const rawCookie = $.getdata(KEY_COOKIE);
+    const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/`;
+    const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+
     if (!rawCookie) {
         $.msg("HDHive", "❌ 无法签到", `无Cookie，请访问 ${DOMAIN}`);
         return;
     }
 
-    // 1. 签到
-    const checkInRes = await doCheckIn(rawCookie);
-    
-    // 2. 只有当 Cookie 有效时，才尝试获取详细信息
-    let info = null;
-    if (checkInRes.status !== 'expired') {
-        // 使用混合技术获取信息 (JWT + 页面爬取)
-        info = await fetchUserInfoCombined(rawCookie);
-    }
-
-    // 3. 发送通知
-    sendNotification(checkInRes, info);
-}
-
-// ------------------------------------------
-// 3. 签到请求
-// ------------------------------------------
-async function doCheckIn(rawCookie) {
-    const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/`;
-    const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
-    
     const cookieObj = parseCookie(rawCookie);
     const token = cookieObj['token'];
     const csrfToken = cookieObj['csrf_access_token'];
 
-    if (!token) return { status: 'expired', msg: 'Cookie缺少token' };
+    if (!token) {
+        $.msg("HDHive", "❌ Cookie失效", "缺少token，请重新登录");
+        return;
+    }
 
     const headers = {
         'User-Agent': ua,
@@ -101,178 +73,30 @@ async function doCheckIn(rawCookie) {
     return new Promise(resolve => {
         $.post(req, (err, resp, data) => {
             if (err) {
-                resolve({ status: 'network', msg: '网络错误', earned: 0 });
+                $.msg("HDHive", "❌ 网络错误", "无法连接服务器");
+                resolve();
                 return;
             }
             let resJson = {};
             try { resJson = JSON.parse(data); } catch (e) {}
             const msg = resJson.message || "";
-            const status = resp.status;
-
-            let earned = 0;
-            const match = msg.match(/获得\s*(\d+)\s*积分/);
-            if (match) earned = match[1];
-
-            if (status === 200 || status === 201) {
-                resolve({ status: 'success', msg: msg, earned: earned });
-            } else if (status === 400) {
-                if (msg.includes("签到") || msg.includes("checked in")) {
-                    resolve({ status: 'repeat', msg: msg, earned: 0 });
-                } else {
-                    resolve({ status: 'fail', msg: msg, earned: 0 });
-                }
-            } else if (status === 401 || status === 403) {
-                resolve({ status: 'expired', msg: '凭证过期', earned: 0 });
-            } else {
-                resolve({ status: 'unknown', msg: `Code: ${status}`, earned: 0 });
-            }
-        });
-    });
-}
-
-// ------------------------------------------
-// 4. 混合获取用户信息 (JWT + HTML Scraping)
-// ------------------------------------------
-async function fetchUserInfoCombined(rawCookie) {
-    const cookieObj = parseCookie(rawCookie);
-    const token = cookieObj['token'];
-    
-    // 1. 【黑科技】本地解码 JWT 获取 User ID
-    // 这是一个无需网络请求的必杀技
-    let userId = "未知";
-    try {
-        const payload = token.split('.')[1]; // 取中间部分
-        const decoded = JSON.parse(decodeBase64(payload));
-        if (decoded && decoded.sub) userId = decoded.sub;
-    } catch (e) {
-        console.log(`[HDHive] JWT解码失败: ${e}`);
-    }
-
-    // 2. 【笨办法】访问 Dashboard 页面去抠 HTML
-    const pageData = await scrapeDashboard(rawCookie);
-
-    return {
-        id: userId, // 优先用 JWT 解码的 ID，最准
-        name: pageData.name || "未知",
-        level: pageData.level || "未知",
-        integral: pageData.integral || "未知",
-        checkins: pageData.checkins || "未知",
-        share: pageData.share || "未知",
-        join: pageData.join || "未知"
-    };
-}
-
-// 爬取 Dashboard 页面
-async function scrapeDashboard(rawCookie) {
-    const ua = $.getdata(KEY_UA);
-    const cookieObj = parseCookie(rawCookie);
-    const token = cookieObj['token'];
-
-    const req = {
-        // 尝试访问用户主页/控制台
-        url: `https://${DOMAIN}/user/dashboard`,
-        method: "GET",
-        headers: {
-            'User-Agent': ua,
-            'Authorization': `Bearer ${token}`, // 带上 token 防跳转
-            'Cookie': rawCookie,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-        }
-    };
-
-    return new Promise(resolve => {
-        $.get(req, (err, resp, data) => {
-            if (err || resp.status !== 200) {
-                console.log(`[HDHive] 页面抓取失败: ${resp ? resp.status : err}`);
-                resolve({});
-                return;
-            }
-
-            // --- 正则大乱炖 ---
-            // 针对 HDHive 的 HTML 结构进行盲猜匹配
-            // 如果提取不到，请将日志发给我，我再微调正则
-            const result = {};
-
-            // 1. 积分 (匹配 "积分" 或 "Integral" 附近的数字)
-            // 常见结构: <div>积分</div><div>1234</div>
-            const integralMatch = data.match(/(?:积分|Integral)[\s\S]{0,50}?(\d{2,})/i) || data.match(/integral.*?value">(\d+)/i);
-            if (integralMatch) result.integral = integralMatch[1];
-
-            // 2. 等级 (匹配 "等级" 或 "Level" 附近的词)
-            const levelMatch = data.match(/(?:等级|Level)[\s\S]{0,50}?class=".*?">([^<]+)</i) || data.match(/(?:等级|Level)\s*[:：]\s*(\S+)/);
-            if (levelMatch) result.level = levelMatch[1].trim();
-
-            // 3. 用户名 (通常在 title 或 欢迎语中)
-            const nameMatch = data.match(/欢迎|Welcome[\s\S]{0,20}?(\S+?)\s*</) || data.match(/class="username">([^<]+)</);
-            if (nameMatch) result.name = nameMatch[1];
-
-            // 4. 签到天数
-            const checkinMatch = data.match(/(?:签到|Check-in)[\s\S]{0,50}?(\d{1,5})/);
-            if (checkinMatch) result.checkins = checkinMatch[1];
             
-            // 5. 分享率/数量
-            const shareMatch = data.match(/(?:分享|Share)[\s\S]{0,50}?(\d+)/);
-            if (shareMatch) result.share = shareMatch[1];
-
-            resolve(result);
+            if (resp.status === 200 || resp.status === 201) {
+                $.msg("HDHive", "✅ 签到成功", msg);
+            } else if (resp.status === 400) {
+                if (msg.includes("签到") || msg.includes("checked in")) {
+                    $.msg("HDHive", "🟢 今日已签到", "无需重复执行");
+                } else {
+                    $.msg("HDHive", "⚠️ 签到异常", msg);
+                }
+            } else if (resp.status === 401 || resp.status === 403) {
+                $.msg("HDHive", "🔴 Cookie过期", "请重新登录网页");
+            } else {
+                $.msg("HDHive", "❌ 未知错误", `状态码 ${resp.status}`);
+            }
+            resolve();
         });
     });
-}
-
-// ------------------------------------------
-// 5. 格式化通知
-// ------------------------------------------
-function sendNotification(res, info) {
-    let title = "HDHive 签到日报";
-    let body = "";
-
-    if (res.status === 'success') title = "✅ HDHive 签到成功";
-    else if (res.status === 'repeat') title = "🟢 HDHive 今日已签";
-    else if (res.status === 'expired') title = "🔴 HDHive 凭证过期";
-    else title = "⚠️ HDHive 签到异常";
-
-    // 构造正文
-    if (info) {
-        const earnedStr = res.earned > 0 ? ` (+${res.earned})` : "";
-        
-        body += `用户名称：${info.name}\n`;
-        body += `用户lD：${info.id}\n`; // 这个 ID 是 JWT 解码的，绝对准确
-        body += `用户等级：${info.level}\n`;
-        body += `分享数量：${info.share}\n`;
-        body += `当前积分：${info.integral}${earnedStr}\n`;
-        body += `累计签到：${info.checkins}\n`;
-        // body += `加入时间：${info.join}`; // 页面上很难抓到加入时间，先隐藏
-    } else {
-        body = `签到状态：${res.msg}\n(数据抓取失败，请检查网页结构)`;
-    }
-
-    $.msg(title, "", body);
-}
-
-// ------------------------------------------
-// 工具函数
-// ------------------------------------------
-function decodeBase64(str) {
-    // 简单的 Base64Url 解码
-    str = str.replace(/-/g, '+').replace(/_/g, '/');
-    while (str.length % 4) {
-        str += '=';
-    }
-    return atob(str);
-}
-
-// atob Polyfill for Loon (如果是旧版本环境)
-function atob(input) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-    let str = input.replace(/=+$/, '');
-    let output = '';
-    if (str.length % 4 == 1) {
-        throw new Error("'atob' failed: The string to be decoded is not correctly encoded.");
-    }
-    for (let bc = 0, bs = 0, buffer, i = 0; buffer = str.charAt(i++); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
-        buffer = chars.indexOf(buffer);
-    }
-    return output;
 }
 
 function parseCookie(str) {
@@ -304,7 +128,6 @@ function Env(name) {
             console.log(`===${t}===\n${s}\n${b}`);
         },
         post: (o, c) => typeof $httpClient !== "undefined" ? $httpClient.post(o, c) : null,
-        get: (o, c) => typeof $httpClient !== "undefined" ? $httpClient.get(o, c) : null,
         logErr: (e) => console.log(`❗️${name} Error: ${e}`),
         done: () => typeof $done !== "undefined" ? $done({}) : null
     };
