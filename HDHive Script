@@ -3,12 +3,12 @@ const $ = new Env("HDHive");
 const KEY_COOKIE = 'hdhive_cookie_v12';
 const KEY_REFERER = 'hdhive_referer_v12';
 const KEY_UA = 'hdhive_ua_v12';
-const KEY_PROFILE = 'hdhive_profile_cache_v1'; // 缓存用户资料
+const KEY_FLOW = 'hdhive_points_flow_v1'; // 缓存积分流水（含签到记录）
 const DOMAIN = 'hdhive.com';
 
-/** ====== 通知日志开关 ====== */
-const ENABLE_NOTIFY_LOG = true;     // true=通知里带日志；false=不带
-const LOG_MAX_LINES = 12;           // 最多保留日志行数
+/** ===== 通知日志（开关）===== */
+const ENABLE_NOTIFY_LOG = true;  // true=通知附带日志；false=不附带
+const LOG_MAX_LINES = 12;
 let LOGS = [];
 
 function addLog(s) {
@@ -23,21 +23,21 @@ function logsText() {
 }
 
 (async () => {
-  // 处理 http-response：抓资料
+  // http-response：抓积分流水（需要 Loon 配置 http-response + requires-body=true）
   if (typeof $request !== "undefined" && typeof $response !== "undefined") {
-    await captureProfileFromResponse();
+    await captureFlowFromResponse();
   }
-  // 处理 http-request：抓 cookie
+  // http-request：抓 Cookie
   else if (typeof $request !== "undefined") {
     await capture();
   }
-  // 定时任务：签到
+  // cron：签到
   else {
     await checkIn();
   }
 })().catch((e) => $.logErr(e)).finally(() => $.done());
 
-/** ====== 抓 Cookie（http-request） ====== */
+/** ===== 抓 Cookie（http-request）===== */
 async function capture() {
   const url = $request.url || "";
   if (url.indexOf("user/checkin") > -1 || url.indexOf("/api/customer/user/checkin") > -1) return;
@@ -51,9 +51,8 @@ async function capture() {
   if (!cookie) return;
 
   addLog(`捕获请求: ${url}`);
-  addLog(`Cookie字段存在: ${cookie.length > 0 ? "是" : "否"}`);
 
-  // 更稳：token/csrf 任一存在都保存（避免站点改名抓不到）
+  // 更稳：token/csrf 任一存在都保存
   const hasToken = cookie.includes("token=");
   const hasCsrf = cookie.includes("csrf_access_token=");
   if (!hasToken && !hasCsrf) return;
@@ -65,13 +64,13 @@ async function capture() {
     $.setdata(cookie, KEY_COOKIE);
     if (ua) $.setdata(ua, KEY_UA);
     if (referer) $.setdata(referer, KEY_REFERER);
-    addLog("Cookie/UA/Referer 已写入持久化");
+    addLog("Cookie/UA/Referer 已更新");
     $.msg("HDHive", "🎉 抓取成功", "Cookie已更新");
   }
 }
 
-/** ====== 抓用户资料（http-response） ====== */
-async function captureProfileFromResponse() {
+/** ===== 抓积分流水（http-response）===== */
+async function captureFlowFromResponse() {
   try {
     const url = $request.url || "";
     if (!url.includes(`${DOMAIN}/api/`)) return;
@@ -83,31 +82,66 @@ async function captureProfileFromResponse() {
     try { j = JSON.parse(body); } catch (e) { return; }
     if (!j || typeof j !== "object") return;
 
-    // 宽松特征匹配：命中>=2个关键字段就认为是“资料类JSON”
-    const s = body;
-    let hit = 0;
-    if (s.includes("username") || s.includes("\"name\"")) hit++;
-    if (s.includes("userId") || s.includes("\"id\"")) hit++;
-    if (s.includes("level")) hit++;
-    if (s.includes("points") || s.includes("score")) hit++;
-    if (s.includes("checkin")) hit++;
-    if (s.includes("join") || s.includes("created_at")) hit++;
+    const flow = parsePointsFlow(j);
+    if (!flow) return;
 
-    if (hit < 2) return;
-
-    const profile = j.user || j.data?.user || j.data?.profile || j.profile || j.data || j;
-    $.setdata(JSON.stringify(profile), KEY_PROFILE);
-
-    addLog(`已缓存用户资料，命中字段数=${hit}`);
-    $.msg("HDHive", "📌 已缓存用户资料", `来源接口：${url}`);
+    $.setdata(JSON.stringify(flow), KEY_FLOW);
+    addLog("已缓存积分流水（含签到记录）");
+    $.msg("HDHive", "📌 已缓存签到记录", `来源接口：${url}`);
   } catch (e) {
     $.logErr(e);
   }
 }
 
-/** ====== 签到（定时任务） ====== */
+function formatTime(iso) {
+  return (iso || "").replace("T", " ").replace(/\+\d\d:\d\d$/, "");
+}
+
+// 兼容：page1 全签到 / page2 混 admin_grant
+function parsePointsFlow(resJson) {
+  const list = resJson?.data?.list;
+  if (!Array.isArray(list) || !list.length) return null;
+
+  const latestCheckin = list.find(x => x && x.change_type === "签到") || null;
+  if (!latestCheckin) return null;
+
+  const recentCheckins = list
+    .filter(x => x && x.change_type === "签到")
+    .slice(0, 3)
+    .map(x => `- ${formatTime(x.created_at)}：+${x.points}（${x.remark || "签到"}）`);
+
+  return {
+    user_id: latestCheckin.user_id,
+    latest_checkin: {
+      points: latestCheckin.points,
+      time: latestCheckin.created_at,
+      remark: latestCheckin.remark
+    },
+    recent_checkins: recentCheckins
+  };
+}
+
+// 精简：只显示签到（不显示 admin_grant）
+function buildFlowText(flow) {
+  if (!flow) return "";
+
+  const lines = [];
+  lines.push(`用户ID：${flow.user_id ?? "未知"}`);
+  lines.push(`最近签到：${formatTime(flow.latest_checkin?.time) || "未知"}`);
+  if (flow.latest_checkin?.points != null) lines.push(`本次获得：+${flow.latest_checkin.points} 积分`);
+  if (flow.latest_checkin?.remark) lines.push(`说明：${flow.latest_checkin.remark}`);
+
+  if (flow.recent_checkins && flow.recent_checkins.length) {
+    lines.push("");
+    lines.push("最近签到记录：");
+    lines.push(flow.recent_checkins.join("\n"));
+  }
+  return lines.join("\n");
+}
+
+/** ===== 签到（cron）===== */
 async function checkIn() {
-  LOGS = []; // 每次签到清空日志，避免上次残留
+  LOGS = [];
   addLog("开始签到");
 
   const rawCookie = ($.getdata(KEY_COOKIE) || "").trim();
@@ -115,7 +149,7 @@ async function checkIn() {
   const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
 
   if (!rawCookie) {
-    addLog("未找到Cookie");
+    addLog("无Cookie");
     $.msg("HDHive", "❌ 无法签到", `无Cookie，请访问 ${DOMAIN}`);
     return;
   }
@@ -124,10 +158,8 @@ async function checkIn() {
   const token = cookieObj['token'];
   const csrfToken = cookieObj['csrf_access_token'];
 
-  addLog(`token存在: ${token ? "是" : "否"}`);
-  addLog(`csrf存在: ${csrfToken ? "是" : "否"}`);
-
   if (!token) {
+    addLog("缺少token");
     $.msg("HDHive", "❌ Cookie失效", "缺少token，请重新登录");
     return;
   }
@@ -147,7 +179,7 @@ async function checkIn() {
     url: `https://${DOMAIN}/api/customer/user/checkin`,
     method: "POST",
     headers,
-    body: "" // 如果遇到后端不接受空body，可改成 "{}"
+    body: ""
   };
 
   addLog(`请求接口: ${req.url}`);
@@ -161,31 +193,28 @@ async function checkIn() {
         return;
       }
 
-      addLog(`HTTP状态码: ${resp.status}`);
-
       let resJson = {};
       try { resJson = JSON.parse(data); } catch (e) {}
       const msg = resJson.message || "";
-      addLog(`返回message: ${msg || "(空)"}`);
 
-      // 从缓存拿资料（因为已签到时接口只回message/success）
-      let cached = {};
-      try { cached = JSON.parse($.getdata(KEY_PROFILE) || "{}"); } catch(e) {}
-      const profileText = (cached && Object.keys(cached).length)
-        ? ("\n\n" + buildProfileText(cached))
-        : "";
+      addLog(`HTTP: ${resp.status}`);
+      addLog(`message: ${msg || "(空)"}`);
 
-      // success=false 且 message 像“已签到”，也按已签到处理
-      const success = (typeof resJson.success === "boolean") ? resJson.success : null;
-      const looksChecked = msg.includes("已经签到") || msg.toLowerCase().includes("checked");
+      // 读取缓存的签到记录
+      let flow = null;
+      try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch(e) {}
+      const flowText = flow ? ("\n\n" + buildFlowText(flow)) : "";
+
+      // 兼容：已签到时可能 400 或者 success=false
+      const looksChecked = msg.includes("已经签到") || msg.includes("明天再来") || msg.toLowerCase().includes("checked");
 
       if (resp.status === 200 || resp.status === 201) {
-        $.msg("HDHive", "✅ 签到成功", `${msg || "签到成功"}${profileText}`);
+        $.msg("HDHive", "✅ 签到成功", `${msg || "签到成功"}${flowText}`);
       } else if (resp.status === 400) {
         if (looksChecked) {
-          $.msg("HDHive", "🟢 今日已签到", `${msg || "无需重复执行"}${profileText}`);
+          $.msg("HDHive", "🟢 今日已签到", `${msg || "无需重复执行"}${flowText}`);
         } else {
-          $.msg("HDHive", "⚠️ 签到异常", `${msg || "未知400错误"}${profileText}`);
+          $.msg("HDHive", "⚠️ 签到异常", `${msg || "请求异常"}${flowText}`);
         }
       } else if (resp.status === 401 || resp.status === 403) {
         $.msg("HDHive", "🔴 Cookie过期", "请重新登录网页");
@@ -196,28 +225,6 @@ async function checkIn() {
       resolve();
     });
   });
-}
-
-/** ====== 工具：把缓存资料格式化成你想要的样式 ====== */
-function buildProfileText(p = {}) {
-  // 兼容不同字段名（按你实际缓存到的JSON字段自动匹配）
-  const name = p.username || p.user_name || p.name || "未知";
-  const id = p.userId || p.user_id || p.id || "未知";
-  const level = p.level || p.user_level || p.role || "未知";
-  const share = p.shareCount ?? p.share_count ?? p.share ?? "未知";
-  const points = p.points ?? p.score ?? p.credit ?? "未知";
-  const totalCheckin = p.totalCheckin ?? p.total_checkin ?? p.checkin_total ?? "未知";
-  const joinAt = p.joinAt || p.join_time || p.created_at || "未知";
-
-  return [
-    `用户名称：${name}`,
-    `用户ID：${id}`,
-    `用户等级：${level}`,
-    `分享数量：${share}`,
-    `当前积分：${points}`,
-    `累计签到：${totalCheckin}`,
-    `加入时间：${joinAt}`,
-  ].join("\n");
 }
 
 function parseCookie(str) {
@@ -245,7 +252,7 @@ function Env(name) {
     getdata: (k) => typeof $persistentStore !== "undefined" ? $persistentStore.read(k) : null,
     setdata: (v, k) => typeof $persistentStore !== "undefined" ? $persistentStore.write(v, k) : null,
     msg: (t, s, b) => {
-      const body = `${b || ""}${logsText()}`; // 通知里自动追加日志
+      const body = `${b || ""}${logsText()}`; // 自动把日志拼进通知
       if (typeof $notification !== "undefined") $notification.post(t, s, body);
       console.log(`===${t}===\n${s}\n${body}`);
     },
