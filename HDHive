@@ -1,5 +1,5 @@
-#!name=HDHive 自动签到 (内嵌版)
-#!desc=合二为一版：无需下载外部脚本。包含自动抓取 Token 和每日定时签到功能。
+#!name=HDHive 自动签到
+#!desc=合二为一修复版：代码已通过多行语法内嵌，解决显示为空的问题。
 #!author=ming & Gemini
 #!icon=https://hdhive.com/favicon.ico
 #!homepage=https://hdhive.com/
@@ -18,8 +18,81 @@ cron {Cron} script-path=HDHiveCore, tag=HDHive签到, timeout=60
 hostname = hdhive.com
 
 # ==============================================
-# 下面是核心逻辑，直接内嵌在插件中，无需额外文件
+# 核心逻辑 (使用 <<< 包裹，Loon 可正确识别)
 # ==============================================
 
 [InlineScript]
-HDHiveCore = "const API='https://hdhive.com/api/customer/user/checkin';const KEY_T='hdhive_token';const KEY_C='hdhive_csrf';if(typeof $request!=='undefined'){const h=$request.headers;const t=h['Authorization']||h['authorization'];const c=h['x-csrf-token']||h['X-Csrf-Token'];if(t&&c){const oldT=$persistentStore.read(KEY_T);if(t!==oldT){$persistentStore.write(t,KEY_T);$persistentStore.write(c,KEY_C);$notification.post('HDHive','🎉 凭证已自动更新','无需操作，已保存新Token');console.log('[HDHive] Token updated: '+t);}}$done({});}else{const t=$persistentStore.read(KEY_T);const c=$persistentStore.read(KEY_C);if(!t||!c){$notification.post('HDHive','❌ 签到失败','未检测到凭证，请先用浏览器访问 hdhive.com');$done({});}else{$httpClient.post({url:API,headers:{'Authorization':t,'x-csrf-token':c,'Origin':'https://hdhive.com','Referer':'https://hdhive.com/user/dashboard','User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'}},(e,r,d)=>{if(!e&&(r.status===200||r.status===201)){let msg='签到成功';try{msg=JSON.parse(d).message||msg}catch(x){}$notification.post('HDHive','✅ 签到成功',msg);console.log('[HDHive] Success: '+d);}else{if(r&&r.status===401){$notification.post('HDHive','⚠️ 签到失败','Token 已失效，请重新访问网页获取');}else{$notification.post('HDHive','❌ 签到失败','状态码:'+(r?r.status:e));console.log('[HDHive] Error: '+d);}}$done({});});}}"
+HDHiveCore = <<<
+/**
+ * HDHive 自动签到 (Inline)
+ */
+const $ = new Env("HDHive");
+
+const API_CHECKIN = 'https://hdhive.com/api/customer/user/checkin';
+const KEY_TOKEN = 'hdhive_token';
+const KEY_CSRF = 'hdhive_csrf';
+
+(async () => {
+    if (typeof $request !== "undefined") {
+        // --- 模式 1: 抓取 Token ---
+        await captureToken();
+    } else {
+        // --- 模式 2: 执行签到 ---
+        await checkIn();
+    }
+})().catch((e) => $.logErr(e)).finally(() => $.done());
+
+async function captureToken() {
+    if ($request.url.indexOf("checkin") > -1) return;
+    const h = $request.headers;
+    const t = h['Authorization'] || h['authorization'];
+    const c = h['x-csrf-token'] || h['X-Csrf-Token'];
+
+    if (t && c) {
+        const oldT = $.getdata(KEY_TOKEN);
+        if (t !== oldT) {
+            $.setdata(t, KEY_TOKEN);
+            $.setdata(c, KEY_CSRF);
+            $.msg("HDHive", "🎉 凭证已自动更新", "无需操作，已保存新Token");
+            $.log(`[HDHive] Token updated.`);
+        }
+    }
+}
+
+async function checkIn() {
+    const t = $.getdata(KEY_TOKEN);
+    const c = $.getdata(KEY_CSRF);
+
+    if (!t || !c) {
+        $.msg("HDHive", "❌ 签到失败", "未检测到凭证，请先用浏览器访问 hdhive.com");
+        return;
+    }
+
+    const req = {
+        url: API_CHECKIN, headers: {
+            "Authorization": t, "x-csrf-token": c,
+            "Origin": "https://hdhive.com",
+            "Referer": "https://hdhive.com/user/dashboard",
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+        }
+    };
+
+    $.post(req, (err, resp, data) => {
+        if (err) {
+            $.msg("HDHive", "❌ 网络错误", "无法连接服务器");
+        } else if (resp.status === 200 || resp.status === 201) {
+            let msg = "签到成功";
+            try { msg = JSON.parse(data).message || msg; } catch (e) {}
+            $.msg("HDHive", "✅ 签到成功", msg);
+            $.log(`[HDHive] Success: ${data}`);
+        } else if (resp.status === 401) {
+            $.msg("HDHive", "⚠️ Token 失效", "请重新访问网页获取");
+        } else {
+            $.msg("HDHive", "❌ 签到失败", `状态码: ${resp.status}`);
+        }
+    });
+}
+
+// Env helper
+function Env(t,e){"undefined"!=typeof process&&JSON.stringify(process.env).indexOf("GITHUB")>-1&&process.exit(0);class s{constructor(t){this.env=t}write(t,e){return this.toObj(t,e)}getdata(t){if(arguments.length)return $persistentStore.read(t)}setdata(t,e){if(arguments.length)return $persistentStore.write(t,e)}post(t,e){const s=t.method?"POST"==t.method.toUpperCase()?$httpClient.post:$httpClient.put:$httpClient.post;if(!e)return new Promise(((e,i)=>{s.call(this,t,((t,s,r)=>{t?i(t):e(s)}))}));s.call(this,t,e)}msg(e=t,s="",r="",i){const o=t=>{if(!t)return t;if("string"==typeof t)return this.isLoon()?t:this.isQuanX()?{"open-url":t}:this.isSurge()?{url:t}:void 0;if("object"==typeof t){if(this.isLoon()){let e=t.openUrl||t.url||t["open-url"],s=t.mediaUrl||t["media-url"];return{openUrl:e,mediaUrl:s}}}};if(!this.isMuteLog){let t=["","==============📣系统通知📣=============="];t.push(e),s&&t.push(s),r&&t.push(r),console.log(t.join("\n")),this.logs=this.logs.concat(t)}$notification.post(e,s,r,o(i))}log(...t){t.length>0&&(this.logs=[...this.logs,...t]),console.log(t.join(this.logSeparator))}logErr(t,e){const s=!this.isSurge()&&!this.isQuanX()&&!this.isLoon();s?this.log("",`❗️${this.name}, 错误!`,t.stack):this.log("",`❗️${this.name}, 错误!`,t)}done(t={}){const e=(new Date).getTime(),s=(e-this.startTime)/1e3;this.log("",`🔔${this.name}, 结束! 🕛 ${s} 秒`),this.log(),$done(t)}isLoon(){return"undefined"!=typeof $loon}isQuanX(){return"undefined"!=typeof $task}isSurge(){return"undefined"!=typeof $httpClient&&"undefined"==typeof $loon}}return new s(t)}
+>>>
