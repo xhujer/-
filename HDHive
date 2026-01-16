@@ -1,5 +1,5 @@
 #!name=HDHive 自动签到
-#!desc=v12.1 纯净版：锁定 hdhive.com，自动抓取Cookie并每日签到。
+#!desc=自动抓取Cookie并每日签到。
 #!author=ming
 #!icon=https://hdhive.com/favicon.ico
 #!homepage=https://hdhive.com/
@@ -18,4 +18,4 @@ http-request ^https?:\/\/(?:www\.)?hdhive\.com\/(?!api\/customer\/user\/checkin)
 http-response ^https?:\/\/(?:www\.)?hdhive\.com\/go-api\/customer\/points-logs(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/HDHive%20Script, tag=HDHive抓取签到记录, timeout=10, requires-body=true, enable={CaptureCookie}, script-update-interval=86400
 
 [Mitm]
-hostname = hdhive.com, www.hdhive.com
+hostname = hdhive.com
