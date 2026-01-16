@@ -9,11 +9,11 @@ RunTime = input,"0 9 * * *",tag=每日签到时间,desc=默认每天上午9点�
 CaptureCookie = switch,true,tag=[开关] 自动获取凭证,desc=开启后访问网页自动抓取 Token
 
 [Script]
-# 定时任务 (请替换为您自己的 GitHub 链接)
+# 定时任务
 cron {RunTime} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/HDHive, tag=HDHive每日签到, timeout=60
 
-# 获取凭证：正则范围扩大，匹配 /api/ 下的所有请求，模仿油猴脚本的嗅探逻辑
-http-request ^https?:\/\/hdhive\.com\/api\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/HDHive, tag=HDHive获取凭证, timeout=10, enable={CaptureCookie}
+# 获取凭证：【关键修改】去掉了 /api/，现在匹配 hdhive.com 下的所有请求
+http-request ^https?:\/\/hdhive\.com\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/HDHive, tag=HDHive获取凭证, timeout=10, enable={CaptureCookie}
 
 [Mitm]
 hostname = hdhive.com
