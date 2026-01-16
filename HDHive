@@ -1,18 +1,21 @@
 /**
- * HDHive 自动签到 (v10.0 Python复刻版)
- * 逻辑来源：基于 MoviePilot hdhivesign.py v1.0.0
- * 核心策略：
- * 1. 兼容 hdhive.com 和 hdhive.online 双域名
- * 2. 从 Cookie 中精准提取 token 和 csrf_access_token
- * 3. 严格按照 Python 插件的逻辑构造请求头 (Bearer + CSRF)
+ * HDHive 自动签到 (v10.1 域名修正版)
+ * 逻辑：保留 Python 版的 Token 提取算法，但强制使用 hdhive.com
+ * 修复：解决 v10.0 连接 hdhive.online 导致的网络错误
  */
 
 const $ = new Env("HDHive");
 
 // 存储 Key
-const KEY_COOKIE = 'hdhive_cookie_v10'; // 存储原始 Cookie
-const KEY_REFERER = 'hdhive_referer_v10'; // 存储真实来源
+const KEY_COOKIE = 'hdhive_cookie_v10'; 
+const KEY_REFERER = 'hdhive_referer_v10'; 
 const KEY_UA = 'hdhive_ua_v10'; 
+
+// 配置
+const CFG = {
+    // 强制使用你之前成功的域名
+    domain: 'hdhive.com',
+};
 
 (async () => {
     if (typeof $request !== "undefined") {
@@ -26,7 +29,6 @@ const KEY_UA = 'hdhive_ua_v10';
 // 1. 抓取逻辑
 // ------------------------------------------
 async function capture() {
-    // 过滤掉签到接口自身
     if ($request.url.indexOf("user/checkin") > -1) return;
 
     const h = $request.headers;
@@ -36,7 +38,6 @@ async function capture() {
 
     // 只要有 Cookie 且包含 token 字段就抓取
     if (cookie && cookie.indexOf("token=") > -1) {
-        // 简单校验长度
         if (cookie.length < 20) return;
 
         const oldCookie = $.getdata(KEY_COOKIE);
@@ -46,75 +47,65 @@ async function capture() {
             if (referer) $.setdata(referer, KEY_REFERER);
             if (ua) $.setdata(ua, KEY_UA);
             
-            // 提取域名用于日志显示
-            const domain = $request.url.match(/https?:\/\/([^/]+)/)[1];
-            console.log(`[HDHive] 捕获凭证成功 (域名: ${domain})`);
-            $.msg("HDHive", "🎉 抓取成功", "已提取 Token 和 CSRF，准备就绪");
+            console.log(`[HDHive] 捕获成功`);
+            $.msg("HDHive", "🎉 抓取成功", "凭证已更新，域名锁定 hdhive.com");
         }
     }
 }
 
 // ------------------------------------------
-// 2. 签到逻辑 (复刻 Python _signin_base)
+// 2. 签到逻辑
 // ------------------------------------------
 async function checkIn() {
     const rawCookie = $.getdata(KEY_COOKIE);
-    // 如果没有 Referer，默认使用 python 脚本中的默认值
-    const referer = $.getdata(KEY_REFERER) || "https://hdhive.online/";
+    const referer = $.getdata(KEY_REFERER) || `https://${CFG.domain}/`;
     const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
 
     if (!rawCookie) {
-        $.msg("HDHive", "❌ 无法签到", "无凭证，请访问 hdhive.online 或 hdhive.com");
+        $.msg("HDHive", "❌ 无法签到", `无凭证，请访问 ${CFG.domain} 抓取`);
         return;
     }
 
-    // --- 核心复刻：从 Cookie 字符串解析字段 ---
+    // 从 Cookie 解析 Token (Python 插件的核心逻辑)
     const cookieObj = parseCookie(rawCookie);
     const token = cookieObj['token'];
     const csrfToken = cookieObj['csrf_access_token'];
 
     if (!token) {
-        $.msg("HDHive", "❌ 凭证不完整", "Cookie 中缺少 token 字段，请重新登录抓取");
+        $.msg("HDHive", "❌ 凭证不完整", "Cookie 缺少 token，请重新登录");
         return;
     }
 
-    // 动态判断 API 域名 (根据 Referer 或默认 online)
-    let apiHost = "hdhive.online";
-    if (referer.includes("hdhive.com")) {
-        apiHost = "hdhive.com";
-    }
-    const apiUrl = `https://${apiHost}/api/customer/user/checkin`;
-    const origin = `https://${apiHost}`;
+    // 构造请求
+    const apiUrl = `https://${CFG.domain}/api/customer/user/checkin`;
+    const origin = `https://${CFG.domain}`;
 
-    // --- 构造 Headers (完全一致) ---
     const headers = {
         'User-Agent': ua,
         'Accept': 'application/json, text/plain, */*',
         'Origin': origin,
         'Referer': referer,
-        'Authorization': `Bearer ${token}` // Python: f'Bearer {token}'
+        'Authorization': `Bearer ${token}`, // 手动构造 Bearer
+        'Cookie': rawCookie
     };
 
-    // Python: if csrf_token: headers['x-csrf-token'] = csrf_token
     if (csrfToken) {
         headers['x-csrf-token'] = csrfToken;
     }
-
-    // Python: cookies=cookies (虽然构造了 Auth，但 Python requests 还是带上了 cookie)
-    // 为了保险，我们把 Cookie 也带上
-    headers['Cookie'] = rawCookie;
 
     const req = {
         url: apiUrl,
         method: "POST",
         headers: headers,
-        body: "" // 空 Body
+        body: "" 
     };
 
     return new Promise(resolve => {
         $.post(req, (err, resp, data) => {
+            // 打印详细错误日志
             if (err) {
-                $.msg("HDHive", "❌ 网络错误", "请求失败");
+                console.log(`[HDHive] 网络错误详情: ${JSON.stringify(err)}`);
+                $.msg("HDHive", "❌ 网络错误", "无法连接到 hdhive.com");
                 resolve();
                 return;
             }
@@ -124,14 +115,13 @@ async function checkIn() {
             
             console.log(`[HDHive] 状态码: ${resp.status}`);
 
-            // Python 逻辑: if signin_result.get('success') ...
             if (resp.status === 200 || resp.status === 201) {
                 const msg = resJson.message || "签到成功";
                 $.msg("HDHive", "✅ 签到成功", msg);
             } 
-            // Python 逻辑: if "已经签到" in message ...
             else if (resp.status === 400) {
                 const msg = resJson.message || "请求被拒绝";
+                // 400 也是连接成功的标志
                 if (msg.includes("已签到") || msg.includes("签到过") || msg.includes("checked in")) {
                     $.msg("HDHive", "🟢 今日已签到", msg);
                 } else {
@@ -139,7 +129,7 @@ async function checkIn() {
                 }
             } 
             else if (resp.status === 401 || resp.status === 403) {
-                 $.msg("HDHive", "⚠️ 凭证失效", "Token 已过期，请重新登录");
+                 $.msg("HDHive", "⚠️ 凭证失效", "请重新登录网页抓取");
             }
             else {
                 $.msg("HDHive", "❌ 签到失败", `状态码 ${resp.status}`);
@@ -150,22 +140,18 @@ async function checkIn() {
 }
 
 // ------------------------------------------
-// 辅助函数
+// 工具函数
 // ------------------------------------------
-
-// 解析 Cookie 字符串为对象
-function parseCookie(cookieStr) {
-    const cookies = {};
-    if (!cookieStr) return cookies;
-    cookieStr.split(';').forEach(item => {
-        const parts = item.split('=');
+function parseCookie(str) {
+    const list = {};
+    if (!str) return list;
+    str.split(';').forEach(i => {
+        const parts = i.split('=');
         if (parts.length >= 2) {
-            const key = parts[0].trim();
-            const value = parts.slice(1).join('=').trim();
-            cookies[key] = value;
+            list[parts[0].trim()] = parts.slice(1).join('=').trim();
         }
     });
-    return cookies;
+    return list;
 }
 
 function getHeader(headers, key) {
