@@ -1,138 +1,25 @@
-#!name=HDHive 自动签到
-#!desc=自动抓取 HDHive 的 Token 和 CSRF，并每日定时签到。
+#!name=HDHive 自动签到 (内嵌版)
+#!desc=合二为一版：无需下载外部脚本。包含自动抓取 Token 和每日定时签到功能。
 #!author=ming & Gemini
 #!icon=https://hdhive.com/favicon.ico
 #!homepage=https://hdhive.com/
 
 [Argument]
-Cron = input,"0 9 * * *",tag=签到时间,desc=设置每日签到执行的时间 (Cron 表达式)
-
-[Rule]
-# 无需额外 Rule，通过 Script 模块拦截
+Cron = input,"0 9 * * *",tag=签到时间,desc=Cron表达式，默认每天上午9点
 
 [Script]
-# 抓取凭证 (访问网页或APP时触发)
-http-request ^https?:\/\/hdhive\.com\/api\/ script-path=https://raw.githubusercontent.com/doesnotexist/placeholder.js, tag=HDHive获权, script-update-interval=0, debug=false, require-body=false, timeout=10, enable=true
+# 1. 抓取凭证 (访问网页时触发)
+http-request ^https?:\/\/hdhive\.com\/api\/ script-path=HDHiveCore, tag=HDHive获权, timeout=10, enable=true
 
-# 定时签到任务
-cron {Cron} script-path=https://raw.githubusercontent.com/doesnotexist/placeholder.js, tag=HDHive签到, timeout=60
+# 2. 定时签到 (后台自动运行)
+cron {Cron} script-path=HDHiveCore, tag=HDHive签到, timeout=60
 
 [Mitm]
 hostname = hdhive.com
 
-# 下面是内嵌脚本，Loon 会自动读取
-[Script]
-# polyfill for script-path
-enable = true
+# ==============================================
+# 下面是核心逻辑，直接内嵌在插件中，无需额外文件
+# ==============================================
 
 [InlineScript]
-/**
- * HDHive 自动签到脚本 for Loon
- */
-
-const $ = new Env("HDHive");
-
-const API_CHECKIN = 'https://hdhive.com/api/customer/user/checkin';
-const KEY_TOKEN = 'hdhive_token';
-const KEY_CSRF = 'hdhive_csrf';
-
-// ------------------------------------
-// 主逻辑
-// ------------------------------------
-
-(async () => {
-    if (typeof $request !== "undefined") {
-        // --- 模式 1: 抓取 Token (HTTP Request) ---
-        await captureToken();
-    } else {
-        // --- 模式 2: 执行签到 (Cron) ---
-        await checkIn();
-    }
-})().catch((e) => $.logErr(e)).finally(() => $.done());
-
-// ------------------------------------
-// 功能函数
-// ------------------------------------
-
-// 1. 抓取凭证
-async function captureToken() {
-    // 忽略特定的请求以免死循环（虽然正则已经限制了）
-    if ($request.url.indexOf("checkin") > -1) return;
-
-    const headers = $request.headers;
-    // Loon 的 headers key 可能是小写也可能是大写，统一处理
-    const auth = headers['Authorization'] || headers['authorization'];
-    const csrf = headers['x-csrf-token'] || headers['X-Csrf-Token'];
-
-    if (auth && csrf) {
-        // 读取旧数据用于对比
-        const oldAuth = $.getdata(KEY_TOKEN);
-        const oldCsrf = $.getdata(KEY_CSRF);
-
-        if (auth !== oldAuth || csrf !== oldCsrf) {
-            $.setdata(auth, KEY_TOKEN);
-            $.setdata(csrf, KEY_CSRF);
-            
-            $.msg("HDHive", "🎉 凭证获取成功", "Token 和 CSRF 已自动更新");
-            $.log(`[HDHive] 获取新凭证:\nToken: ${auth}\nCSRF: ${csrf}`);
-        }
-    }
-}
-
-// 2. 执行签到
-async function checkIn() {
-    const token = $.getdata(KEY_TOKEN);
-    const csrf = $.getdata(KEY_CSRF);
-
-    if (!token || !csrf) {
-        $.msg("HDHive", "❌ 签到失败", "未找到 Token，请先在浏览器访问 hdhive.com");
-        return;
-    }
-
-    const req = {
-        url: API_CHECKIN,
-        method: "POST",
-        headers: {
-            "Authorization": token,
-            "x-csrf-token": csrf,
-            "Origin": "https://hdhive.com",
-            "Referer": "https://hdhive.com/user/dashboard",
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
-            "Accept": "application/json, text/plain, */*"
-        }
-    };
-
-    $.post(req, (err, resp, data) => {
-        if (err) {
-            $.msg("HDHive", "❌ 签到异常", "网络请求出错");
-            $.logErr(err);
-            return;
-        }
-
-        try {
-            // 根据原脚本逻辑，只要能 parse JSON 就算成功，或者判断状态码
-            if (resp.status === 200 || resp.status === 201) {
-                const result = JSON.parse(data);
-                // 假设返回的数据里有 message 字段，如果没有则显示通用成功
-                const msg = result.message || "签到成功";
-                $.msg("HDHive", "✅ 签到成功", msg);
-                $.log(`[HDHive] 签到响应: ${data}`);
-            } else {
-                $.msg("HDHive", "⚠️ 签到失败", `状态码: ${resp.status}`);
-                $.log(`[HDHive] 失败响应: ${data}`);
-                
-                if (resp.status === 401) {
-                     $.msg("HDHive", "⚠️ Token 失效", "请重新访问网站获取 Token");
-                }
-            }
-        } catch (e) {
-            $.msg("HDHive", "❌ 签到错误", "返回数据解析失败 (可能 Token 过期)");
-            $.log(`[HDHive] 解析失败: ${data}`);
-        }
-    });
-}
-
-// ------------------------------------
-// 环境兼容层 (由 chavyleung 等大佬提供思路)
-// ------------------------------------
-function Env(t,e){"undefined"!=typeof process&&JSON.stringify(process.env).indexOf("GITHUB")>-1&&process.exit(0);class s{constructor(t){this.env=t}write(t,e){return this.toObj(t,e)}getdata(t){if(arguments.length)return $persistentStore.read(t)}setdata(t,e){if(arguments.length)return $persistentStore.write(t,e)}post(t,e){const s=t.method?"POST"==t.method.toUpperCase()?$httpClient.post:$httpClient.put:$httpClient.post;if(!e)return new Promise(((e,i)=>{s.call(this,t,((t,s,r)=>{t?i(t):e(s)}))}));s.call(this,t,e)}msg(e=t,s="",r="",i){const o=t=>{if(!t)return t;if("string"==typeof t)return this.isLoon()?t:this.isQuanX()?{"open-url":t}:this.isSurge()?{url:t}:void 0;if("object"==typeof t){if(this.isLoon()){let e=t.openUrl||t.url||t["open-url"],s=t.mediaUrl||t["media-url"];return{openUrl:e,mediaUrl:s}}if(this.isQuanX()){let e=t["open-url"]||t.url||t.openUrl,s=t["media-url"]||t.mediaUrl;return{"open-url":e,"media-url":s}}if(this.isSurge()){let e=t.url||t.openUrl||t["open-url"];return{url:e}}}};if(this.isMute||(this.isSurge()||this.isLoon()?$notification.post(e,s,r,o(i)):this.isQuanX()&&$notify(e,s,r,o(i))),!this.isMuteLog){let t=["","==============📣系统通知📣=============="];t.push(e),s&&t.push(s),r&&t.push(r),console.log(t.join("\n")),this.logs=this.logs.concat(t)}}log(...t){t.length>0&&(this.logs=[...this.logs,...t]),console.log(t.join(this.logSeparator))}logErr(t,e){const s=!this.isSurge()&&!this.isQuanX()&&!this.isLoon();s?this.log("",`❗️${this.name}, 错误!`,t.stack):this.log("",`❗️${this.name}, 错误!`,t)}done(t={}){const e=(new Date).getTime(),s=(e-this.startTime)/1e3;this.log("",`🔔${this.name}, 结束! 🕛 ${s} 秒`),this.log(),(this.isSurge()||this.isQuanX()||this.isLoon())&&$done(t)}isLoon(){return"undefined"!=typeof $loon}isQuanX(){return"undefined"!=typeof $task}isSurge(){return"undefined"!=typeof $httpClient&&"undefined"==typeof $loon}}return new s(t)}
+HDHiveCore = "const API='https://hdhive.com/api/customer/user/checkin';const KEY_T='hdhive_token';const KEY_C='hdhive_csrf';if(typeof $request!=='undefined'){const h=$request.headers;const t=h['Authorization']||h['authorization'];const c=h['x-csrf-token']||h['X-Csrf-Token'];if(t&&c){const oldT=$persistentStore.read(KEY_T);if(t!==oldT){$persistentStore.write(t,KEY_T);$persistentStore.write(c,KEY_C);$notification.post('HDHive','🎉 凭证已自动更新','无需操作，已保存新Token');console.log('[HDHive] Token updated: '+t);}}$done({});}else{const t=$persistentStore.read(KEY_T);const c=$persistentStore.read(KEY_C);if(!t||!c){$notification.post('HDHive','❌ 签到失败','未检测到凭证，请先用浏览器访问 hdhive.com');$done({});}else{$httpClient.post({url:API,headers:{'Authorization':t,'x-csrf-token':c,'Origin':'https://hdhive.com','Referer':'https://hdhive.com/user/dashboard','User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'}},(e,r,d)=>{if(!e&&(r.status===200||r.status===201)){let msg='签到成功';try{msg=JSON.parse(d).message||msg}catch(x){}$notification.post('HDHive','✅ 签到成功',msg);console.log('[HDHive] Success: '+d);}else{if(r&&r.status===401){$notification.post('HDHive','⚠️ 签到失败','Token 已失效，请重新访问网页获取');}else{$notification.post('HDHive','❌ 签到失败','状态码:'+(r?r.status:e));console.log('[HDHive] Error: '+d);}}$done({});});}}"
