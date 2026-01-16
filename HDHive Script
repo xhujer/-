@@ -1,18 +1,26 @@
+/**
+ * HDHive 自动签到 (v14.0 全能通知版)
+ * 功能：签到后提取 7 项核心数据，严格按照用户要求的格式推送通知
+ */
+
 const $ = new Env("HDHive");
 
-const KEY_COOKIE = 'hdhive_cookie_v12';
-const KEY_REFERER = 'hdhive_referer_v12';
-const KEY_UA = 'hdhive_ua_v12';
+const KEY_COOKIE = 'hdhive_cookie_v14'; // 升级 Key 以隔离旧数据
+const KEY_REFERER = 'hdhive_referer_v14'; 
+const KEY_UA = 'hdhive_ua_v14';
 const DOMAIN = 'hdhive.com';
 
 (async () => {
     if (typeof $request !== "undefined") {
         await capture();
     } else {
-        await checkIn();
+        await main();
     }
 })().catch((e) => $.logErr(e)).finally(() => $.done());
 
+// ------------------------------------------
+// 1. 抓取逻辑
+// ------------------------------------------
 async function capture() {
     if ($request.url.indexOf("user/checkin") > -1) return;
     if ($request.url.indexOf(DOMAIN) === -1) return;
@@ -29,29 +37,46 @@ async function capture() {
             $.setdata(cookie, KEY_COOKIE);
             if (ua) $.setdata(ua, KEY_UA);
             if (referer) $.setdata(referer, KEY_REFERER);
-            $.msg("HDHive", "🎉 抓取成功", "Cookie已更新");
+            $.msg("HDHive", "🎉 抓取成功", "Cookie已更新，下次签到显示详细面板");
         }
     }
 }
 
-async function checkIn() {
+// ------------------------------------------
+// 2. 主流程
+// ------------------------------------------
+async function main() {
     const rawCookie = $.getdata(KEY_COOKIE);
-    const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/`;
-    const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
-
     if (!rawCookie) {
         $.msg("HDHive", "❌ 无法签到", `无Cookie，请访问 ${DOMAIN}`);
         return;
     }
 
+    // 1. 签到
+    const checkInRes = await doCheckIn(rawCookie);
+    
+    // 2. 获取详细信息 (只要凭证没过期就去查)
+    let info = null;
+    if (checkInRes.status !== 'expired') {
+        info = await getUserInfo(rawCookie);
+    }
+
+    // 3. 发送通知
+    sendNotification(checkInRes, info);
+}
+
+// ------------------------------------------
+// 3. 签到请求
+// ------------------------------------------
+async function doCheckIn(rawCookie) {
+    const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/`;
+    const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+    
     const cookieObj = parseCookie(rawCookie);
     const token = cookieObj['token'];
     const csrfToken = cookieObj['csrf_access_token'];
 
-    if (!token) {
-        $.msg("HDHive", "❌ Cookie失效", "缺少token，请重新登录");
-        return;
-    }
+    if (!token) return { status: 'expired', msg: 'Cookie缺少token' };
 
     const headers = {
         'User-Agent': ua,
@@ -73,32 +98,125 @@ async function checkIn() {
     return new Promise(resolve => {
         $.post(req, (err, resp, data) => {
             if (err) {
-                $.msg("HDHive", "❌ 网络错误", "无法连接服务器");
-                resolve();
+                resolve({ status: 'network', msg: '网络错误', earned: 0 });
                 return;
             }
             let resJson = {};
             try { resJson = JSON.parse(data); } catch (e) {}
             const msg = resJson.message || "";
-            
-            if (resp.status === 200 || resp.status === 201) {
-                $.msg("HDHive", "✅ 签到成功", msg);
-            } else if (resp.status === 400) {
+            const status = resp.status;
+
+            // 提取获得积分
+            let earned = 0;
+            const match = msg.match(/获得\s*(\d+)\s*积分/);
+            if (match) earned = match[1];
+
+            if (status === 200 || status === 201) {
+                resolve({ status: 'success', msg: msg, earned: earned });
+            } else if (status === 400) {
                 if (msg.includes("签到") || msg.includes("checked in")) {
-                    $.msg("HDHive", "🟢 今日已签到", "无需重复执行");
+                    resolve({ status: 'repeat', msg: msg, earned: 0 });
                 } else {
-                    $.msg("HDHive", "⚠️ 签到异常", msg);
+                    resolve({ status: 'fail', msg: msg, earned: 0 });
                 }
-            } else if (resp.status === 401 || resp.status === 403) {
-                $.msg("HDHive", "🔴 Cookie过期", "请重新登录网页");
+            } else if (status === 401 || status === 403) {
+                resolve({ status: 'expired', msg: '凭证过期', earned: 0 });
             } else {
-                $.msg("HDHive", "❌ 未知错误", `状态码 ${resp.status}`);
+                resolve({ status: 'unknown', msg: `Code: ${status}`, earned: 0 });
             }
-            resolve();
         });
     });
 }
 
+// ------------------------------------------
+// 4. 获取详细用户信息 (7项数据)
+// ------------------------------------------
+async function getUserInfo(rawCookie) {
+    const ua = $.getdata(KEY_UA);
+    const cookieObj = parseCookie(rawCookie);
+    const token = cookieObj['token'];
+
+    const req = {
+        url: `https://${DOMAIN}/api/customer/user/info`,
+        method: "GET",
+        headers: {
+            'User-Agent': ua,
+            'Authorization': `Bearer ${token}`,
+            'Cookie': rawCookie,
+            'Accept': 'application/json'
+        }
+    };
+
+    return new Promise(resolve => {
+        $.get(req, (err, resp, data) => {
+            if (err || resp.status !== 200) {
+                console.log(`[HDHive] 获取信息失败: ${data}`);
+                resolve(null);
+                return;
+            }
+            try {
+                const json = JSON.parse(data);
+                const d = json.data || json; // 兼容不同结构
+
+                // 尝试提取数据，如果没有则显示默认值
+                return resolve({
+                    name: d.username || d.name || "未知",
+                    id: d.id || "未知",
+                    // 尝试从 group 或 level 字段获取等级名称
+                    level: (d.group ? d.group.name : "") || d.level_name || d.class_name || "普通用户",
+                    // 分享/发布数量
+                    share: d.share_count || d.publish_count || d.uploads || 0,
+                    // 当前积分
+                    integral: d.integral || d.points || d.total_points || 0,
+                    // 累计签到
+                    checkins: d.checkin_count || d.total_checkin || d.sign_count || 0,
+                    // 加入时间 (只截取日期部分)
+                    join: (d.created_at || d.join_time || "未知").substring(0, 10)
+                });
+            } catch (e) {
+                console.log(`[HDHive] 解析信息错误: ${e}`);
+                resolve(null);
+            }
+        });
+    });
+}
+
+// ------------------------------------------
+// 5. 格式化通知
+// ------------------------------------------
+function sendNotification(res, info) {
+    let title = "HDHive 签到日报";
+    let body = "";
+
+    // 1. 设置标题状态
+    if (res.status === 'success') title = "✅ HDHive 签到成功";
+    else if (res.status === 'repeat') title = "🟢 HDHive 今日已签";
+    else if (res.status === 'expired') title = "🔴 HDHive 凭证过期";
+    else title = "⚠️ HDHive 签到异常";
+
+    // 2. 构造正文 (严格按照用户要求格式)
+    if (info) {
+        // 如果今日有收益，在积分后面标注
+        const earnedStr = res.earned > 0 ? ` (+${res.earned})` : "";
+        
+        body += `用户名称：${info.name}\n`;
+        body += `用户lD：${info.id}\n`;
+        body += `用户等级：${info.level}\n`;
+        body += `分享数量：${info.share}\n`;
+        body += `当前积分：${info.integral}${earnedStr}\n`;
+        body += `累计签到：${info.checkins}\n`;
+        body += `加入时间：${info.join}`;
+    } else {
+        // 如果获取信息失败，只显示签到结果
+        body = `签到状态：${res.msg}\n无法获取详细用户信息，请检查日志。`;
+    }
+
+    $.msg(title, "", body);
+}
+
+// ------------------------------------------
+// 工具函数
+// ------------------------------------------
 function parseCookie(str) {
     const list = {};
     if (!str) return list;
@@ -128,6 +246,7 @@ function Env(name) {
             console.log(`===${t}===\n${s}\n${b}`);
         },
         post: (o, c) => typeof $httpClient !== "undefined" ? $httpClient.post(o, c) : null,
+        get: (o, c) => typeof $httpClient !== "undefined" ? $httpClient.get(o, c) : null,
         logErr: (e) => console.log(`❗️${name} Error: ${e}`),
         done: () => typeof $done !== "undefined" ? $done({}) : null
     };
