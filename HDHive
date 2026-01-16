@@ -1,125 +1,179 @@
 /**
- * HDHive 自动签到 (纯 Cookie 版 v5.0)
- * 策略：完全抛弃 Token，只使用 Cookie + CSRF 进行验证
- * 优势：配合浏览器的“记住我”功能，有效期极长
+ * HDHive 自动签到 (v7.0 动态 CSRF 版)
+ * 核心升级：不再依赖存储的死 CSRF，而是每次签到前“现场获取”最新 CSRF。
+ * 效果：彻底解决 419/Token 过期问题，只要 Cookie 活着就能签到。
  */
 
 const $ = new Env("HDHive");
 
 // 配置
 const CFG = {
-    apiCheckin: 'https://hdhive.com/api/customer/user/checkin',
+    // 1. 签到接口
+    checkinUrl: 'https://hdhive.com/api/customer/user/checkin',
+    // 2. 用于提取 CSRF 的页面 (通常是 Dashboard 或首页)
+    csrfUrl: 'https://hdhive.com/user/dashboard',
+    
+    origin: 'https://hdhive.com',
+    referer: 'https://hdhive.com/user/dashboard'
 };
 
-// 存储 Key (使用新 Key 防止旧数据干扰)
-const KEY_COOKIE = 'hdhive_cookie_v5';
-const KEY_CSRF = 'hdhive_csrf_v5';
+// 存储 Key (只需要 Cookie 和 UA，不再强依赖存死的 CSRF)
+const KEY_COOKIE = 'hdhive_cookie_v7';
+const KEY_UA = 'hdhive_ua_v7';
 
 (async () => {
     if (typeof $request !== "undefined") {
-        await captureCookie();
+        await capture();
     } else {
-        await checkIn();
+        await checkInLogic();
     }
 })().catch((e) => $.logErr(e)).finally(() => $.done());
 
 // ------------------------------------------
-// 1. 抓取逻辑 (只抓 Cookie + CSRF)
+// 1. 抓取逻辑 (主要抓 Cookie)
 // ------------------------------------------
-async function captureCookie() {
-    const url = $request.url;
-    // 排除签到接口本身
-    if (url.indexOf("user/checkin") > -1) return;
+async function capture() {
+    if ($request.url.indexOf("user/checkin") > -1) return;
 
-    const h = $request.headers;
-    
-    // 必须同时存在 Cookie 和 CSRF 才是有效的用户请求
-    // (静态资源通常没有 CSRF 头)
-    const cookie = h['Cookie'] || h['cookie'];
-    const csrf = h['x-csrf-token'] || h['X-Csrf-Token'];
-    const userAgent = h['User-Agent'] || h['user-agent'];
+    const cookie = getHeader($request.headers, 'Cookie');
+    const ua = getHeader($request.headers, 'User-Agent');
 
-    if (cookie && csrf) {
-        // 简单过滤：Cookie 长度太短通常无效
+    if (cookie) {
+        // 简单校验
         if (cookie.length < 20) return;
 
         const oldCookie = $.getdata(KEY_COOKIE);
-        const oldCsrf = $.getdata(KEY_CSRF);
 
-        if (cookie !== oldCookie || csrf !== oldCsrf) {
+        // 只要 Cookie 变了就存
+        if (cookie !== oldCookie) {
             $.setdata(cookie, KEY_COOKIE);
-            $.setdata(csrf, KEY_CSRF);
+            if (ua) $.setdata(ua, KEY_UA);
             
-            // 顺便把 UA 也存一下，模拟得更像
-            if (userAgent) $.setdata(userAgent, 'hdhive_ua_v5');
-
-            console.log(`[HDHive] 捕获新 Cookie (前20位): ${cookie.substring(0, 20)}...`);
-            $.msg("HDHive", "🎉 抓取成功", "Cookie 已更新，请测试运行");
+            console.log(`[HDHive] 捕获 Cookie: ${cookie.substring(0, 15)}...`);
+            $.msg("HDHive", "🎉 抓取成功", "Cookie 已保存，CSRF 将由脚本自动处理");
         }
     }
 }
 
 // ------------------------------------------
-// 2. 签到逻辑 (纯 Cookie 发包)
+// 2. 签到主流程
 // ------------------------------------------
-async function checkIn() {
+async function checkInLogic() {
     const cookie = $.getdata(KEY_COOKIE);
-    const csrf = $.getdata(KEY_CSRF);
-    const ua = $.getdata('hdhive_ua_v5') || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+    const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
 
-    if (!cookie || !csrf) {
-        $.msg("HDHive", "❌ 无法签到", "无 Cookie，请用浏览器登录 hdhive.com 并勾选[记住我]");
+    if (!cookie) {
+        $.msg("HDHive", "❌ 无法签到", "无 Cookie，请先用浏览器登录并勾选[记住我]");
         return;
     }
 
+    // 第一步：访问页面，动态提取最新的 CSRF
+    console.log("[HDHive] 正在动态获取新鲜 CSRF...");
+    const freshCsrf = await getFreshCsrf(cookie, ua);
+
+    if (!freshCsrf) {
+        $.msg("HDHive", "⚠️ 预处理失败", "Cookie 可能已失效，无法获取 CSRF");
+        return;
+    }
+
+    // 第二步：使用新鲜的 CSRF 进行签到
+    await doCheckIn(cookie, freshCsrf, ua);
+}
+
+// ------------------------------------------
+// 3. 动态获取 CSRF (核心黑科技)
+// ------------------------------------------
+async function getFreshCsrf(cookie, ua) {
+    return new Promise(resolve => {
+        const req = {
+            url: CFG.csrfUrl,
+            method: "GET",
+            headers: {
+                "Cookie": cookie,
+                "User-Agent": ua,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            }
+        };
+
+        $.get(req, (err, resp, data) => {
+            if (err || resp.status !== 200) {
+                console.log(`[HDHive] 获取 CSRF 失败，状态码: ${resp ? resp.status : 'Error'}`);
+                resolve(null);
+                return;
+            }
+
+            // 使用正则从 HTML 中提取 <meta name="csrf-token" content="...">
+            // 常见的 Laravel 写法
+            const metaPattern = /<meta\s+name=["']csrf-token["']\s+content=["'](.*?)["']/;
+            const match = data.match(metaPattern);
+
+            if (match && match[1]) {
+                const token = match[1];
+                console.log(`[HDHive] 成功提取 CSRF: ${token.substring(0, 10)}...`);
+                resolve(token);
+            } else {
+                console.log("[HDHive] 页面中未找到 csrf-token meta 标签");
+                // 备用方案：有时候 token 在 window.Laravel = { csrfToken: '...' }
+                const jsPattern = /csrfToken\s*:\s*["'](.*?)["']/;
+                const matchJs = data.match(jsPattern);
+                if (matchJs && matchJs[1]) {
+                    console.log(`[HDHive] 从 JS 中提取 CSRF 成功`);
+                    resolve(matchJs[1]);
+                } else {
+                    resolve(null);
+                }
+            }
+        });
+    });
+}
+
+// ------------------------------------------
+// 4. 执行签到请求
+// ------------------------------------------
+async function doCheckIn(cookie, csrf, ua) {
     const req = {
-        url: CFG.apiCheckin,
+        url: CFG.checkinUrl,
         method: "POST",
         headers: {
-            "accept": "application/json, text/plain, */*",
-            "x-csrf-token": csrf,
-            "origin": "https://hdhive.com",
-            "referer": "https://hdhive.com/user/dashboard",
-            "cookie": cookie,     // 核心凭证
-            "user-agent": ua      // 模拟来源
-            // 注意：这里绝对不能加 Authorization 头
+            "Accept": "application/json, text/plain, */*",
+            "X-Csrf-Token": csrf, // 使用刚提取的新鲜 Token
+            "Origin": CFG.origin,
+            "Referer": CFG.referer,
+            "Cookie": cookie,
+            "User-Agent": ua
         },
-        body: "" // 保持空 Body，符合 UserScript 逻辑
+        body: "" 
     };
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
         $.post(req, (err, resp, data) => {
             if (err) {
                 $.msg("HDHive", "❌ 网络错误", "请求失败");
-                console.log(err);
                 resolve();
                 return;
             }
 
-            // 解析响应
-            let isJson = false;
             let resJson = {};
-            try {
-                resJson = JSON.parse(data);
-                isJson = true;
-            } catch (e) {}
+            try { resJson = JSON.parse(data); } catch (e) {}
 
-            console.log(`[HDHive] 状态码: ${resp.status}`);
+            console.log(`[HDHive] 签到状态码: ${resp.status}`);
 
             if (resp.status === 200 || resp.status === 201) {
-                const msg = (isJson && resJson.message) ? resJson.message : "签到成功";
+                const msg = resJson.message || "签到成功";
                 $.msg("HDHive", "✅ 签到成功", msg);
                 console.log(`[HDHive] Success: ${data}`);
-            } else {
-                if (resp.status === 401 || resp.status === 419) {
-                    // 419 是 Laravel 特有的 CSRF 过期错误
-                    $.msg("HDHive", "⚠️ 会话失效", "Cookie/CSRF 已过期，请重新刷新网页");
-                } else if (resp.status === 400) {
-                    const msg = (isJson && resJson.message) ? resJson.message : "请求被拒绝(400)";
-                    $.msg("HDHive", "⚠️ 签到结果", msg);
+            } else if (resp.status === 400) {
+                const msg = resJson.message || "请求被拒绝";
+                if (msg.includes("已签到") || msg.includes("checked in")) {
+                    $.msg("HDHive", "🟢 今日已签到", msg);
                 } else {
-                    $.msg("HDHive", "❌ 签到失败", `状态码 ${resp.status}`);
+                    $.msg("HDHive", "⚠️ 签到结果(400)", msg);
                 }
+            } else if (resp.status === 419) {
+                // 如果这里还报 419，说明 Cookie 本身也废了
+                $.msg("HDHive", "⚠️ 彻底失效", "Cookie 已过期，请重新登录");
+            } else {
+                $.msg("HDHive", "❌ 签到失败", `状态码 ${resp.status}`);
             }
             resolve();
         });
@@ -127,8 +181,17 @@ async function checkIn() {
 }
 
 // ------------------------------------------
-// 工具类
+// 辅助函数
 // ------------------------------------------
+function getHeader(headers, key) {
+    if (!headers) return null;
+    const lowerKey = key.toLowerCase();
+    for (const k in headers) {
+        if (k.toLowerCase() === lowerKey) return headers[k];
+    }
+    return null;
+}
+
 function Env(name) {
     return {
         name: name,
@@ -138,6 +201,7 @@ function Env(name) {
             if (typeof $notification !== "undefined") $notification.post(t, s, b);
             console.log(`===${t}===\n${s}\n${b}`);
         },
+        get: (o, c) => typeof $httpClient !== "undefined" ? $httpClient.get(o, c) : null,
         post: (o, c) => typeof $httpClient !== "undefined" ? $httpClient.post(o, c) : null,
         logErr: (e) => console.log(`❗️${name} Error: ${e}`),
         done: () => typeof $done !== "undefined" ? $done({}) : null
