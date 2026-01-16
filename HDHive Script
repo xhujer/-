@@ -1,11 +1,9 @@
 /*
-HDHive 自动签到 (稳定修复版)
+HDHive 自动签到 (Loon 原生专用版)
 Update: 2026-01-16
 Author: ming
-Fix: 换回通用 Env 模块，解决 "Script Error" 和 "read undefined" 问题
+Desc: 去除了所有 Env 兼容层，直接调用 Loon API，彻底解决报错。
 */
-
-const $ = new Env("HDHive");
 
 // --- 变量定义 ---
 const KEY_COOKIE = 'hdhive_cookie_v12';
@@ -14,59 +12,58 @@ const KEY_UA = 'hdhive_ua_v12';
 const KEY_USER_ID = 'hdhive_uid_v1';
 const DOMAIN = 'hdhive.com';
 
-// 接口地址
 const API_CHECKIN = `https://${DOMAIN}/api/customer/user/checkin`;
 const API_LOGS = `https://${DOMAIN}/go-api/customer/points-logs?page=1&page_size=10`;
 
-// --- 主程序入口 ---
+// --- 主逻辑 ---
 (async () => {
+  // 判断是脚本运行还是 cron 运行
   if (typeof $request !== "undefined") {
     await captureCookie();
   } else {
-    await main();
+    await runCron();
   }
 })()
-  .catch((e) => $.logErr(e))
-  .finally(() => $.done());
+  .catch((e) => console.log(`❌ 脚本崩溃: ${e}`))
+  .finally(() => $done());
 
-// --- 核心逻辑 ---
-async function main() {
-  const cookie = $.getdata(KEY_COOKIE);
+async function runCron() {
+  const cookie = $persistentStore.read(KEY_COOKIE);
   if (!cookie) {
-    $.msg($.name, "❌ 无法执行", `未找到 Cookie，请先访问 ${DOMAIN} 登录`);
+    $notification.post("HDHive", "❌ 无法执行", `未找到 Cookie，请先访问 ${DOMAIN} 登录`);
     return;
   }
 
-  // 1. 执行签到
+  // 1. 签到
   const checkInResult = await doCheckIn(cookie);
-  
-  // 2. 尝试拉取日志（延迟 2 秒）
+
+  // 2. 只有成功或重复时，延迟拉取日志
   if (checkInResult.success || checkInResult.isRepeated) {
-     await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 2000));
   }
   const serverLogs = await fetchPointsLog(cookie);
 
-  // 3. 构建文案
+  // 3. 生成文案
   const finalContent = buildFinalContent(checkInResult, serverLogs);
-  
-  // 4. 发送通知
-  $.msg($.name, checkInResult.title, finalContent);
+
+  // 4. 通知
+  $notification.post("HDHive", checkInResult.title, finalContent);
+  console.log(`\n${checkInResult.title}\n${finalContent}`);
 }
 
-/**
- * 构建文案
- */
+// --- 功能函数 ---
+
 function buildFinalContent(checkInRes, serverLogs) {
   const logs = serverLogs || [];
   
-  // 获取 UserID
-  let userId = $.getdata(KEY_USER_ID) || "未知";
+  // 处理 UserID
+  let userId = $persistentStore.read(KEY_USER_ID) || "未知";
   if (logs.length > 0 && logs[0].user_id) {
     userId = logs[0].user_id;
-    $.setdata(String(userId), KEY_USER_ID);
+    $persistentStore.write(String(userId), KEY_USER_ID);
   }
 
-  // 构造“最新一条”记录
+  // 智能补全日志
   let currentLog = null;
   const isServerUpdated = logs.length > 0 && 
                           logs[0].change_type === "签到" && 
@@ -87,13 +84,8 @@ function buildFinalContent(checkInRes, serverLogs) {
   }
 
   const lines = [];
-  
-  // 第一行消息
-  const topMsg = checkInRes.raw_msg || checkInRes.message;
-  lines.push(topMsg); 
+  lines.push(checkInRes.raw_msg || checkInRes.message); 
   lines.push("");
-
-  // 详细信息
   lines.push(`用户ID：${userId}`);
   lines.push(`最近签到：${formatTime(currentLog.created_at)}`);
   lines.push(`本次获得：+${currentLog.points} 积分`);
@@ -101,7 +93,6 @@ function buildFinalContent(checkInRes, serverLogs) {
   lines.push("");
   lines.push("最近签到记录：");
 
-  // 列表
   logs.slice(0, 5).forEach(log => {
     const time = formatTime(log.created_at);
     const pts = log.points;
@@ -112,85 +103,53 @@ function buildFinalContent(checkInRes, serverLogs) {
   return lines.join("\n");
 }
 
-/**
- * 签到动作
- */
 async function doCheckIn(cookie) {
   const headers = buildHeaders(cookie);
   headers['Content-Type'] = 'application/json';
-  
-  const options = {
-    url: API_CHECKIN,
-    method: "POST",
-    headers: headers,
-    body: "{}"
-  };
 
   return new Promise(resolve => {
-    $.post(options, (err, resp, data) => {
-      try {
-        if (err) throw new Error("网络请求失败");
-        
-        // 兼容性处理：如果 data 是对象则直接用，如果是字符串则解析
-        let res = {};
-        if (typeof data === 'string') {
-            try { res = JSON.parse(data); } catch (e) { res = { message: data }; }
-        } else {
-            res = data || {};
-        }
+    $httpClient.post({
+      url: API_CHECKIN,
+      headers: headers,
+      body: "{}"
+    }, (error, response, data) => {
+      if (error) {
+        resolve({ success: false, points: 0, title: "❌ 网络错误", message: "请求失败", raw_msg: "Network Error" });
+        return;
+      }
+      
+      let res = {};
+      try { res = JSON.parse(data); } catch (e) { res = { message: data }; }
+      const msg = res.message || "";
+      const pointsMatch = msg.match(/(\d+)\s*积分/);
+      const gainedPoints = pointsMatch ? parseInt(pointsMatch[1], 10) : 0;
 
-        const msg = res.message || "";
-        const pointsMatch = msg.match(/(\d+)\s*积分/);
-        const gainedPoints = pointsMatch ? parseInt(pointsMatch[1], 10) : 0;
-
-        if (resp.status === 200 || resp.status === 201) {
-          resolve({ 
-            success: true, isRepeated: false, points: gainedPoints, 
-            title: "✅ 签到成功", message: msg, raw_msg: msg 
-          });
-        } else if (resp.status === 400) {
-          if (msg.includes("已经签到") || msg.includes("checked in")) {
-            resolve({ 
-              success: false, isRepeated: true, points: 0, 
-              title: "🟢 签到成功", message: msg, raw_msg: msg 
-            });
-          } else {
-            resolve({ success: false, points: 0, title: "⚠️ 签到失败", message: msg, raw_msg: msg });
-          }
-        } else if (resp.status === 401 || resp.status === 403) {
-           resolve({ success: false, points: 0, title: "🔴 Cookie 失效", message: "Token 已过期", raw_msg: "Token Invalid" });
+      if (response.status === 200 || response.status === 201) {
+        resolve({ success: true, isRepeated: false, points: gainedPoints, title: "✅ 签到成功", message: msg, raw_msg: msg });
+      } else if (response.status === 400) {
+        if (msg.includes("已经签到") || msg.includes("checked in")) {
+          resolve({ success: false, isRepeated: true, points: 0, title: "🟢 签到成功", message: msg, raw_msg: msg });
         } else {
-           resolve({ success: false, points: 0, title: "❌ 未知错误", message: msg, raw_msg: msg });
+          resolve({ success: false, points: 0, title: "⚠️ 签到失败", message: msg, raw_msg: msg });
         }
-      } catch (e) {
-        console.log("签到解析错误: " + e);
-        resolve({ success: false, points: 0, title: "❌ 脚本异常", message: e.message, raw_msg: "Script Error" });
+      } else if (response.status === 401 || response.status === 403) {
+        resolve({ success: false, points: 0, title: "🔴 Cookie 失效", message: "Token过期", raw_msg: "Token Invalid" });
+      } else {
+        resolve({ success: false, points: 0, title: "❌ 未知错误", message: msg, raw_msg: msg });
       }
     });
   });
 }
 
-/**
- * 拉取日志动作
- */
 async function fetchPointsLog(cookie) {
-  const options = {
-    url: API_LOGS,
-    method: "GET",
-    headers: buildHeaders(cookie)
-  };
-
   return new Promise(resolve => {
-    $.get(options, (err, resp, data) => {
-      if (err) { resolve([]); return; }
+    $httpClient.get({
+      url: API_LOGS,
+      headers: buildHeaders(cookie)
+    }, (error, response, data) => {
+      if (error) { resolve([]); return; }
       try {
-        let json = {};
-        if (typeof data === 'string') {
-           json = JSON.parse(data);
-        } else {
-           json = data;
-        }
-        
+        const json = JSON.parse(data);
         if (json && json.data && Array.isArray(json.data.list)) {
           resolve(json.data.list);
         } else {
@@ -201,12 +160,43 @@ async function fetchPointsLog(cookie) {
   });
 }
 
-// --- 辅助工具 ---
+async function captureCookie() {
+  const url = $request.url;
+  if (url.includes("/user/checkin") || url.includes("points-logs")) return;
+  
+  const h = $request.headers;
+  const cookie = h['Cookie'] || h['cookie'];
+  if (cookie && cookie.includes("token=")) {
+    const old = $persistentStore.read(KEY_COOKIE);
+    if (cookie !== old) {
+      $persistentStore.write(cookie, KEY_COOKIE);
+      const ua = h['User-Agent'] || h['user-agent'];
+      const ref = h['Referer'] || h['referer'];
+      if(ua) $persistentStore.write(ua, KEY_UA);
+      if(ref) $persistentStore.write(ref, KEY_REFERER);
+      $notification.post("HDHive", "🎉 Cookie 更新", "获取成功");
+    }
+  }
+}
+
+// --- 工具 ---
+function buildHeaders(cookie) {
+  const ua = $persistentStore.read(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+  const referer = $persistentStore.read(KEY_REFERER) || `https://${DOMAIN}/`;
+  const token = (cookie.match(/token=([^;]+)/) || [])[1] || "";
+  return { 
+    'User-Agent': ua, 
+    'Referer': referer, 
+    'Origin': `https://${DOMAIN}`, 
+    'Cookie': cookie, 
+    'Authorization': `Bearer ${token}` 
+  };
+}
+
 function getNowStr() {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60000;
-  const local = new Date(now.getTime() - offset);
-  return local.toISOString().replace("Z", "");
+  return new Date(now.getTime() - offset).toISOString().replace("Z", "");
 }
 
 function formatTime(isoStr) {
@@ -216,36 +206,5 @@ function formatTime(isoStr) {
 
 function isToday(isoStr) {
   if (!isoStr) return false;
-  const logDate = isoStr.slice(0, 10);
-  const nowDate = getNowStr().slice(0, 10);
-  return logDate === nowDate;
+  return isoStr.slice(0, 10) === getNowStr().slice(0, 10);
 }
-
-// Cookie 抓取
-async function captureCookie() {
-  const url = $request.url;
-  if (url.includes("/user/checkin") || url.includes("points-logs")) return;
-  const h = $request.headers;
-  const cookie = h['Cookie'] || h['cookie'];
-  if (cookie && cookie.includes("token=")) {
-    const old = $.getdata(KEY_COOKIE);
-    if (cookie !== old) {
-      $.setdata(cookie, KEY_COOKIE);
-      const ua = h['User-Agent'] || h['user-agent'];
-      const ref = h['Referer'] || h['referer'];
-      if(ua) $.setdata(ua, KEY_UA);
-      if(ref) $.setdata(ref, KEY_REFERER);
-      $.msg($.name, "🎉 Cookie 更新", "获取成功");
-    }
-  }
-}
-
-function buildHeaders(cookie) {
-  const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
-  const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/`;
-  const token = (cookie.match(/token=([^;]+)/) || [])[1] || "";
-  return { 'User-Agent': ua, 'Referer': referer, 'Origin': `https://${DOMAIN}`, 'Cookie': cookie, 'Authorization': `Bearer ${token}` };
-}
-
-// --- 通用兼容模块 (从 chavy/NobyDa 移植，最稳版本) ---
-function Env(t,e){"undefined"!=typeof process&&JSON.stringify(process.env).indexOf("GITHUB")>-1&&process.exit(0);class s{constructor(t){this.env=t}write(t,e){switch(this.env){case"Surge":return $persistentStore.write(t,e);case"Quantumult X":return $prefs.setValueForKey(t,e);case"Loon":return $persistentStore.write(t,e)}}read(t){switch(this.env){case"Surge":return $persistentStore.read(t);case"Quantumult X":return $prefs.valueForKey(t);case"Loon":return $persistentStore.read(t)}}delete(t){switch(this.env){case"Surge":return $persistentStore.write(null,t);case"Quantumult X":return $prefs.removeValueForKey(t);case"Loon":return $persistentStore.write(null,t)}}post(t,e=null){const s=e?{url:t,...e}:t;if(e&&e.body&&!s.body&&(s.body=e.body),"Loon"===this.env||"Surge"===this.env)$httpClient.post(s,(t,e,s)=>{e.body=s,e.statusCode=e.status,this.done(e)});else if("Quantumult X"===this.env){const t=require("config");t.method="POST",t.url=s.url,t.headers=s.headers,t.body=s.body,$task.fetch(t).then(t=>{t.status=t.statusCode,this.done(t)},t=>{this.done(null)})}}get(t,e=null){const s=e?{url:t,...e}:t;if("Loon"===this.env||"Surge"===this.env)$httpClient.get(s,(t,e,s)=>{e.body=s,e.statusCode=e.status,this.done(e)});else if("Quantumult X"===this.env){const t=require("config");t.method="GET",t.url=s.url,t.headers=s.headers,$task.fetch(t).then(t=>{t.status=t.statusCode,this.done(t)},t=>{this.done(null)})}}}return new class{constructor(t,s){this.name=t,this.http=new class{post(t){return new Promise((e,s)=>{new Env("Loon").post(t,(t,r,n)=>{t?s(t):e(r)})})}get(t){return new Promise((e,s)=>{new Env("Loon").get(t,(t,r,n)=>{t?s(t):e(r)})})}},this.data=null,this.dataFile="box.dat",this.logs=[],this.isSurge="undefined"!=typeof $httpClient&&"undefined"==typeof $loon,this.isQuantumultX="undefined"!=typeof $task,this.isLoon="undefined"!=typeof $loon,this.isNode="undefined"!=typeof module&&!!module.exports,this.logSeparator="\n"}getdata(t){if(this.isLoon||this.isSurge)return new Env("Loon").read(t);if(this.isQuantumultX)return new Env("Quantumult X").read(t)}setdata(t,e){if(this.isLoon||this.isSurge)return new Env("Loon").write(t,e);if(this.isQuantumultX)return new Env("Quantumult X").write(t,e)}msg(t,e,s){this.isLoon&&$notification.post(t,e,s),this.isSurge&&$notification.post(t,e,s),this.isQuantumultX&&$notify(t,e,s),this.logs.push(t,e,s)}log(t){console.log(t),this.logs.push(t)}logErr(t){console.log(t),this.logs.push(t)}done(t={}){const e=(new Date).getTime();this.isLoon||this.isSurge?$done(t):this.isQuantumultX&&$done(t)}}(t,e)}
