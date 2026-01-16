@@ -1,12 +1,11 @@
-#!name=HDHive 自动签到 (动态版)
-#!desc=v7.0 动态CSRF版：只需 Cookie 即可长久运行。自动抓取凭证，每日定时签到。
+#!name=HDHive 自动签到 
 #!author=ming
 #!icon=https://hdhive.com/favicon.ico
 #!homepage=https://hdhive.com/
 
 [Argument]
 RunTime = input,"0 6 * * *",tag=每日签到时间,desc=Cron表达式 (默认每天6点)
-CaptureCookie = switch,true,tag=[开关] 自动获取凭证,desc=开启后访问网页自动抓取 Cookie
+CaptureCookie = switch,true,tag=[开关] 获取Cookie,desc=开启后访问网页自动抓取 Cookie
 
 [Script]
 # 定时任务
