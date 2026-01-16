@@ -1,5 +1,5 @@
 #!name=HDHive 自动签到
-#!desc=v14.0 全能通知版：签到成功后显示 ID、等级、分享数、积分、累计签到及加入时间。
+#!desc=自动抓取Cookie并每日签到。
 #!author=ming
 #!icon=https://hdhive.com/favicon.ico
 #!homepage=https://hdhive.com/
