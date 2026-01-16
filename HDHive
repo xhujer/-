@@ -1,11 +1,11 @@
 /**
- * HDHive 自动签到 (1:1 严格复刻版)
- * 严格按照 UserScript 逻辑重写，解决 400 问题
+ * HDHive 自动签到 (v3.0 最终修复版)
+ * 修复了脚本提前结束导致无响应的问题
  */
 
 const $ = new Env("HDHive");
 
-// --- 1. 配置复刻 ---
+// 配置
 const CFG = {
     apiCheckin: 'https://hdhive.com/api/customer/user/checkin',
     watchApiPrefix: '/api/', 
@@ -22,7 +22,7 @@ const KEY_CSRF = 'hdhive_csrf';
     }
 })().catch((e) => $.logErr(e)).finally(() => $.done());
 
-// --- 2. 抓取逻辑 (复刻 stripBearer) ---
+// --- 抓取逻辑 ---
 async function captureToken() {
     const url = $request.url;
     if (url.indexOf("user/checkin") > -1) return;
@@ -32,35 +32,32 @@ async function captureToken() {
     const csrf = h['x-csrf-token'] || h['X-Csrf-Token'];
 
     if (auth && csrf) {
-        // [UserScript逻辑]：存入前去掉 Bearer
+        // 去掉 Bearer 前缀存储
         const rawToken = auth.replace(/^Bearer\s+/i, '').trim();
         const rawCsrf = csrf.trim();
-
         const storedToken = $.getdata(KEY_TOKEN);
         
         if (rawToken !== storedToken) {
             $.setdata(rawToken, KEY_TOKEN);
             $.setdata(rawCsrf, KEY_CSRF);
-            
-            console.log(`[HDHive] 捕获 Token: ${rawToken.substring(0, 10)}...`);
+            console.log(`[HDHive] 捕获新Token: ${rawToken.substring(0, 10)}...`);
             $.msg("HDHive", "🎉 抓取成功", "凭证已更新");
         }
     }
 }
 
-// --- 3. 签到逻辑 (复刻 Request) ---
+// --- 签到逻辑 (增加 Promise 等待) ---
 async function checkIn() {
     const token = $.getdata(KEY_TOKEN);
     const csrf = $.getdata(KEY_CSRF);
 
     if (!token || !csrf) {
-        $.msg("HDHive", "❌ 签到失败", "无凭证，请用浏览器重新登录 hdhive.com");
+        $.msg("HDHive", "❌ 签到失败", "无凭证，请先用浏览器访问 hdhive.com");
         return;
     }
 
-    // [UserScript逻辑]：使用时加上 Bearer
+    // 严格复刻 UserScript 请求构造
     const finalToken = `Bearer ${token}`;
-
     const req = {
         url: CFG.apiCheckin,
         method: "POST",
@@ -70,47 +67,51 @@ async function checkIn() {
             "x-csrf-token": csrf,
             "origin": "https://hdhive.com",
             "referer": "https://hdhive.com/user/dashboard"
-            // [关键修正]: UserScript 没有 Content-Type，这里也不加！
         },
-        // [关键修正]: UserScript 发送的是空字符串，不是 "{}"
-        body: "" 
+        body: "" // 空字符串 Body
     };
 
-    $.post(req, (err, resp, data) => {
-        if (err) {
-            $.msg("HDHive", "❌ 网络错误", "无法连接");
-            console.log(err);
-            return;
-        }
-
-        console.log(`[HDHive] 状态码: ${resp.status}`);
-        
-        // [UserScript逻辑]: 只要能解析JSON就算成功
-        let isJson = false;
-        let resJson = {};
-        try {
-            resJson = JSON.parse(data);
-            isJson = true;
-        } catch (e) {}
-
-        if (resp.status === 200 || resp.status === 201) {
-            // 如果解析出 message 就显示 message，否则显示通用成功
-            const msg = (isJson && resJson.message) ? resJson.message : "签到成功";
-            $.msg("HDHive", "✅ 签到成功", msg);
-        } else {
-            // 错误处理
-            if (resp.status === 401 || resp.status === 403) {
-                $.msg("HDHive", "⚠️ 凭证失效", "请重新登录网站");
-            } else {
-                const errMsg = (isJson && resJson.message) ? resJson.message : `状态码 ${resp.status}`;
-                $.msg("HDHive", "❌ 签到失败", errMsg);
-                console.log(`[HDHive] 响应体: ${data}`);
+    // [关键修复] 必须返回 Promise，让 await checkIn() 等待请求完成
+    return new Promise((resolve) => {
+        $.post(req, (err, resp, data) => {
+            if (err) {
+                $.msg("HDHive", "❌ 网络错误", "无法连接");
+                console.log(err);
+                resolve(); // 结束等待
+                return;
             }
-        }
+
+            console.log(`[HDHive] 状态码: ${resp.status}`);
+            
+            let isJson = false;
+            let resJson = {};
+            try {
+                resJson = JSON.parse(data);
+                isJson = true;
+            } catch (e) {}
+
+            if (resp.status === 200 || resp.status === 201) {
+                const msg = (isJson && resJson.message) ? resJson.message : "签到成功";
+                $.msg("HDHive", "✅ 签到成功", msg);
+                console.log(`[HDHive] 响应: ${data}`);
+            } else {
+                if (resp.status === 401 || resp.status === 403) {
+                    $.msg("HDHive", "⚠️ 凭证失效", "请重新登录网站");
+                } else if (resp.status === 400) {
+                     // 400 可能是"已签到"
+                    const msg = (isJson && resJson.message) ? resJson.message : "请求被拒绝(400)";
+                    $.msg("HDHive", "⚠️ 签到结果", msg);
+                    console.log(`[HDHive] 400详情: ${data}`);
+                } else {
+                    $.msg("HDHive", "❌ 签到失败", `状态码 ${resp.status}`);
+                }
+            }
+            resolve(); // 结束等待
+        });
     });
 }
 
-// --- Env 工具类 ---
+// --- Env ---
 function Env(name) {
     return {
         name: name,
