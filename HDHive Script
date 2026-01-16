@@ -1,7 +1,7 @@
 /*
 HDHive 自动签到 (定制格式版)
 Update: 2026-01-16
-Author: ming & Gemini
+Author: ming
 Features: 自动签到 + 主动拉取 + 严格指定文案格式
 */
 
@@ -58,7 +58,7 @@ async function main() {
 function buildFinalContent(checkInRes, serverLogs) {
   const logs = serverLogs || [];
   
-  // 尝试获取 UserID (从日志中拿，如果日志为空则无法获取)
+  // 尝试获取 UserID
   let userId = logs.length > 0 ? logs[0].user_id : "未知";
   
   // 构造“最新一条”数据
@@ -66,7 +66,6 @@ function buildFinalContent(checkInRes, serverLogs) {
   // 否则（服务器延迟），用当前签到结果构造一条假的，插在最前面。
   
   let currentLog = null;
-  const nowStr = formatTime(new Date().toISOString()); // 当前时间格式化
   
   // 简单的日期比对
   const isServerUpdated = logs.length > 0 && 
@@ -79,21 +78,22 @@ function buildFinalContent(checkInRes, serverLogs) {
   } else if (checkInRes.success) {
     // 情况B：服务器没更新，但刚才签到成功了 -> 手动构造
     currentLog = {
-      created_at: new Date().toISOString(), // 保持ISO格式供后续处理
+      created_at: new Date().toISOString(),
       points: checkInRes.points,
       remark: checkInRes.message.replace("服务端回应：", "") || "签到成功",
-      user_id: userId // 沿用旧ID
+      user_id: userId
     };
     // 把它插到数组头，用于下方列表展示
     logs.unshift(currentLog);
   } else {
-    // 情况C：没签到成功，也不是最新的，可能只是查看 -> 取旧的最新
+    // 情况C：没签到成功，也不是最新的 -> 取旧的最新
     currentLog = logs[0] || {};
   }
 
   // 格式化顶部信息
   const lines = [];
-  lines.push(checkInRes.message.replace("服务端回应：", "")); // "签到成功，获得 9 积分"
+  // 标题行：签到成功，获得 9 积分
+  lines.push(checkInRes.message.replace("服务端回应：", "")); 
   lines.push("");
   lines.push(`用户ID：${currentLog.user_id || userId}`);
   lines.push(`最近签到：${formatTime(currentLog.created_at)}`);
@@ -104,7 +104,6 @@ function buildFinalContent(checkInRes, serverLogs) {
 
   // 格式化列表 (取前5条)
   logs.slice(0, 5).forEach(log => {
-    // 过滤掉非签到数据（可选，根据你的需求，这里暂时全部显示）
     // 格式：- 2026-01-15 19:00:26：+10（签到成功，获得 10 积分）
     const time = formatTime(log.created_at);
     const pts = log.points;
@@ -195,23 +194,28 @@ async function fetchPointsLog(cookie) {
   });
 }
 
-// 辅助：时间格式化 2026-01-15T19:00:26+08:00 -> 2026-01-15 19:00:26
+// 辅助：时间格式化
 function formatTime(isoStr) {
   if (!isoStr) return "未知时间";
   return isoStr.replace("T", " ").replace(/\.\d+Z$/, "").replace(/\+\d{2}:\d{2}$/, "").substring(0, 19);
 }
 
-// 辅助：判断是否是今天 (UTC转本地粗略判断，或直接字符串比对)
+// 辅助：判断是否是今天
 function isToday(isoStr) {
   if (!isoStr) return false;
-  const logDate = new Date(isoStr).toISOString().slice(0, 10);
+  // 简单的UTC转本地日期截取 (兼容性处理)
+  // 为确保准确，这里直接比较“年月日”字符串，忽略时区细微差异，因为签到通常按服务器时间
+  // 如果需要极其严格的时区处理，可使用 new Date().toLocaleDateString
+  const logDate = isoStr.slice(0, 10);
   const nowDate = new Date().toISOString().slice(0, 10);
   return logDate === nowDate;
 }
 
 async function captureCookie() {
   const url = $request.url;
-  if (url.includes("/user/checkin")) return;
+  // 二次防护：排除API
+  if (url.includes("/user/checkin") || url.includes("/points-logs")) return;
+  
   const h = $request.headers;
   const cookie = h['Cookie'] || h['cookie'];
   if (cookie && cookie.includes("token=")) {
@@ -222,7 +226,7 @@ async function captureCookie() {
       const ref = h['Referer'] || h['referer'];
       if(ua) $.setdata(ua, KEY_UA);
       if(ref) $.setdata(ref, KEY_REFERER);
-      $.msg($.name, "🎉 Cookie 更新", "请关闭自动获取开关");
+      $.msg($.name, "🎉 Cookie 更新", "请关闭插件配置中的[自动获取]开关");
     }
   }
 }
