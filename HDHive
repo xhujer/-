@@ -1,24 +1,19 @@
 /**
- * HDHive 自动签到 (复刻油猴版 v2.2)
- * 基于用户提供的 UserScript 逻辑重写
- * 1. 抓取逻辑同步：监控 /api/ 下的所有请求
- * 2. Token处理同步：确保存储和使用时格式正确
- * 3. 修复 400 错误：模拟油猴的请求体格式
+ * HDHive 自动签到 (1:1 严格复刻版)
+ * 严格按照 UserScript 逻辑重写，解决 400 问题
  */
 
 const $ = new Env("HDHive");
 
-// --- 配置区域 (复刻 UserScript) ---
+// --- 1. 配置复刻 ---
 const CFG = {
     apiCheckin: 'https://hdhive.com/api/customer/user/checkin',
-    // 监听所有 /api/ 请求，和油猴脚本保持一致
     watchApiPrefix: '/api/', 
 };
 
 const KEY_TOKEN = 'hdhive_token';
 const KEY_CSRF = 'hdhive_csrf';
 
-// --- 入口 ---
 (async () => {
     if (typeof $request !== "undefined") {
         await captureToken();
@@ -27,81 +22,70 @@ const KEY_CSRF = 'hdhive_csrf';
     }
 })().catch((e) => $.logErr(e)).finally(() => $.done());
 
-// --- 核心逻辑 1: 抓取 (Capture) ---
+// --- 2. 抓取逻辑 (复刻 stripBearer) ---
 async function captureToken() {
     const url = $request.url;
-    
-    // 过滤掉签到接口本身，防止死循环
     if (url.indexOf("user/checkin") > -1) return;
 
     const h = $request.headers;
-    // 兼容大小写
     const auth = h['Authorization'] || h['authorization'];
     const csrf = h['x-csrf-token'] || h['X-Csrf-Token'];
 
     if (auth && csrf) {
-        // 油猴逻辑：stripBearer (去掉Bearer前缀)
-        // Loon逻辑：为了方便，我们直接存完整的，但在使用时会检查
-        const storedAuth = $.getdata(KEY_TOKEN);
+        // [UserScript逻辑]：存入前去掉 Bearer
+        const rawToken = auth.replace(/^Bearer\s+/i, '').trim();
+        const rawCsrf = csrf.trim();
+
+        const storedToken = $.getdata(KEY_TOKEN);
         
-        if (auth !== storedAuth) {
-            $.setdata(auth, KEY_TOKEN);
-            $.setdata(csrf, KEY_CSRF);
+        if (rawToken !== storedToken) {
+            $.setdata(rawToken, KEY_TOKEN);
+            $.setdata(rawCsrf, KEY_CSRF);
             
-            // 打印日志
-            console.log(`[HDHive] 捕获新凭证:\nURL: ${url}\nToken: ${auth.substring(0, 15)}...`);
-            $.msg("HDHive", "🎉 抓取成功", "凭证已更新，请等待定时签到");
+            console.log(`[HDHive] 捕获 Token: ${rawToken.substring(0, 10)}...`);
+            $.msg("HDHive", "🎉 抓取成功", "凭证已更新");
         }
     }
 }
 
-// --- 核心逻辑 2: 签到 (Check-in) ---
+// --- 3. 签到逻辑 (复刻 Request) ---
 async function checkIn() {
-    let token = $.getdata(KEY_TOKEN);
+    const token = $.getdata(KEY_TOKEN);
     const csrf = $.getdata(KEY_CSRF);
 
     if (!token || !csrf) {
-        $.msg("HDHive", "❌ 签到失败", "未检测到凭证，请先用浏览器访问 hdhive.com");
+        $.msg("HDHive", "❌ 签到失败", "无凭证，请用浏览器重新登录 hdhive.com");
         return;
     }
 
-    // [关键修正] 确保 Token 格式正确
-    // 如果抓到的 Token 没有 Bearer 前缀，手动加上 (模拟油猴的 headers: { authorization: Bearer ${token} })
-    if (!token.toLowerCase().startsWith("bearer ")) {
-        token = "Bearer " + token;
-    }
+    // [UserScript逻辑]：使用时加上 Bearer
+    const finalToken = `Bearer ${token}`;
 
-    // [关键修正] 模拟油猴的请求配置
-    // 油猴源码: data: '' (空字符串)
-    // 之前的 Loon: body: "{}" (可能导致 400)
     const req = {
         url: CFG.apiCheckin,
         method: "POST",
         headers: {
             "accept": "application/json, text/plain, */*",
-            "authorization": token,
+            "authorization": finalToken,
             "x-csrf-token": csrf,
             "origin": "https://hdhive.com",
-            "referer": "https://hdhive.com/user/dashboard",
-            // 显式声明 JSON，以防服务器对空 body 敏感
-            "Content-Type": "application/json" 
+            "referer": "https://hdhive.com/user/dashboard"
+            // [关键修正]: UserScript 没有 Content-Type，这里也不加！
         },
-        // 尝试发送空对象，符合大多数 API 规范
-        body: "{}" 
+        // [关键修正]: UserScript 发送的是空字符串，不是 "{}"
+        body: "" 
     };
 
     $.post(req, (err, resp, data) => {
         if (err) {
-            $.msg("HDHive", "❌ 网络错误", "请求失败");
+            $.msg("HDHive", "❌ 网络错误", "无法连接");
             console.log(err);
             return;
         }
 
         console.log(`[HDHive] 状态码: ${resp.status}`);
-        console.log(`[HDHive] 响应体: ${data}`);
-
-        // 油猴逻辑: const ok = !!safeJson(res.responseText)
-        // 只要能解析 JSON 就算成功
+        
+        // [UserScript逻辑]: 只要能解析JSON就算成功
         let isJson = false;
         let resJson = {};
         try {
@@ -110,24 +94,23 @@ async function checkIn() {
         } catch (e) {}
 
         if (resp.status === 200 || resp.status === 201) {
+            // 如果解析出 message 就显示 message，否则显示通用成功
             const msg = (isJson && resJson.message) ? resJson.message : "签到成功";
             $.msg("HDHive", "✅ 签到成功", msg);
         } else {
-            // 处理错误
+            // 错误处理
             if (resp.status === 401 || resp.status === 403) {
-                $.msg("HDHive", "⚠️ 凭证失效", "Token 已过期，请重新登录");
-            } else if (resp.status === 400) {
-                // 如果还是 400，说明可能已经签到了，或者 Body 格式依然有问题
-                const msg = (isJson && resJson.message) ? resJson.message : "请求被拒绝";
-                $.msg("HDHive", "⚠️ 签到失败 (400)", msg);
+                $.msg("HDHive", "⚠️ 凭证失效", "请重新登录网站");
             } else {
-                $.msg("HDHive", "❌ 异常", `Status: ${resp.status}`);
+                const errMsg = (isJson && resJson.message) ? resJson.message : `状态码 ${resp.status}`;
+                $.msg("HDHive", "❌ 签到失败", errMsg);
+                console.log(`[HDHive] 响应体: ${data}`);
             }
         }
     });
 }
 
-// --- Env Helper ---
+// --- Env 工具类 ---
 function Env(name) {
     return {
         name: name,
