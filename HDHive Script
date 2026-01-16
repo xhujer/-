@@ -1,11 +1,12 @@
 /**
- * HDHive 自动签到 (v14.0 全能通知版)
- * 功能：签到后提取 7 项核心数据，严格按照用户要求的格式推送通知
+ * HDHive 自动签到 (v14.1 接口修正版)
+ * 修复：尝试使用新的用户信息接口 /api/customer/user
+ * 优化：如果获取信息失败，不再报错，而是降级显示基础签到通知
  */
 
 const $ = new Env("HDHive");
 
-const KEY_COOKIE = 'hdhive_cookie_v14'; // 升级 Key 以隔离旧数据
+const KEY_COOKIE = 'hdhive_cookie_v14'; 
 const KEY_REFERER = 'hdhive_referer_v14'; 
 const KEY_UA = 'hdhive_ua_v14';
 const DOMAIN = 'hdhive.com';
@@ -37,7 +38,7 @@ async function capture() {
             $.setdata(cookie, KEY_COOKIE);
             if (ua) $.setdata(ua, KEY_UA);
             if (referer) $.setdata(referer, KEY_REFERER);
-            $.msg("HDHive", "🎉 抓取成功", "Cookie已更新，下次签到显示详细面板");
+            $.msg("HDHive", "🎉 抓取成功", "Cookie已更新");
         }
     }
 }
@@ -55,7 +56,7 @@ async function main() {
     // 1. 签到
     const checkInRes = await doCheckIn(rawCookie);
     
-    // 2. 获取详细信息 (只要凭证没过期就去查)
+    // 2. 获取详细信息 (仅当凭证有效时)
     let info = null;
     if (checkInRes.status !== 'expired') {
         info = await getUserInfo(rawCookie);
@@ -106,7 +107,6 @@ async function doCheckIn(rawCookie) {
             const msg = resJson.message || "";
             const status = resp.status;
 
-            // 提取获得积分
             let earned = 0;
             const match = msg.match(/获得\s*(\d+)\s*积分/);
             if (match) earned = match[1];
@@ -129,15 +129,16 @@ async function doCheckIn(rawCookie) {
 }
 
 // ------------------------------------------
-// 4. 获取详细用户信息 (7项数据)
+// 4. 获取详细用户信息 (接口修正)
 // ------------------------------------------
 async function getUserInfo(rawCookie) {
     const ua = $.getdata(KEY_UA);
     const cookieObj = parseCookie(rawCookie);
     const token = cookieObj['token'];
 
+    // 【修正点】尝试去除 /info 后缀
     const req = {
-        url: `https://${DOMAIN}/api/customer/user/info`,
+        url: `https://${DOMAIN}/api/customer/user`,
         method: "GET",
         headers: {
             'User-Agent': ua,
@@ -149,28 +150,26 @@ async function getUserInfo(rawCookie) {
 
     return new Promise(resolve => {
         $.get(req, (err, resp, data) => {
+            // 如果出错，只记录日志，不影响主流程
             if (err || resp.status !== 200) {
-                console.log(`[HDHive] 获取信息失败: ${data}`);
+                console.log(`[HDHive] 获取信息API失败(Code ${resp ? resp.status : 'ERR'}): ${data}`);
                 resolve(null);
                 return;
             }
             try {
                 const json = JSON.parse(data);
-                const d = json.data || json; // 兼容不同结构
+                const d = json.data || json; 
 
-                // 尝试提取数据，如果没有则显示默认值
+                // 打印数据结构以便调试
+                // console.log(`[HDHive] UserData: ${JSON.stringify(d)}`);
+
                 return resolve({
                     name: d.username || d.name || "未知",
                     id: d.id || "未知",
-                    // 尝试从 group 或 level 字段获取等级名称
-                    level: (d.group ? d.group.name : "") || d.level_name || d.class_name || "普通用户",
-                    // 分享/发布数量
+                    level: (d.group ? d.group.name : "") || d.level_name || "普通用户",
                     share: d.share_count || d.publish_count || d.uploads || 0,
-                    // 当前积分
-                    integral: d.integral || d.points || d.total_points || 0,
-                    // 累计签到
-                    checkins: d.checkin_count || d.total_checkin || d.sign_count || 0,
-                    // 加入时间 (只截取日期部分)
+                    integral: d.integral || d.points || d.balance || 0,
+                    checkins: d.checkin_count || d.total_checkin || 0,
                     join: (d.created_at || d.join_time || "未知").substring(0, 10)
                 });
             } catch (e) {
@@ -188,15 +187,13 @@ function sendNotification(res, info) {
     let title = "HDHive 签到日报";
     let body = "";
 
-    // 1. 设置标题状态
     if (res.status === 'success') title = "✅ HDHive 签到成功";
     else if (res.status === 'repeat') title = "🟢 HDHive 今日已签";
     else if (res.status === 'expired') title = "🔴 HDHive 凭证过期";
     else title = "⚠️ HDHive 签到异常";
 
-    // 2. 构造正文 (严格按照用户要求格式)
+    // 如果成功获取到了信息，显示详细面板
     if (info) {
-        // 如果今日有收益，在积分后面标注
         const earnedStr = res.earned > 0 ? ` (+${res.earned})` : "";
         
         body += `用户名称：${info.name}\n`;
@@ -207,8 +204,11 @@ function sendNotification(res, info) {
         body += `累计签到：${info.checkins}\n`;
         body += `加入时间：${info.join}`;
     } else {
-        // 如果获取信息失败，只显示签到结果
-        body = `签到状态：${res.msg}\n无法获取详细用户信息，请检查日志。`;
+        // 降级显示：只显示签到结果，不显示报错信息，保持美观
+        body = `签到状态：${res.msg}`;
+        if (res.status === 'success' || res.status === 'repeat') {
+            body += `\n(暂无法获取积分详情，但签到已完成)`;
+        }
     }
 
     $.msg(title, "", body);
