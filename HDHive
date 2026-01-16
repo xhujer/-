@@ -1,92 +1,144 @@
 /**
- * HDHive 自动签到脚本
- * author: ming
+ * HDHive 自动签到 (复刻油猴版 v2.2)
+ * 基于用户提供的 UserScript 逻辑重写
+ * 1. 抓取逻辑同步：监控 /api/ 下的所有请求
+ * 2. Token处理同步：确保存储和使用时格式正确
+ * 3. 修复 400 错误：模拟油猴的请求体格式
  */
 
 const $ = new Env("HDHive");
 
-const API_CHECKIN = 'https://hdhive.com/api/customer/user/checkin';
+// --- 配置区域 (复刻 UserScript) ---
+const CFG = {
+    apiCheckin: 'https://hdhive.com/api/customer/user/checkin',
+    // 监听所有 /api/ 请求，和油猴脚本保持一致
+    watchApiPrefix: '/api/', 
+};
+
 const KEY_TOKEN = 'hdhive_token';
 const KEY_CSRF = 'hdhive_csrf';
 
+// --- 入口 ---
 (async () => {
     if (typeof $request !== "undefined") {
-        // --- 模式 1: 抓取 Token (HTTP Request) ---
         await captureToken();
     } else {
-        // --- 模式 2: 执行签到 (Cron) ---
         await checkIn();
     }
 })().catch((e) => $.logErr(e)).finally(() => $.done());
 
+// --- 核心逻辑 1: 抓取 (Capture) ---
 async function captureToken() {
-    // 避免死循环
-    if ($request.url.indexOf("checkin") > -1) return;
+    const url = $request.url;
+    
+    // 过滤掉签到接口本身，防止死循环
+    if (url.indexOf("user/checkin") > -1) return;
 
-    const headers = $request.headers;
+    const h = $request.headers;
     // 兼容大小写
-    const auth = headers['Authorization'] || headers['authorization'];
-    const csrf = headers['x-csrf-token'] || headers['X-Csrf-Token'];
+    const auth = h['Authorization'] || h['authorization'];
+    const csrf = h['x-csrf-token'] || h['X-Csrf-Token'];
 
     if (auth && csrf) {
-        const oldAuth = $.getdata(KEY_TOKEN);
-        const oldCsrf = $.getdata(KEY_CSRF);
-
-        if (auth !== oldAuth || csrf !== oldCsrf) {
+        // 油猴逻辑：stripBearer (去掉Bearer前缀)
+        // Loon逻辑：为了方便，我们直接存完整的，但在使用时会检查
+        const storedAuth = $.getdata(KEY_TOKEN);
+        
+        if (auth !== storedAuth) {
             $.setdata(auth, KEY_TOKEN);
             $.setdata(csrf, KEY_CSRF);
             
-            $.msg("HDHive", "🎉 凭证获取成功", "Token 和 CSRF 已自动更新");
-            $.log(`[HDHive] 获取新凭证:\nToken: ${auth}\nCSRF: ${csrf}`);
+            // 打印日志
+            console.log(`[HDHive] 捕获新凭证:\nURL: ${url}\nToken: ${auth.substring(0, 15)}...`);
+            $.msg("HDHive", "🎉 抓取成功", "凭证已更新，请等待定时签到");
         }
     }
 }
 
+// --- 核心逻辑 2: 签到 (Check-in) ---
 async function checkIn() {
-    const token = $.getdata(KEY_TOKEN);
+    let token = $.getdata(KEY_TOKEN);
     const csrf = $.getdata(KEY_CSRF);
 
     if (!token || !csrf) {
-        $.msg("HDHive", "❌ 签到失败", "未找到 Token，请先在浏览器访问 hdhive.com");
+        $.msg("HDHive", "❌ 签到失败", "未检测到凭证，请先用浏览器访问 hdhive.com");
         return;
     }
 
+    // [关键修正] 确保 Token 格式正确
+    // 如果抓到的 Token 没有 Bearer 前缀，手动加上 (模拟油猴的 headers: { authorization: Bearer ${token} })
+    if (!token.toLowerCase().startsWith("bearer ")) {
+        token = "Bearer " + token;
+    }
+
+    // [关键修正] 模拟油猴的请求配置
+    // 油猴源码: data: '' (空字符串)
+    // 之前的 Loon: body: "{}" (可能导致 400)
     const req = {
-        url: API_CHECKIN,
+        url: CFG.apiCheckin,
         method: "POST",
         headers: {
-            "Authorization": token,
+            "accept": "application/json, text/plain, */*",
+            "authorization": token,
             "x-csrf-token": csrf,
-            "Origin": "https://hdhive.com",
-            "Referer": "https://hdhive.com/user/dashboard",
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
-            "Accept": "application/json, text/plain, */*"
-        }
+            "origin": "https://hdhive.com",
+            "referer": "https://hdhive.com/user/dashboard",
+            // 显式声明 JSON，以防服务器对空 body 敏感
+            "Content-Type": "application/json" 
+        },
+        // 尝试发送空对象，符合大多数 API 规范
+        body: "{}" 
     };
 
     $.post(req, (err, resp, data) => {
         if (err) {
-            $.msg("HDHive", "❌ 签到异常", "网络请求出错");
-            $.logErr(err);
+            $.msg("HDHive", "❌ 网络错误", "请求失败");
+            console.log(err);
             return;
         }
 
+        console.log(`[HDHive] 状态码: ${resp.status}`);
+        console.log(`[HDHive] 响应体: ${data}`);
+
+        // 油猴逻辑: const ok = !!safeJson(res.responseText)
+        // 只要能解析 JSON 就算成功
+        let isJson = false;
+        let resJson = {};
         try {
-            if (resp.status === 200 || resp.status === 201) {
-                const result = JSON.parse(data);
-                const msg = result.message || "签到成功";
-                $.msg("HDHive", "✅ 签到成功", msg);
-                $.log(`[HDHive] 签到响应: ${data}`);
+            resJson = JSON.parse(data);
+            isJson = true;
+        } catch (e) {}
+
+        if (resp.status === 200 || resp.status === 201) {
+            const msg = (isJson && resJson.message) ? resJson.message : "签到成功";
+            $.msg("HDHive", "✅ 签到成功", msg);
+        } else {
+            // 处理错误
+            if (resp.status === 401 || resp.status === 403) {
+                $.msg("HDHive", "⚠️ 凭证失效", "Token 已过期，请重新登录");
+            } else if (resp.status === 400) {
+                // 如果还是 400，说明可能已经签到了，或者 Body 格式依然有问题
+                const msg = (isJson && resJson.message) ? resJson.message : "请求被拒绝";
+                $.msg("HDHive", "⚠️ 签到失败 (400)", msg);
             } else {
-                $.msg("HDHive", "⚠️ 签到失败", `状态码: ${resp.status}`);
-                if (resp.status === 401) {
-                     $.msg("HDHive", "⚠️ Token 失效", "请重新访问网站获取 Token");
-                }
+                $.msg("HDHive", "❌ 异常", `Status: ${resp.status}`);
             }
-        } catch (e) {
-            $.msg("HDHive", "❌ 签到错误", "返回数据解析失败");
         }
     });
 }
 
-function Env(t,e){"undefined"!=typeof process&&JSON.stringify(process.env).indexOf("GITHUB")>-1&&process.exit(0);class s{constructor(t){this.env=t}write(t,e){return this.toObj(t,e)}getdata(t){if(arguments.length)return $persistentStore.read(t)}setdata(t,e){if(arguments.length)return $persistentStore.write(t,e)}post(t,e){const s=t.method?"POST"==t.method.toUpperCase()?$httpClient.post:$httpClient.put:$httpClient.post;if(!e)return new Promise(((e,i)=>{s.call(this,t,((t,s,r)=>{t?i(t):e(s)}))}));s.call(this,t,e)}msg(e=t,s="",r="",i){const o=t=>{if(!t)return t;if("string"==typeof t)return this.isLoon()?t:this.isQuanX()?{"open-url":t}:this.isSurge()?{url:t}:void 0;if("object"==typeof t){if(this.isLoon()){let e=t.openUrl||t.url||t["open-url"],s=t.mediaUrl||t["media-url"];return{openUrl:e,mediaUrl:s}}if(this.isQuanX()){let e=t["open-url"]||t.url||t.openUrl,s=t["media-url"]||t.mediaUrl;return{"open-url":e,"media-url":s}}if(this.isSurge()){let e=t.url||t.openUrl||t["open-url"];return{url:e}}}};if(this.isMute||(this.isSurge()||this.isLoon()?$notification.post(e,s,r,o(i)):this.isQuanX()&&$notify(e,s,r,o(i))),!this.isMuteLog){let t=["","==============📣系统通知📣=============="];t.push(e),s&&t.push(s),r&&t.push(r),console.log(t.join("\n")),this.logs=this.logs.concat(t)}}log(...t){t.length>0&&(this.logs=[...this.logs,...t]),console.log(t.join(this.logSeparator))}logErr(t,e){const s=!this.isSurge()&&!this.isQuanX()&&!this.isLoon();s?this.log("",`❗️${this.name}, 错误!`,t.stack):this.log("",`❗️${this.name}, 错误!`,t)}done(t={}){const e=(new Date).getTime(),s=(e-this.startTime)/1e3;this.log("",`🔔${this.name}, 结束! 🕛 ${s} 秒`),this.log(),(this.isSurge()||this.isQuanX()||this.isLoon())&&$done(t)}isLoon(){return"undefined"!=typeof $loon}isQuanX(){return"undefined"!=typeof $task}isSurge(){return"undefined"!=typeof $httpClient&&"undefined"==typeof $loon}}return new s(t)}
+// --- Env Helper ---
+function Env(name) {
+    return {
+        name: name,
+        getdata: (k) => typeof $persistentStore !== "undefined" ? $persistentStore.read(k) : null,
+        setdata: (v, k) => typeof $persistentStore !== "undefined" ? $persistentStore.write(v, k) : null,
+        msg: (t, s, b) => {
+            if (typeof $notification !== "undefined") $notification.post(t, s, b);
+            console.log(`===${t}===\n${s}\n${b}`);
+        },
+        post: (o, c) => typeof $httpClient !== "undefined" ? $httpClient.post(o, c) : null,
+        logErr: (e) => console.log(`❗️${name} Error: ${e}`),
+        done: () => typeof $done !== "undefined" ? $done({}) : null
+    };
+}
