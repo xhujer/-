@@ -1,19 +1,13 @@
 /*
- * Linux.Do 助手 for Loon
- * 功能：
- * 1. 自动抓取 Cookie (需手动访问一次 https://linux.do)
- * 2. 每日访问保持活跃
- * 3. 查询 Connect 达标情况
- * * 使用方法：
- * 1. 配置好插件。
- * 2. 确保 MitM 开启并包含 hostname = linux.do
- * 3. Safari 打开 https://linux.do 并登录，等待顶部弹出“Cookie获取成功”。
+ * Linux.Do 增强版 (修复 403 问题)
+ * 使用方法：
+ * 1. 复制此代码到 Loon 本地脚本。
+ * 2. 浏览器访问 https://linux.do 获取 Cookie。
  */
 
 const $ = new Env("Linux.Do");
 const CK_KEY = "linuxdo_cookie";
 
-// 脚本入口
 (async () => {
     if (typeof $request !== "undefined") {
         getCookie();
@@ -23,101 +17,77 @@ const CK_KEY = "linuxdo_cookie";
     $.done();
 })();
 
-// 1. 获取 Cookie
 function getCookie() {
     if ($request.headers) {
-        // Loon 的 header key 可能是小写
         const cookie = $request.headers["Cookie"] || $request.headers["cookie"];
+        // 只有包含关键 session 字段才保存
         if (cookie && cookie.includes("_forum_session")) {
             $.write(cookie, CK_KEY);
-            $.notify("Linux.Do", "✅ Cookie 获取成功", "您的会话已保存，脚本将以此身份运行。");
+            $.notify("Linux.Do", "✅ Cookie 更新成功", "请手动运行一次脚本测试");
         }
     }
 }
 
-// 2. 签到与查询流程
 async function checkIn() {
     const cookie = $.read(CK_KEY);
     if (!cookie) {
-        $.notify("Linux.Do", "❌ 失败", "未找到 Cookie，请先在浏览器访问 linux.do 进行获取。");
+        $.notify("Linux.Do", "❌ 未找到 Cookie", "请使用 Safari 访问并登录 linux.do");
         return;
     }
 
-    // 步骤1：访问主页 (模拟活跃)
-    await httpRequest("GET", "https://linux.do/", cookie);
-    
-    // 步骤2：访问 Connect 页面获取数据
-    const connectData = await httpRequest("GET", "https://connect.linux.do/", cookie);
-    
-    if (connectData) {
-        const info = parseConnectInfo(connectData);
-        if (info) {
-            const notifySwitch = $.getArgument("Notify_Enable") !== "false";
-            if (notifySwitch) {
-                $.notify("Linux.Do 每日统计", info.status, info.detail);
-            }
-            console.log(`\n${info.status}\n${info.detail}`);
+    // 伪装成 iOS Safari 17
+    const headers = {
+        "Cookie": cookie,
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+        "Referer": "https://linux.do/",
+        "Origin": "https://linux.do",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh-Hans;q=0.9"
+    };
+
+    const url = "https://connect.linux.do/";
+
+    const options = {
+        url: url,
+        headers: headers,
+        timeout: 15 // 增加超时时间
+    };
+
+    $httpClient.get(options, (err, resp, data) => {
+        if (err) {
+            console.log("请求失败: " + err);
+            $.notify("Linux.Do", "❌ 请求失败", "网络错误，请检查节点");
+        } else if (resp.status === 403) {
+            console.log("403 Forbidden - 详细 Headers: " + JSON.stringify(headers));
+            $.notify("Linux.Do", "🚫 403 拒绝访问", "Cookie失效 或 IP被盾。请尝试：\n1. 切换节点\n2. 重新登录网页获取Cookie");
+        } else if (resp.status !== 200) {
+            $.notify("Linux.Do", "❌ 异常状态", `状态码: ${resp.status}`);
         } else {
-            $.notify("Linux.Do", "⚠️ 数据解析失败", "无法获取 Connect 信息，Cookie 可能已过期。");
-        }
-    }
-}
-
-// 辅助：HTTP 请求
-function httpRequest(method, url, cookie) {
-    return new Promise((resolve) => {
-        const options = {
-            url: url,
-            headers: {
-                "Cookie": cookie,
-                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
-            }
-        };
-
-        $httpClient.get(options, (err, resp, data) => {
-            if (err) {
-                console.log(`请求失败: ${url} - ${err}`);
-                resolve(null);
+            // 解析数据
+            const info = parseConnectInfo(data);
+            if (info) {
+                $.notify("Linux.Do 状态", info.status, info.detail);
+                console.log("成功获取数据");
             } else {
-                if (resp.status === 200) {
-                    resolve(data);
-                } else {
-                    console.log(`请求非200: ${resp.status}`);
-                    resolve(null);
-                }
+                $.notify("Linux.Do", "⚠️ 解析失败", "网页结构可能已变更或Cookie过期");
             }
-        });
+        }
+        $.done();
     });
 }
 
-// 辅助：解析 HTML 表格 (正则提取核心数据)
 function parseConnectInfo(html) {
     try {
-        // 简单正则提取，防止引入 heavy 库
-        // 提取 50天内登录
-        const loginMatch = html.match(/50天内登录.*?(\d+).*?(\d+)/s);
-        // 提取 帖子回复
-        const replyMatch = html.match(/帖子回复.*?(\d+).*?(\d+)/s);
-        // 提取 获得点赞
-        const likeMatch = html.match(/获得点赞.*?(\d+).*?(\d+)/s);
-        // 提取 进入读帖
-        const readMatch = html.match(/进入读帖.*?(\d+).*?(\d+)/s);
+        // 宽松正则匹配，防止网页微调导致失败
+        let login = html.match(/50天内登录[\s\S]*?(\d+)\s*\/\s*(\d+)/);
+        let reply = html.match(/帖子回复[\s\S]*?(\d+)/);
+        let like = html.match(/获得点赞[\s\S]*?(\d+)/);
+        let read = html.match(/进入读帖[\s\S]*?(\d+)/);
 
-        if (loginMatch && replyMatch) {
-            const loginCur = loginMatch[1].trim();
-            const loginReq = loginMatch[2].trim();
-            
-            const replyCur = replyMatch[1].trim();
-            const likeCur = likeMatch ? likeMatch[1].trim() : "0";
-            const readCur = readMatch ? readMatch[1].trim() : "0";
-
-            let msg = `📅 登录: ${loginCur}/${loginReq} 天\n`;
-            msg += `💬 回复: ${replyCur} | ❤️ 获赞: ${likeCur}\n`;
-            msg += `📖 读帖: ${readCur} 贴`;
-            
+        if (login) {
             return {
-                status: "✅ 数据获取成功",
-                detail: msg
+                status: "✅ 活跃检测通过",
+                detail: `📅 登录: ${login[1]}/${login[2]} 天\n💬 回复: ${reply ? reply[1] : 0} | ❤️ 获赞: ${like ? like[1] : 0}\n📖 读帖: ${read ? read[1] : 0}`
             };
         }
         return null;
@@ -127,20 +97,13 @@ function parseConnectInfo(html) {
     }
 }
 
-// 辅助：Loon/Surge/QX 兼容类 (简版)
+// 兼容层
 function Env(t) {
     return {
         name: t,
         read: (key) => $persistentStore.read(key),
         write: (val, key) => $persistentStore.write(val, key),
         notify: (title, subtitle, content) => $notification.post(title, subtitle, content),
-        getArgument: (key) => {
-            if (typeof $argument !== "undefined") {
-                // 简单的参数解析，实际 Loon 可以直接获取
-                return $argument; 
-            }
-            return null;
-        },
         done: () => $done()
     };
 }
