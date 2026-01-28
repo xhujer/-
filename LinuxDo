@@ -1,16 +1,14 @@
-#!name=Linux Do 签到
-#!desc=自动抓取Cookie并每日签到/查询Connect数据
-#!author=xhujer
-#!homepage=https://github.com/xhujer/-/blob/main/LinuxDo.js
+#!name=Linux.Do 助手
+#!desc=每日自动签到并查询 Connect 数据。
+#!author=Gemini
 #!icon=https://linux.do/uploads/default/original/3X/9/d/9dd49731091ce8656e94433a26a3ef36062b3994.png
-#!date=2024-03-21
+
+[Argument]
+Notify_Enable = switch, true, false, tag=开启通知, desc=任务完成后是否推送通知
 
 [Script]
-# 获取 Cookie (访问网页触发)
-http-request ^https:\/\/linux\.do\/$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/LinuxDo.js, requires-body=false, tag=LinuxDo获取Cookie, timeout=10
-
-# 定时任务 (每天早上9点执行)
-cron "0 9 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/LinuxDo.js, tag=LinuxDo每日签到, timeout=60
+http-request ^https:\/\/(www\.)?linux\.do\/?$ script-path=LinuxDo_v2.js, requires-body=false, tag=LinuxDo Cookie, argument=Notify_Enable
+cron "0 9 * * *" script-path=LinuxDo_v2.js, tag=LinuxDo Checkin, timeout=60, argument=Notify_Enable
 
 [MitM]
-hostname = linux.do
+hostname = *.linux.do
