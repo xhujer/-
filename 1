@@ -1,30 +1,17 @@
-#!name=网易邮箱大师精简版+VIP
-#!desc=去广告并解锁本地会员权益（需配合MITM）。
-#!author=可莉🅥 & chxm1023
-#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/MailMaster.png
-#!tag=去广告,解锁会员
-#!loon_version=3.2.4(787)
+#!name=网易邮箱大师 VIP
+#!author=可莉 & xhujer
 
 [Script]
-# 核心：修改会员信息 (引用 chxm1023 的通用脚本)
-http-response ^https?:\/\/.*\.mail\.163\.com\/.*\/vip\/privilege\/info script-path=https://raw.githubusercontent.com/chxm1023/Rewrite/main/mailmaster.js, requires-body=true, tag=网易邮箱大师会员
+http-response ^https?:\/\/.*\.mail\.163\.com\/.*\/vip\/privilege\/info script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/2, requires-body=true, tag=网易VIP
 
 [Body Rewrite]
-# 移除功能区的推广
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","functionOperatorInfoList"]])'
-# 移除底部的发现/活动标签
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","activityTabInfoList"]])'
-# ⚠️ 注意：我删除了删除 memberOperator 的那行代码，以便让你看到会员状态
-
-# 精简工具栏，只保留邮件追踪和替身邮箱
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","functionOperatorInfoList"], ["data","activityTabInfoList"]])'
 http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
 
 [Map Local]
-# 屏蔽开屏广告和任务请求
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 ^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 ^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
 [MITM]
-# 必须包含 dspay 和泛域名以拦截 VIP 接口
-hostname = %APPEND% appconf.mail.163.com, dashi.163.com, *.mail.163.com, dspay.mail.163.com
+hostname = %APPEND% appconf.mail.163.com, dashi.163.com, services.mail.163.com, *.mail.163.com
