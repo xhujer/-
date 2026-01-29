@@ -1,0 +1,28 @@
+#!name=网易邮箱大师去广告+解锁会员
+#!desc=移除开屏广告、任务提醒，并尝试解锁本地会员权益（皮肤、标识）。
+#!author=可莉🅥 & Modified
+#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/MailMaster.png
+#!category=iKeLee
+#!tag=去广告,解锁会员
+#!loon_version=3.2.4(787)
+
+[Script]
+# 核心：拦截会员权益接口，注入VIP数据
+http-response ^https?:\/\/.*\.mail\.163\.com\/.*\/vip\/privilege\/info script-path=https://raw.githubusercontent.com/chxm1023/Rewrite/main/NeteaseMaster.js, requires-body=true, tag=网易邮箱大师会员
+
+[Body Rewrite]
+# 原有的去广告逻辑（保持不变）
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","functionOperatorInfoList"]])'
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","memberOperator"]])'
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","activityTabInfoList"]])'
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
+
+[Map Local]
+# 原有的拦截逻辑（保持不变）
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+[MITM]
+# 必须添加新的域名 *.mail.163.com 才能拦截会员接口
+hostname = %APPEND% appconf.mail.163.com, dashi.163.com, *.mail.163.com, dspay.mail.163.com
