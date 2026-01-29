@@ -1,0 +1,38 @@
+/*
+脚本作者：可莉🅥 & chxm1023 (Modified)
+功能描述：网易邮箱大师解锁本地会员权益
+使用声明：仅供学习参考，请勿商用
+*/
+
+var body = $response.body;
+var url = $request.url;
+
+// 判断是否是 JSON 数据
+if (body) {
+  var obj = JSON.parse(body);
+
+  // 1. 处理用户信息/权益接口
+  if (url.indexOf('privilege/info') !== -1 || url.indexOf('vip/info') !== -1) {
+    // 强制修改过期时间到 2099 年 (时间戳)
+    var expireTime = 4092599349000;
+    
+    // 修改 VIP 状态
+    if (obj.data) {
+      obj.data.memberType = 1; // 1 通常代表高级会员
+      obj.data.expireTime = expireTime;
+      obj.data.vipExpireTime = expireTime;
+      
+      // 如果有 privileges 数组，全部设为 true
+      if (obj.data.privileges) {
+        for (var i = 0; i < obj.data.privileges.length; i++) {
+            obj.data.privileges[i].expireTime = expireTime;
+            obj.data.privileges[i].isValid = true;
+        }
+      }
+    }
+  }
+
+  $done({ body: JSON.stringify(obj) });
+} else {
+  $done({});
+}
