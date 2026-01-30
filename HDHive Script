@@ -1,9 +1,3 @@
-/*
-HDHive 自动签到脚本
-Update: 2026-01-16
-Author: ming
-*/
-
 const $ = new Env("HDHive");
 
 // ========= 常量 =========
@@ -45,16 +39,14 @@ async function captureCookie() {
   }
 }
 
-// ========= 主动获取积分流水 =========
+// ========= 主动获取积分日志 =========
 async function activeFetchPointsFlow(headers) {
-  // 修正：增加 page_size=10
   const url = `https://${DOMAIN}/go-api/customer/points-logs?page=1&page_size=10`;
   try {
     const json = await httpGetJson(url, headers);
     const list = json?.data?.list;
     if (!Array.isArray(list) || !list.length) return null;
 
-    // 修正：移除 Filter 逻辑，直接取最新变动
     const latest = list[0];
 
     const recent = list.slice(0, 3).map(x =>
@@ -83,14 +75,13 @@ function buildFlowText(flow) {
   if (!flow) return "";
   const l = [];
   l.push(`用户ID：${flow.user_id}`);
-  // 修正：优化展示文本标签
   l.push(`最新变动：${formatTime(flow.latest_checkin.time)}`);
   l.push(`变动数值：+${flow.latest_checkin.points} 积分`);
   if (flow.latest_checkin.remark)
     l.push(`内容描述：${flow.latest_checkin.remark}`);
   if (flow.recent_checkins?.length) {
     l.push("");
-    l.push("📝 最近流水记录：");
+    l.push("📝 最近积分日志：");
     l.push(flow.recent_checkins.join("\n"));
   }
   return l.join("\n");
@@ -186,7 +177,6 @@ function getHeader(h, k) {
 }
 
 function formatTime(t) {
-  // 修正：处理毫秒及补全格式
   return (t || "").replace("T", " ").replace(/\..*$/, "").replace(/\+\d\d:\d\d$/, "");
 }
 
