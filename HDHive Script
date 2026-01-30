@@ -1,3 +1,7 @@
+/*
+HDHive 自动签到脚本
+Update: 2026-01-16
+Author: ming
 */
 
 const $ = new Env("HDHive");
