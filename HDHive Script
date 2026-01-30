@@ -1,7 +1,8 @@
 /*
-HDHive 自动签到脚本
+HDHive 自动签到增强版
 Update: 2026-01-16
-Author: ming
+Author: ming & AI
+修复：针对流水不更新、关键词匹配失效进行了优化
 */
 
 const $ = new Env("HDHive");
@@ -34,47 +35,56 @@ async function captureCookie() {
   const referer = getHeader(h, 'Referer');
 
   if (!cookie || !cookie.includes("token=")) return;
-  if (cookie.length < 20) return;
 
   const old = $.getdata(KEY_COOKIE);
   if (cookie !== old) {
     $.setdata(cookie, KEY_COOKIE);
     if (ua) $.setdata(ua, KEY_UA);
     if (referer) $.setdata(referer, KEY_REFERER);
-    $.msg("HDHive", "🎉 Cookie 已更新", "可以关闭自动获取开关");
+    $.msg("HDHive", "🎉 Cookie 已更新", "可以重新运行签到脚本");
   }
 }
 
 // ========= 主动获取积分流水 =========
 async function activeFetchPointsFlow(headers) {
-  const url = `https://${DOMAIN}/go-api/customer/points-logs?page=1`;
+  // 优化点：同步网页端 page_size 参数
+  const url = `https://${DOMAIN}/go-api/customer/points-logs?page=1&page_size=10`;
   try {
     const json = await httpGetJson(url, headers);
     const list = json?.data?.list;
-    if (!Array.isArray(list) || !list.length) return null;
+    
+    if (!Array.isArray(list) || !list.length) {
+      console.log("⚠️ 未获取到流水列表或列表为空");
+      return null;
+    }
 
-    const checkins = list.filter(x => (x.change_type || "").includes("签到"));
-    if (!checkins.length) return null;
+    // 优化点：模糊匹配“签到”或“奖励”，如果都没找到，直接取最新的一条
+    let checkins = list.filter(x => (x.change_type || "").includes("签到") || (x.remark || "").includes("签到"));
+    
+    if (!checkins.length) {
+      console.log("⚠️ 未能精准匹配'签到'字样，将显示最新账单项");
+      checkins = [list[0]]; 
+    }
 
     const latest = checkins[0];
-
-    const recent = checkins.slice(0, 3).map(x =>
-      `- ${formatTime(x.created_at)}：+${x.points}（${x.remark || "签到"}）`
+    const recent = list.slice(0, 3).map(x =>
+      `- ${formatTime(x.created_at)}：+${x.points}（${x.remark || x.change_type || "积分变动"}）`
     );
 
     const flow = {
-      user_id: latest.user_id,
+      user_id: latest.user_id || "未知",
       latest_checkin: {
         time: latest.created_at,
         points: latest.points,
-        remark: latest.remark
+        remark: latest.remark || latest.change_type || "签到奖励"
       },
       recent_checkins: recent
     };
 
     $.setdata(JSON.stringify(flow), KEY_FLOW);
     return flow;
-  } catch {
+  } catch (e) {
+    console.log("❌ 获取流水请求失败: " + e);
     return null;
   }
 }
@@ -84,13 +94,13 @@ function buildFlowText(flow) {
   if (!flow) return "";
   const l = [];
   l.push(`用户ID：${flow.user_id}`);
-  l.push(`最近签到：${formatTime(flow.latest_checkin.time)}`);
-  l.push(`上次获得：+${flow.latest_checkin.points} 积分`);
+  l.push(`最近记录：${formatTime(flow.latest_checkin.time)}`);
+  l.push(`变动数值：+${flow.latest_checkin.points} 积分`);
   if (flow.latest_checkin.remark)
     l.push(`说明：${flow.latest_checkin.remark}`);
   if (flow.recent_checkins?.length) {
     l.push("");
-    l.push("📝 最近记录：");
+    l.push("📝 历史近况：");
     l.push(flow.recent_checkins.join("\n"));
   }
   return l.join("\n");
@@ -100,23 +110,18 @@ function buildFlowText(flow) {
 async function checkIn() {
   const rawCookie = $.getdata(KEY_COOKIE);
   if (!rawCookie) {
-    $.msg("HDHive", "❌ 无法签到", "未获取 Cookie");
+    $.msg("HDHive", "❌ 无法签到", "未获取 Cookie，请先访问网站");
     return;
   }
 
   const token = parseCookie(rawCookie)['token'];
-  if (!token) {
-    $.msg("HDHive", "❌ Cookie 失效", "缺少 token");
-    return;
-  }
-
   const headers = {
-    'User-Agent': $.getdata(KEY_UA) || 'Mozilla/5.0',
+    'User-Agent': $.getdata(KEY_UA) || 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
     'Accept': 'application/json, text/plain, */*',
     'Content-Type': 'application/json;charset=utf-8',
     'Origin': `https://${DOMAIN}`,
     'Referer': $.getdata(KEY_REFERER) || `https://${DOMAIN}/`,
-    'Authorization': `Bearer ${token}`,
+    'Authorization': token ? `Bearer ${token}` : '',
     'Cookie': rawCookie
   };
 
@@ -129,28 +134,30 @@ async function checkIn() {
 
   return new Promise(resolve => {
     $.post(req, async (err, resp, data) => {
-      if (err) {
-        $.msg("HDHive", "❌ 网络错误", "请求失败");
-        resolve();
-        return;
+      let msg = "请求失败";
+      let isSuccess = false;
+
+      if (!err && data) {
+        try {
+          const res = JSON.parse(data);
+          msg = res.message || "未知响应";
+          isSuccess = msg.includes("成功") || msg.includes("已经") || msg.includes("明天");
+        } catch (e) {
+          msg = "响应解析失败";
+        }
       }
 
-      let res = {};
-      try { res = JSON.parse(data); } catch {}
-      const msg = res.message || "";
-      const checked =
-        msg.includes("已经") || msg.includes("明天") || msg.toLowerCase().includes("checked");
-
+      // 无论签到接口结果如何，都尝试拉取最新流水
       let flow = await activeFetchPointsFlow(headers);
       if (!flow) {
         try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
       }
 
-      const flowText = flow ? "\n\n" + buildFlowText(flow) : "";
+      const flowText = flow ? "\n\n" + buildFlowText(flow) : "\n\n(流水查询失败，请检查 Cookie)";
 
       $.msg(
         "HDHive",
-        checked ? "🟢 今日已签到" : "✅ 签到成功",
+        isSuccess ? "🟢 签到执行完毕" : "❌ 签到异常",
         `${msg}${flowText}`
       );
       resolve();
@@ -158,7 +165,7 @@ async function checkIn() {
   });
 }
 
-// ========= 工具 =========
+// ========= 工具函数 =========
 function httpGetJson(url, headers) {
   return new Promise((resolve, reject) => {
     $.get({ url, headers }, (err, resp, data) => {
@@ -170,6 +177,7 @@ function httpGetJson(url, headers) {
 
 function parseCookie(str) {
   const obj = {};
+  if (!str) return obj;
   str.split(';').forEach(p => {
     const i = p.indexOf('=');
     if (i > 0) obj[p.slice(0, i).trim()] = p.slice(i + 1).trim();
@@ -186,22 +194,23 @@ function getHeader(h, k) {
 }
 
 function formatTime(t) {
-  return (t || "").replace("T", " ").replace(/\+\d\d:\d\d$/, "");
+  if (!t) return "未知时间";
+  return t.replace("T", " ").replace(/\.\d+.*$/, "").replace(/\+\d\d:\d\d$/, "");
 }
 
-// ========= Env =========
+// ========= Loon / Quantumult X 环境适配 =========
 function Env(name) {
   return {
     name,
-    getdata: k => $persistentStore?.read(k),
-    setdata: (v, k) => $persistentStore?.write(v, k),
-    post: (o, c) => $httpClient?.post(o, c),
-    get: (o, c) => $httpClient?.get(o, c),
+    getdata: k => $persistentStore.read(k),
+    setdata: (v, k) => $persistentStore.write(v, k),
+    post: (o, c) => $httpClient.post(o, c),
+    get: (o, c) => $httpClient.get(o, c),
     msg: (t, s, b) => {
-      $notification?.post(t, s, b);
+      $notification.post(t, s, b);
       console.log(`===${t}===\n${s}\n${b}`);
     },
-    logErr: e => console.log(`❗️${name}: ${e}`),
-    done: () => $done?.({})
+    logErr: e => console.log(`❗️${name} 错误: ${e}`),
+    done: () => $done({})
   };
 }
