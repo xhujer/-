@@ -1,15 +1,19 @@
 /*
-HDHive 自动签到 (流水全记录 & 日志精简版)
+HDHive 自动签到脚本
 Update: 2026-01-29
+Author: ming
 */
 
 const $ = new Env("HDHive");
+
+// ========= 常量 =========
 const KEY_COOKIE = 'hdhive_cookie_v12';
 const KEY_REFERER = 'hdhive_referer_v12';
 const KEY_UA = 'hdhive_ua_v12';
 const KEY_FLOW = 'hdhive_points_flow_v1';
 const DOMAIN = 'hdhive.com';
 
+// ========= 入口 =========
 (async () => {
   if (typeof $request !== "undefined") {
     await captureCookie();
@@ -18,20 +22,29 @@ const DOMAIN = 'hdhive.com';
   }
 })().catch(e => $.logErr(e)).finally(() => $.done());
 
+// ========= 抓 Cookie =========
 async function captureCookie() {
   const url = $request.url || "";
-  if (!url.includes(DOMAIN) || url.includes("user/checkin")) return;
+  if (!url.includes(DOMAIN)) return;
+  if (url.includes("user/checkin")) return;
+
   const h = $request.headers || {};
   const cookie = getHeader(h, 'Cookie');
+  const ua = getHeader(h, 'User-Agent');
+  const referer = getHeader(h, 'Referer');
+
   if (!cookie || !cookie.includes("token=")) return;
-  if (cookie !== $.getdata(KEY_COOKIE)) {
+
+  const old = $.getdata(KEY_COOKIE);
+  if (cookie !== old) {
     $.setdata(cookie, KEY_COOKIE);
-    $.setdata(getHeader(h, 'User-Agent'), KEY_UA);
-    $.setdata(getHeader(h, 'Referer'), KEY_REFERER);
-    $.msg("HDHive", "🎉 Cookie 已获取", "");
+    if (ua) $.setdata(ua, KEY_UA);
+    if (referer) $.setdata(referer, KEY_REFERER);
+    $.msg("HDHive", "🎉 Cookie 已更新", "可以关闭自动获取开关");
   }
 }
 
+// ========= 主动获取积分流水 =========
 async function activeFetchPointsFlow(headers) {
   const url = `https://${DOMAIN}/go-api/customer/points-logs?page=1&page_size=10`;
   try {
@@ -40,72 +53,107 @@ async function activeFetchPointsFlow(headers) {
     if (!Array.isArray(list) || !list.length) return null;
 
     const latest = list[0];
+    const recent = list.slice(0, 3).map(x =>
+      `- ${formatTime(x.created_at)}：+${x.points}（${x.remark || x.change_type}）`
+    );
+
     const flow = {
-      user_id: latest.user_id || "未知",
-      latest_item: {
+      user_id: latest.user_id,
+      latest_checkin: {
         time: latest.created_at,
         points: latest.points,
         remark: latest.remark || latest.change_type
       },
-      recent_items: list.slice(0, 3).map(x => 
-        `- ${formatTime(x.created_at)}：+${x.points}（${x.remark || x.change_type}）`
-      )
+      recent_checkins: recent
     };
+
     $.setdata(JSON.stringify(flow), KEY_FLOW);
-    console.log(`✅ 流水拉取成功: 最新变动为 [${latest.change_type}]`);
     return flow;
-  } catch (e) {
-    console.log(`❌ 流水获取失败: ${e}`);
+  } catch {
     return null;
   }
 }
 
+// ========= 构建展示文本 =========
 function buildFlowText(flow) {
   if (!flow) return "";
-  return [
-    `用户ID：${flow.user_id}`,
-    `最新记录：${formatTime(flow.latest_item.time)}`,
-    `变动数值：+${flow.latest_item.points} 积分`,
-    `内容描述：${flow.latest_item.remark}`,
-    "\n📝 近期流水记录：",
-    ...flow.recent_items
-  ].filter(Boolean).join("\n");
+  const l = [];
+  l.push(`用户ID：${flow.user_id}`);
+  l.push(`最新变动：${formatTime(flow.latest_checkin.time)}`);
+  l.push(`变动数值：+${flow.latest_checkin.points} 积分`);
+  if (flow.latest_checkin.remark)
+    l.push(`内容描述：${flow.latest_checkin.remark}`);
+  if (flow.recent_checkins?.length) {
+    l.push("");
+    l.push("📝 近期流水记录：");
+    l.push(flow.recent_checkins.join("\n"));
+  }
+  return l.join("\n");
 }
 
+// ========= 签到 =========
 async function checkIn() {
   const rawCookie = $.getdata(KEY_COOKIE);
-  if (!rawCookie) return $.msg("HDHive", "❌ 无法签到", "未获取 Cookie");
-  
+  if (!rawCookie) {
+    $.msg("HDHive", "❌ 无法签到", "未获取 Cookie");
+    return;
+  }
+
   const token = parseCookie(rawCookie)['token'];
+  if (!token) {
+    $.msg("HDHive", "❌ Cookie 失效", "缺少 token");
+    return;
+  }
+
   const headers = {
     'User-Agent': $.getdata(KEY_UA) || 'Mozilla/5.0',
-    'Authorization': token ? `Bearer ${token}` : '',
-    'Cookie': rawCookie,
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=utf-8',
+    'Origin': `https://${DOMAIN}`,
     'Referer': $.getdata(KEY_REFERER) || `https://${DOMAIN}/`,
-    'Content-Type': 'application/json'
+    'Authorization': `Bearer ${token}`,
+    'Cookie': rawCookie
   };
 
-  const req = { url: `https://${DOMAIN}/api/customer/user/checkin`, method: "POST", headers, body: "{}" };
-  console.log("🚀 发起签到请求...");
+  const req = {
+    url: `https://${DOMAIN}/api/customer/user/checkin`,
+    method: "POST",
+    headers,
+    body: "{}"
+  };
 
   return new Promise(resolve => {
     $.post(req, async (err, resp, data) => {
-      let msg = "请求超时", isSuccess = false;
-      if (!err && data) {
-        const res = JSON.parse(data);
-        msg = res.message || "未知响应";
-        isSuccess = msg.includes("成功") || msg.includes("已经") || msg.includes("明天");
-        console.log(`📦 签到结果: ${msg}`);
+      if (err) {
+        $.msg("HDHive", "❌ 网络错误", "请求失败");
+        resolve();
+        return;
       }
-      
-      let flow = await activeFetchPointsFlow(headers) || JSON.parse($.getdata(KEY_FLOW) || "null");
-      $.msg("HDHive", isSuccess ? "🟢 签到执行完毕" : "❌ 签到异常", `${msg}\n\n${buildFlowText(flow)}`);
+
+      let res = {};
+      try { res = JSON.parse(data); } catch {}
+      const msg = res.message || "";
+      const checked =
+        msg.includes("已经") || msg.includes("明天") || msg.toLowerCase().includes("checked");
+
+      let flow = await activeFetchPointsFlow(headers);
+      if (!flow) {
+        try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
+      }
+
+      const flowText = flow ? "\n\n" + buildFlowText(flow) : "";
+
+      $.msg(
+        "HDHive",
+        checked ? "🟢 今日已执行" : "✅ 签到成功",
+        `${msg}${flowText}`
+      );
       resolve();
     });
   });
 }
 
-// ========= 工具函数 =========
+// ========= 工具 =========
 function httpGetJson(url, headers) {
   return new Promise((resolve, reject) => {
     $.get({ url, headers }, (err, resp, data) => {
@@ -117,7 +165,6 @@ function httpGetJson(url, headers) {
 
 function parseCookie(str) {
   const obj = {};
-  if (!str) return obj;
   str.split(';').forEach(p => {
     const i = p.indexOf('=');
     if (i > 0) obj[p.slice(0, i).trim()] = p.slice(i + 1).trim();
@@ -127,24 +174,29 @@ function parseCookie(str) {
 
 function getHeader(h, k) {
   const key = k.toLowerCase();
-  for (const i in h) if (i.toLowerCase() === key) return h[i];
+  for (const i in h) {
+    if (i.toLowerCase() === key) return h[i];
+  }
   return null;
 }
 
 function formatTime(t) {
-  if (!t) return "未知时间";
-  return t.replace("T", " ").replace(/\..*$/, "").replace(/\+\d\d:\d\d$/, "");
+  return (t || "").replace("T", " ").replace(/\..*$/, "").replace(/\+\d\d:\d\d$/, "");
 }
 
+// ========= Env =========
 function Env(name) {
   return {
     name,
-    getdata: k => $persistentStore.read(k),
-    setdata: (v, k) => $persistentStore.write(v, k),
-    post: (o, c) => $httpClient.post(o, c),
-    get: (o, c) => $httpClient.get(o, c),
-    msg: (t, s, b) => $notification.post(t, s, b),
-    logErr: e => console.log(`! ${name} 错误: ${e}`),
-    done: () => $done({})
+    getdata: k => $persistentStore?.read(k),
+    setdata: (v, k) => $persistentStore?.write(v, k),
+    post: (o, c) => $httpClient?.post(o, c),
+    get: (o, c) => $httpClient?.get(o, c),
+    msg: (t, s, b) => {
+      $notification?.post(t, s, b);
+      console.log(`===${t}===\n${s}\n${b}`);
+    },
+    logErr: e => console.log(`❗️${name}: ${e}`),
+    done: () => $done?.({})
   };
 }
