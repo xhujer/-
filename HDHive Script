@@ -1,4 +1,5 @@
 */
+
 const $ = new Env("HDHive");
 
 // ========= 常量 =========
@@ -85,7 +86,7 @@ function buildFlowText(flow) {
     l.push(`内容描述：${flow.latest_checkin.remark}`);
   if (flow.recent_checkins?.length) {
     l.push("");
-    l.push("📝 积分日志：");
+    l.push("📝 最近流水记录：");
     l.push(flow.recent_checkins.join("\n"));
   }
   return l.join("\n");
