@@ -1,7 +1,4 @@
-/*
-HDHive 自动签到脚本
-Update: 2026-01-16
-Author: ming
+
 */
 
 const $ = new Env("HDHive");
@@ -90,7 +87,7 @@ function buildFlowText(flow) {
     l.push(`内容描述：${flow.latest_checkin.remark}`);
   if (flow.recent_checkins?.length) {
     l.push("");
-    l.push("📝 最近流水记录：");
+    l.push("📝 积分日志：");
     l.push(flow.recent_checkins.join("\n"));
   }
   return l.join("\n");
