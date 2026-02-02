@@ -1,57 +1,48 @@
-// 初始化响应体和请求 URL
 let obj = JSON.parse($response.body);
 const url = $request.url;
 
-const vip_info = '/api/user/info/detail3';
-const vip_privilege = '/external/privilege/data';
-const vip_feature = '/api/privilege/feature/info3';
-
-// 1. 身份判定 (detail3)
-if (url.indexOf(vip_info) != -1) {
-  if (obj.result) {
-    obj.result.isMember = true;
-    obj.result.mbrType = 1;
-    obj.result.startTime = 1704067200000;
-    obj.result.endTime = 4092599349000;
-    obj.result.isVip = true;
-    obj.result.vipStatus = 1;
-    obj.result.memberBefore = true; // 补充标志位
-  }
+// 1. 身份定性 (detail3)
+if (url.indexOf('/api/user/info/detail3') != -1 && obj.result) {
+  let r = obj.result;
+  r.isMember = true;
+  r.mbrType = 1;
+  r.endTime = 4092599349000;
+  r.isVip = true;
+  r.vipStatus = 1;
 }
 
-// 2. 权益列表 (容量与通用特权)
-if (url.indexOf(vip_privilege) != -1) {
-  if (obj.result) {
-    if (obj.result.capacityDTO) {
-      obj.result.capacityDTO.total = 1100585369600; // 1TB
-      obj.result.capacityDTO.used = 1048576;
-    }
-    if (obj.result.privilegeList) {
-      obj.result.privilegeList.forEach(item => {
-        item.hasPrivilege = true;
-        item.isLocked = false;
-        item.expireTime = 4092599349000;
-      });
-    }
-  }
+// 2. 权益下发 (privilege/data)
+if (url.indexOf('/external/privilege/data') != -1 && obj.result) {
+  let r = obj.result;
+  if (r.capacityDTO) r.capacityDTO.total = 1100585369600;
+  // 针对 privilegeList 的稳健处理
+  let list = r.privilegeList || [];
+  list.forEach(i => { i.hasPrivilege = true; i.isLocked = false; });
 }
 
-// 3. 尊享图标专项解锁 (核心补丁)
-if (url.indexOf(vip_feature) != -1) {
-  // 注意：这个接口返回的 result 有可能是对象也有可能是数组，这里做个兼容
-  let features = Array.isArray(obj.result) ? obj.result : (obj.result?.list || []);
-  features.forEach(item => {
-    if (item.type === 210 || item.name === "尊享图标") {
-      item.hasPrivilege = true; 
-      item.isLocked = false;
-      if (item.ext) {
-        item.ext.status = 1; 
-        item.ext.vipLimit = 0; 
-      }
+// 3. 特权功能 (feature/info3) - 处理“数组可能在 result 或 result.list”的情况
+if (url.indexOf('/api/privilege/feature/info3') != -1) {
+  let list = Array.isArray(obj.result) ? obj.result : (obj.result?.list || []);
+  list.forEach(i => {
+    if (i.type === 210 || i.name === "尊享图标") {
+      i.hasPrivilege = true;
+      i.isLocked = false;
+      if (i.ext) { i.ext.status = 1; i.ext.vipLimit = 0; }
     }
-    item.hasPrivilege = true; // 顺便点亮所有特权
   });
 }
 
-// 最终导出修改后的 Body
+// 4. 配置开关 (function.do) - 处理“result 字段嵌套或 config 字段嵌套”的情况
+if (url.indexOf('/mailmaster/api/config/function.do') != -1) {
+  // 兼容两种结构: 1. result直接是数组; 2. result.config是数组
+  let configs = Array.isArray(obj.result) ? obj.result : (obj.result?.config || []);
+  configs.forEach(item => {
+    if (item.functionName === "Function-App-Icon-Guide" || item.functionName === "Function-Vip-Icon") {
+      // 兼容 enable 直接在 item 下，或在 item.result 下
+      if (item.hasOwnProperty('enable')) item.enable = true;
+      if (item.result && item.result.hasOwnProperty('enable')) item.result.enable = true;
+    }
+  });
+}
+
 $done({ body: JSON.stringify(obj) });
