@@ -1,33 +1,31 @@
-const $ = new Env("163会员助手");
-
+// 初始化响应体和请求 URL
 let obj = JSON.parse($response.body);
 const url = $request.url;
 
-const PATH_DETAIL = '/api/user/info/detail3';
-const PATH_PRIVILEGE = '/external/privilege/data';
+const vip_info = '/api/user/info/detail3';
+const vip_privilege = '/external/privilege/data';
+const vip_feature = '/api/privilege/feature/info3';
 
-if (url.indexOf(PATH_DETAIL) != -1) {
+// 1. 身份判定 (detail3)
+if (url.indexOf(vip_info) != -1) {
   if (obj.result) {
     obj.result.isMember = true;
     obj.result.mbrType = 1;
-    obj.result.startTime = 1704067200000; // 2024-01-01
-    obj.result.endTime = 4092599349000;   // 2099-10-01
-    obj.result.nearExpired = false;
-    obj.result.memberBefore = true;
-    // 补全可能影响UI的标志位
+    obj.result.startTime = 1704067200000;
+    obj.result.endTime = 4092599349000;
     obj.result.isVip = true;
     obj.result.vipStatus = 1;
+    obj.result.memberBefore = true; // 补充标志位
   }
 }
 
-if (url.indexOf(PATH_PRIVILEGE) != -1) {
+// 2. 权益列表 (容量与通用特权)
+if (url.indexOf(vip_privilege) != -1) {
   if (obj.result) {
-    // 1. 容量修改 (50GB)
     if (obj.result.capacityDTO) {
-      obj.result.capacityDTO.total = 53687091200;
-      obj.result.capacityDTO.used = 0;
+      obj.result.capacityDTO.total = 1100585369600; // 1TB
+      obj.result.capacityDTO.used = 1048576;
     }
-    // 2. 特权清单全开
     if (obj.result.privilegeList) {
       obj.result.privilegeList.forEach(item => {
         item.hasPrivilege = true;
@@ -35,19 +33,25 @@ if (url.indexOf(PATH_PRIVILEGE) != -1) {
         item.expireTime = 4092599349000;
       });
     }
-    // 3. 广告移除标识
-    if (obj.result.adPrivilege) {
-      obj.result.adPrivilege.hasPrivilege = true;
-    }
   }
 }
 
-$done({ body: JSON.stringify(obj) });
-
-function Env(n) {
-  return {
-    name: n,
-    log: (...a) => console.log(`[${n}]`, ...a),
-    notify: (t, s, c) => $notification.post(t, s, c)
-  };
+// 3. 尊享图标专项解锁 (核心补丁)
+if (url.indexOf(vip_feature) != -1) {
+  // 注意：这个接口返回的 result 有可能是对象也有可能是数组，这里做个兼容
+  let features = Array.isArray(obj.result) ? obj.result : (obj.result?.list || []);
+  features.forEach(item => {
+    if (item.type === 210 || item.name === "尊享图标") {
+      item.hasPrivilege = true; 
+      item.isLocked = false;
+      if (item.ext) {
+        item.ext.status = 1; 
+        item.ext.vipLimit = 0; 
+      }
+    }
+    item.hasPrivilege = true; // 顺便点亮所有特权
+  });
 }
+
+// 最终导出修改后的 Body
+$done({ body: JSON.stringify(obj) });
