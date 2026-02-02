@@ -1,0 +1,9 @@
+#!name = 163空间助手
+#!desc = 163空间助手
+#!author = @2987
+
+[MITM]
+hostname = dashi.163.com
+
+[Script]
+http-response ^https?:\/\/dashi\.163\.com\/api\/video-award\/info script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/163, requires-body=true, timeout=60, tag=163助手
