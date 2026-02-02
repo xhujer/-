@@ -1,136 +1,53 @@
-/**
- * Loon 脚本：网易邮箱空间奖励自动化
- * - 适配 dashi.163.com 接口
- * - 模拟真实观看时长延迟
- * - 自动提取 UID 和 AdsID
- */
+const $ = new Env("163会员助手");
 
-const $ = new Env("网易空间助手");
+let obj = JSON.parse($response.body);
+const url = $request.url;
 
-// ====== 1) 域名白名单 ======
-const ALLOWED_HOSTS = ["dashi.163.com"];
-const API_BASE = "https://dashi.163.com";
-const ENDPOINT_FULFILL = "/api/video-award/fulfill"; 
+const PATH_DETAIL = '/api/user/info/detail3';
+const PATH_PRIVILEGE = '/external/privilege/data';
 
-// ====== 2) 运行参数 ======
-const CFG = {
-  debug: true,
-  timeoutMs: 10000,
-  maxRetries: 2,
-  baseBackoffMs: 1000,
-  // 模拟真实感：延迟 32-35 秒（视频通常为 30s）
-  delayMs: 32000 + Math.floor(Math.random() * 3000), 
-};
-
-// ====== 3) 主逻辑：监听 info 接口获取任务参数 ======
-if ($request?.url?.includes("/api/video-award/info")) {
-  const host = getHost($request.url);
-  if (!ALLOWED_HOSTS.includes(host)) return $done({});
-
-  const res = safeJson($response?.body);
-  if (!res || res.success !== "true") {
-    $.log("Info 接口返回异常或未登录");
-    return $done({});
+if (url.indexOf(PATH_DETAIL) != -1) {
+  if (obj.result) {
+    obj.result.isMember = true;
+    obj.result.mbrType = 1;
+    obj.result.startTime = 1704067200000; // 2024-01-01
+    obj.result.endTime = 4092599349000;   // 2099-10-01
+    obj.result.nearExpired = false;
+    obj.result.memberBefore = true;
+    // 补全可能影响UI的标志位
+    obj.result.isVip = true;
+    obj.result.vipStatus = 1;
   }
-
-  // 提取 163 特有的 params 字段
-  const params = res.result?.params;
-  if (!params) return $done({});
-
-  // 校验次数：今日剩余次数 > 0 才触发
-  const remaining = Number(params.dailyRemainingCnt ?? 0);
-  if (remaining <= 0) {
-    $.log(`今日已达上限 (${params.dailyObtainedCnt}/8)，跳过执行`);
-    return $done({});
-  }
-
-  // 幂等键：由 UID + AdsID + 当前领奖次数 组成
-  // 确保在手动刷新页面时，不会对同一次奖励发送重复请求
-  const idempotencyKey = makeIdempotencyKey({
-    uid: params.uid,
-    adsId: params.adsId,
-    obtained: params.dailyObtainedCnt
-  });
-
-  // 构造 163 结算接口需要的 Payload
-  const payload = {
-    "adsId": params.adsId,
-    "strategyId": params.strategyId,
-    "sceneId": params.sceneId,
-    "uid": params.uid,
-    "utype": params.utype,
-    "positionId": params.positionId || "mailListAccount"
-  };
-
-  $.notify("检测到奖励任务", "", `剩余 ${remaining} 次，将在 ${Math.round(CFG.delayMs/1000)}s 后尝试领取`);
-
-  // 异步触发结算
-  setTimeout(() => {
-    fulfill(payload, idempotencyKey, $request.headers);
-  }, CFG.delayMs);
 }
 
-$done({});
-
-// ====== 4) fulfill 请求：执行结算 ======
-function fulfill(payload, idempotencyKey, originalHeaders) {
-  const url = API_BASE + ENDPOINT_FULFILL;
-
-  const headers = {
-    "Content-Type": "application/json",
-    "User-Agent": originalHeaders["User-Agent"] || originalHeaders["user-agent"],
-    "Cookie": originalHeaders["Cookie"] || originalHeaders["cookie"],
-    "Referer": "https://dashi.163.com/projects/video-award/index.html",
-    "X-Idempotency-Key": idempotencyKey, // 骨架保留字段
-  };
-
-  requestWithRetry({
-    method: "POST",
-    url,
-    headers,
-    body: JSON.stringify(payload),
-    timeoutMs: CFG.timeoutMs,
-  }, CFG.maxRetries)
-  .then((data) => {
-    const res = safeJson(data);
-    if (res && res.success === "true") {
-      $.notify("领取成功 🎁", "", `获得 ${payload.unit || '18'}M 空间`);
-    } else {
-      $.notify("领取失败", "", res?.marketText || "接口逻辑未通过");
+if (url.indexOf(PATH_PRIVILEGE) != -1) {
+  if (obj.result) {
+    // 1. 容量修改 (50GB)
+    if (obj.result.capacityDTO) {
+      obj.result.capacityDTO.total = 53687091200;
+      obj.result.capacityDTO.used = 0;
     }
-  })
-  .catch((e) => $.log(`请求异常: ${e}`))
-  .finally(() => $.log("Fulfill 流程结束"));
-}
-
-// ====== 5) 核心函数封装（沿用你的 Env 骨架） ======
-function requestWithRetry(req, retriesLeft) {
-  return new Promise((resolve, reject) => {
-    const runOnce = (attempt) => {
-      const opt = { url: req.url, headers: req.headers, body: req.body, timeout: req.timeoutMs };
-      $httpClient.post(opt, (err, resp, data) => {
-        if (!err && resp.status < 400) return resolve(data);
-        if (retriesLeft - attempt <= 0) return reject(err || `HTTP ${resp.status}`);
-        setTimeout(() => runOnce(attempt + 1), CFG.baseBackoffMs * Math.pow(2, attempt));
+    // 2. 特权清单全开
+    if (obj.result.privilegeList) {
+      obj.result.privilegeList.forEach(item => {
+        item.hasPrivilege = true;
+        item.isLocked = false;
+        item.expireTime = 4092599349000;
       });
-    };
-    runOnce(0);
-  });
+    }
+    // 3. 广告移除标识
+    if (obj.result.adPrivilege) {
+      obj.result.adPrivilege.hasPrivilege = true;
+    }
+  }
 }
 
-function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }
-function getHost(url) { return url.match(/^https?:\/\/([^\/]+)/i)?.[1] || ""; }
-function makeIdempotencyKey(obj) {
-  const raw = JSON.stringify(obj);
-  let h = 2166136261;
-  for (let i = 0; i < raw.length; i++) { h ^= raw.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return "163_" + (h >>> 0).toString(16);
-}
+$done({ body: JSON.stringify(obj) });
 
-function Env(name) {
+function Env(n) {
   return {
-    name,
-    log: (...a) => CFG.debug && console.log(`[${name}]`, ...a),
+    name: n,
+    log: (...a) => console.log(`[${n}]`, ...a),
     notify: (t, s, c) => $notification.post(t, s, c)
   };
 }
