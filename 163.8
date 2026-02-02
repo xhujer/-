@@ -1,9 +1,9 @@
-#!name = 163空间助手
-#!desc = 163空间助手
+#!name = 163邮箱会员助手
+#!desc = 仅保留会员身份与权益接口调试。
 #!author = @2987
 
 [MITM]
-hostname = dashi.163.com
+hostname = vm.mail.163.com, mail.163.com
 
 [Script]
-http-response ^https?:\/\/dashi\.163\.com\/api\/video-award\/info script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/163, requires-body=true, timeout=60, tag=163助手
+http-response ^https?:\/\/(vm\.mail\.163\.com\/api\/user\/info\/detail3|mail\.163\.com\/fgw\/mail-member-center\/external\/privilege\/data) script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/163, requires-body=true, tag=163会员助手
