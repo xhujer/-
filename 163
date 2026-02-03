@@ -1,48 +1,57 @@
-let obj = JSON.parse($response.body);
+let body = $response.body;
 const url = $request.url;
 
-// 1. 身份定性 (detail3)
-if (url.indexOf('/api/user/info/detail3') != -1 && obj.result) {
-  let r = obj.result;
-  r.isMember = true;
-  r.mbrType = 1;
-  r.endTime = 4092599349000;
-  r.isVip = true;
-  r.vipStatus = 1;
-}
+try {
+    let obj = JSON.parse(body);
 
-// 2. 权益下发 (privilege/data)
-if (url.indexOf('/external/privilege/data') != -1 && obj.result) {
-  let r = obj.result;
-  if (r.capacityDTO) r.capacityDTO.total = 1100585369600;
-  // 针对 privilegeList 的稳健处理
-  let list = r.privilegeList || [];
-  list.forEach(i => { i.hasPrivilege = true; i.isLocked = false; });
-}
-
-// 3. 特权功能 (feature/info3) - 处理“数组可能在 result 或 result.list”的情况
-if (url.indexOf('/api/privilege/feature/info3') != -1) {
-  let list = Array.isArray(obj.result) ? obj.result : (obj.result?.list || []);
-  list.forEach(i => {
-    if (i.type === 210 || i.name === "尊享图标") {
-      i.hasPrivilege = true;
-      i.isLocked = false;
-      if (i.ext) { i.ext.status = 1; i.ext.vipLimit = 0; }
+    // 1. 暴力注入身份 (detail3)
+    if (url.indexOf("/api/user/info/detail3") != -1) {
+        obj.result = obj.result || {};
+        Object.assign(obj.result, {
+            "isMember": true,
+            "mbrType": 1,
+            "endTime": 4092599349000,
+            "isVip": true,
+            "vipStatus": 1,
+            "memberBefore": true
+        });
     }
-  });
-}
 
-// 4. 配置开关 (function.do) - 处理“result 字段嵌套或 config 字段嵌套”的情况
-if (url.indexOf('/mailmaster/api/config/function.do') != -1) {
-  // 兼容两种结构: 1. result直接是数组; 2. result.config是数组
-  let configs = Array.isArray(obj.result) ? obj.result : (obj.result?.config || []);
-  configs.forEach(item => {
-    if (item.functionName === "Function-App-Icon-Guide" || item.functionName === "Function-Vip-Icon") {
-      // 兼容 enable 直接在 item 下，或在 item.result 下
-      if (item.hasOwnProperty('enable')) item.enable = true;
-      if (item.result && item.result.hasOwnProperty('enable')) item.result.enable = true;
+    // 2. 暴力解锁权益 (privilege/data)
+    if (url.indexOf("/external/privilege/data") != -1) {
+        if (obj.result) {
+            if (obj.result.capacityDTO) obj.result.capacityDTO.total = 1100585369600;
+            if (Array.isArray(obj.result.privilegeList)) {
+                obj.result.privilegeList.forEach(i => {
+                    i.hasPrivilege = true;
+                    i.isLocked = false;
+                });
+            }
+        }
     }
-  });
-}
 
-$done({ body: JSON.stringify(obj) });
+    // 3. 暴力点亮功能 (info3)
+    if (url.indexOf("/api/privilege/feature/info3") != -1) {
+        let list = Array.isArray(obj.result) ? obj.result : (obj.result?.list || []);
+        list.forEach(i => {
+            i.hasPrivilege = true;
+            i.isLocked = false;
+            if (i.ext) { i.ext.status = 1; i.ext.vipLimit = 0; }
+        });
+    }
+
+    // 4. 暴力开启总控开关 (function.do)
+    if (url.indexOf("/mailmaster/api/config/function.do") != -1) {
+        let configs = Array.isArray(obj.result) ? obj.result : (obj.result?.config || []);
+        configs.forEach(i => {
+            if (i.functionName && (i.functionName.includes("Icon") || i.functionName.includes("Guide"))) {
+                i.enable = true;
+                if (i.result) i.result.enable = true;
+            }
+        });
+    }
+
+    body = JSON.stringify(obj);
+} catch (e) {}
+
+$done({ body });
