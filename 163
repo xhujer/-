@@ -1,36 +1,25 @@
 /**
- * @name 网易邮箱大师图标解锁 (增强版)
- * @desc 深度覆盖 detail3 接口，确保权限下发
+ * @name 网易邮箱大师图标解锁
+ * @desc 针对 detail3 接口重写会员状态
  */
 
-let body = $response.body;
-if (!body) $done({}); 
+let obj = JSON.parse($response.body);
 
-try {
-    let obj = JSON.parse(body);
-
-    // 递归处理函数：遍历对象，只要发现权限关键字就改写
-    const unlock = (target) => {
-        if (!target || typeof target !== 'object') return;
-        
-        // 修改关键会员字段
-        if (target.hasOwnProperty('isMember')) target.isMember = true;
-        if (target.hasOwnProperty('hasMasterPrvlg')) target.hasMasterPrvlg = true;
-        if (target.hasOwnProperty('mbrType')) target.mbrType = 1;
-        if (target.hasOwnProperty('endTime')) target.endTime = 4092599349000; // 2099年
-        if (target.hasOwnProperty('vipStatus')) target.vipStatus = 1;
-
-        // 递归处理嵌套的对象或数组 (兼容 master/plus 嵌套)
-        for (let key in target) {
-            if (typeof target[key] === 'object') unlock(target[key]);
-        }
-    };
-
-    // 执行解锁逻辑
-    unlock(obj);
-
-    $done({ body: JSON.stringify(obj) });
-} catch (e) {
-    console.log("网易邮箱解锁脚本执行异常: " + e);
-    $done({ body }); // 出错时返回原包，保证 App 正常运行
+if (obj.result) {
+    // 核心权限修改
+    obj.result.mbrType = 1;               // 设为 1 通常代表大师会员
+    obj.result.isMember = true;           // 解锁会员身份
+    obj.result.hasMasterPrvlg = true;     // 解锁大师特权
+    
+    // 延长有效期至 2030 年 (时间戳毫秒)
+    obj.result.endTime = 1924905599000; 
+    
+    // 如果 result 下还有 master/plus 嵌套层级，一并处理
+    if (obj.result.master) {
+        obj.result.master.isMember = true;
+        obj.result.master.hasMasterPrvlg = true;
+        obj.result.master.mbrType = 1;
+    }
 }
+
+$done({ body: JSON.stringify(obj) });
