@@ -1,25 +1,67 @@
 /**
- * @name 网易邮箱大师图标解锁
- * @desc 针对 detail3 接口重写会员状态
+ * @name 网易邮箱大师 - 大师会员专项解锁
+ * @desc 强制注入大师会员(Master)特权，解锁图标更换
  */
 
-let obj = JSON.parse($response.body);
+let body = $response.body;
+if (!body) $done({});
 
-if (obj.result) {
-    // 核心权限修改
-    obj.result.mbrType = 1;               // 设为 1 通常代表大师会员
-    obj.result.isMember = true;           // 解锁会员身份
-    obj.result.hasMasterPrvlg = true;     // 解锁大师特权
-    
-    // 延长有效期至 2030 年 (时间戳毫秒)
-    obj.result.endTime = 1924905599000; 
-    
-    // 如果 result 下还有 master/plus 嵌套层级，一并处理
-    if (obj.result.master) {
-        obj.result.master.isMember = true;
-        obj.result.master.hasMasterPrvlg = true;
-        obj.result.master.mbrType = 1;
+try {
+    let obj = JSON.parse(body);
+    const url = $request.url;
+
+    // 1. 核心身份接口：针对性注入 Master 会员字段
+    if (url.includes("/api/user/info/detail3")) {
+        // 覆盖顶层 result
+        if (obj.result) {
+            obj.result.isMember = true;
+            obj.result.hasMasterPrvlg = true;
+            obj.result.mbrType = 1; // 1 通常对应大师会员
+            obj.result.endTime = 4092599349000;
+        }
+        
+        // 关键：强制修正 master 对象 (即使原本不存在也补全)
+        obj.master = obj.master || {};
+        Object.assign(obj.master, {
+            "isMember": true,
+            "hasMasterPrvlg": true,
+            "mbrType": "master", // 这里网易有时用字符串 "master"
+            "endTime": "2099-12-31T23:59:59.000Z"
+        });
+
+        // 兼容某些版本 result 嵌套 master 的情况
+        if (obj.result && obj.result.master) {
+            obj.result.master.isMember = true;
+            obj.result.master.hasMasterPrvlg = true;
+            obj.result.master.mbrType = 1;
+        }
     }
-}
 
-$done({ body: JSON.stringify(obj) });
+    // 2. 权益定义接口：解锁功能锁
+    if (url.includes("/api/privilege/feature/info3")) {
+        let list = Array.isArray(obj.result) ? obj.result : (obj.result?.list || []);
+        list.forEach(i => {
+            // 只要是 master 租户的权益，全部解锁
+            if (i.tenant === "master" || i.type === 210) {
+                i.hasPrivilege = true;
+                i.isLocked = false;
+                if (i.manual) i.manual.isLocked = false;
+            }
+        });
+    }
+
+    // 3. 功能开关：确保图标入口 enable
+    if (url.includes("/mailmaster/api/config/function.do")) {
+        let configs = Array.isArray(obj.result) ? obj.result : [];
+        configs.forEach(i => {
+            if (i.functionName && i.functionName.includes("Icon")) {
+                i.enable = true;
+                if (i.result) i.result.enable = true;
+            }
+        });
+    }
+
+    $done({ body: JSON.stringify(obj) });
+} catch (e) {
+    $done({ body });
+}
