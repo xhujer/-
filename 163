@@ -1,53 +1,36 @@
+/**
+ * @name 网易邮箱大师图标解锁 (增强版)
+ * @desc 深度覆盖 detail3 接口，确保权限下发
+ */
+
 let body = $response.body;
-const url = $request.url;
+if (!body) $done({}); 
 
 try {
-  let obj = JSON.parse(body);
+    let obj = JSON.parse(body);
 
-  if (url.includes("/api/user/info/detail3")) {
-    obj.result = obj.result || {};
-    Object.assign(obj.result, {
-      "isMember": true,
-      "mbrType": 1,
-      "endTime": 4092599349000,
-      "isVip": true,
-      "vipStatus": 1,
-      "memberBefore": true
-    });
-  }
+    // 递归处理函数：遍历对象，只要发现权限关键字就改写
+    const unlock = (target) => {
+        if (!target || typeof target !== 'object') return;
+        
+        // 修改关键会员字段
+        if (target.hasOwnProperty('isMember')) target.isMember = true;
+        if (target.hasOwnProperty('hasMasterPrvlg')) target.hasMasterPrvlg = true;
+        if (target.hasOwnProperty('mbrType')) target.mbrType = 1;
+        if (target.hasOwnProperty('endTime')) target.endTime = 4092599349000; // 2099年
+        if (target.hasOwnProperty('vipStatus')) target.vipStatus = 1;
 
-  if (url.includes("/external/privilege/data")) {
-    if (obj.result) {
-      if (obj.result.capacityDTO) obj.result.capacityDTO.total = 1100585369600;
-      (obj.result.privilegeList || []).forEach(i => {
-        i.hasPrivilege = true;
-        i.isLocked = false;
-      });
-    }
-  }
+        // 递归处理嵌套的对象或数组 (兼容 master/plus 嵌套)
+        for (let key in target) {
+            if (typeof target[key] === 'object') unlock(target[key]);
+        }
+    };
 
-  if (url.includes("/api/privilege/feature/info3")) {
-    (Array.isArray(obj.result) ? obj.result : (obj.result?.list || [])).forEach(i => {
-      i.hasPrivilege = true;
-      i.isLocked = false;
-      if (i.ext) { i.ext.status = 1; i.ext.vipLimit = 0; }
-    });
-  }
+    // 执行解锁逻辑
+    unlock(obj);
 
-  if (url.includes("/mailmaster/api/config/function.do")) {
-    (Array.isArray(obj.result) ? obj.result : (obj.result?.config || [])).forEach(i => {
-      if (i.functionName && (i.functionName.includes("Icon") || i.functionName.includes("Guide") || i.functionName.includes("Vip"))) {
-        i.enable = true;
-        if (i.result) i.result.enable = true;
-      }
-      if (i.functionName === "Function-AD") {
-        i.enable = false;
-        if (i.result) i.result.enable = false;
-      }
-    });
-  }
-
-  body = JSON.stringify(obj);
-} catch (e) {}
-
-$done({ body });
+    $done({ body: JSON.stringify(obj) });
+} catch (e) {
+    console.log("网易邮箱解锁脚本执行异常: " + e);
+    $done({ body }); // 出错时返回原包，保证 App 正常运行
+}
