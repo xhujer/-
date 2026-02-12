@@ -1,0 +1,9 @@
+[Script]
+# 手动访问 linux.do 时：抓 Cookie
+http-request ^https:\/\/linux\.do\/.* script-path=linuxdo.js, tag=LinuxDo-抓Cookie, enabled=true
+
+# 定时：自动刷新 Cookie + 拉 Connect
+cron "0 */6 * * *" script-path=linuxdo.js, tag=LinuxDo-自动刷新&任务, enabled=true
+
+[MITM]
+hostname = %APPEND% linux.do, connect.linux.do
