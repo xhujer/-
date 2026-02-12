@@ -1,0 +1,211 @@
+/**
+ * linuxdo.js（一个文件搞定）
+ * - 在 http-request 场景：抓 Cookie/UA 并保存
+ * - 在 cron 场景：用 Cookie 请求 /session/csrf 续期 -> 拉 connect.linux.do 并解析表格
+ */
+
+const KEY_COOKIE = "LINUXDO_COOKIE";
+const KEY_UA = "LINUXDO_UA";
+
+const HOME_URL = "https://linux.do/";
+const CSRF_URL = "https://linux.do/session/csrf";
+const CONNECT_URL = "https://connect.linux.do/";
+
+const DEFAULT_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+
+function notify(title, sub, msg) {
+  $notification.post(title, sub, msg);
+}
+
+function httpGet(url, headers) {
+  return new Promise((resolve) => {
+    $httpClient.get({ url, headers, timeout: 20000 }, (err, resp, data) => {
+      resolve({ err, resp, data });
+    });
+  });
+}
+
+/** 提取 Set-Cookie 并转成 "k=v; k2=v2" */
+function extractSetCookie(resp) {
+  if (!resp || !resp.headers) return "";
+  const h = resp.headers;
+
+  let sc = h["set-cookie"] || h["Set-Cookie"] || h["SET-COOKIE"] || "";
+  if (Array.isArray(sc)) sc = sc.join(",");
+  if (typeof sc !== "string") sc = String(sc || "");
+  if (!sc) return "";
+
+  const parts = sc
+    .split(/,(?=[^;]+?=)/g)
+    .map((s) => s.split(";")[0].trim())
+    .filter(Boolean);
+
+  const map = {};
+  parts.forEach((kv) => {
+    const idx = kv.indexOf("=");
+    if (idx > 0) map[kv.slice(0, idx)] = kv;
+  });
+
+  return Object.values(map).join("; ");
+}
+
+function mergeCookie(oldCookie, newCookie) {
+  const jar = {};
+  function add(cookieStr) {
+    if (!cookieStr) return;
+    cookieStr.split(";").forEach((kv) => {
+      const s = kv.trim();
+      const i = s.indexOf("=");
+      if (i > 0) jar[s.slice(0, i)] = s;
+    });
+  }
+  add(oldCookie);
+  add(newCookie);
+  return Object.values(jar).join("; ");
+}
+
+function looksLoggedOut(resp, data) {
+  const st = resp && typeof resp.status === "number" ? resp.status : 0;
+  const text = typeof data === "string" ? data : "";
+  if ([301, 302, 303, 307, 308].includes(st)) return true;
+  if (text.includes("/login") || text.includes("login") || text.includes("Log In")) return true;
+  return false;
+}
+
+function parseConnectTable(html) {
+  const rows = [];
+  const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let tr;
+  while ((tr = trRe.exec(html)) !== null) {
+    const trHtml = tr[1];
+    const tds = [];
+    const tdRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    let td;
+    while ((td = tdRe.exec(trHtml)) !== null) {
+      let text = td[1]
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text) tds.push(text);
+    }
+    if (tds.length >= 3) rows.push([tds[0], tds[1] || "0", tds[2] || "0"]);
+  }
+  return rows;
+}
+
+/** ============ 模式1：http-request 抓 Cookie ============ */
+function handleCapture() {
+  try {
+    const headers = ($request && $request.headers) || {};
+    const cookie = headers["Cookie"] || headers["cookie"] || "";
+    const ua = headers["User-Agent"] || headers["user-agent"] || "";
+
+    const looksLogin =
+      cookie &&
+      (cookie.includes("_forum_session") ||
+        cookie.includes("session") ||
+        cookie.includes("remember") ||
+        cookie.includes("_t="));
+
+    if (looksLogin) {
+      $persistentStore.write(cookie, KEY_COOKIE);
+      if (ua) $persistentStore.write(ua, KEY_UA);
+      notify("LINUX DO", "Cookie 已保存", "之后 cron 会自动刷新并拉取 Connect 信息");
+    }
+  } catch (e) {
+    console.log("[LinuxDo] capture error:", String(e));
+  }
+  $done({});
+}
+
+/** ============ 模式2：cron 自动刷新 + connect ============ */
+async function handleCron() {
+  let cookie = $persistentStore.read(KEY_COOKIE) || "";
+  const ua = $persistentStore.read(KEY_UA) || DEFAULT_UA;
+
+  if (!cookie) {
+    notify("LINUX DO", "未找到 Cookie", "请先手动打开 linux.do 并登录一次（会自动抓 Cookie）");
+    return $done();
+  }
+
+  // 1) /session/csrf 续期
+  const csrfHeaders = {
+    "User-Agent": ua,
+    Accept: "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+    "X-Requested-With": "XMLHttpRequest",
+    Referer: HOME_URL,
+    Cookie: cookie,
+  };
+
+  const csrfRes = await httpGet(CSRF_URL, csrfHeaders);
+  if (csrfRes.err || !csrfRes.resp) {
+    notify("LINUX DO", "刷新失败", String(csrfRes.err || "no response"));
+    return $done();
+  }
+  if (looksLoggedOut(csrfRes.resp, csrfRes.data)) {
+    notify("LINUX DO", "Cookie 已失效", "请重新手动登录一次 linux.do（会自动更新 Cookie）");
+    return $done();
+  }
+
+  const sc1 = extractSetCookie(csrfRes.resp);
+  if (sc1) {
+    const merged = mergeCookie(cookie, sc1);
+    if (merged && merged !== cookie) {
+      cookie = merged;
+      $persistentStore.write(cookie, KEY_COOKIE);
+      console.log("[LinuxDo] Cookie refreshed & saved.");
+    }
+  }
+
+  // 2) 拉 connect
+  const connectHeaders = {
+    "User-Agent": ua,
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+    Referer: HOME_URL,
+    Cookie: cookie,
+  };
+
+  const connectRes = await httpGet(CONNECT_URL, connectHeaders);
+  if (connectRes.err || !connectRes.resp) {
+    notify("LINUX DO", "Connect 获取失败", String(connectRes.err || "no response"));
+    return $done();
+  }
+  if (looksLoggedOut(connectRes.resp, connectRes.data)) {
+    notify("LINUX DO", "Cookie 可能失效", "访问 connect 被重定向登录页，请手动登录更新 Cookie");
+    return $done();
+  }
+
+  const sc2 = extractSetCookie(connectRes.resp);
+  if (sc2) {
+    const merged2 = mergeCookie(cookie, sc2);
+    if (merged2 && merged2 !== cookie) {
+      cookie = merged2;
+      $persistentStore.write(cookie, KEY_COOKIE);
+      console.log("[LinuxDo] Cookie updated from connect & saved.");
+    }
+  }
+
+  const rows = parseConnectTable(connectRes.data || "");
+  let msg = "✅ Cookie 刷新成功 + 登录态有效";
+  if (rows.length > 0) {
+    msg += "\n" + rows.slice(0, 6).map((r) => `${r[0]}: ${r[1]}/${r[2]}`).join("\n");
+    if (rows.length > 6) msg += `\n...共 ${rows.length} 项`;
+  } else {
+    msg += "\n（未解析到 Connect 表格，可能页面结构变了）";
+  }
+
+  notify("LINUX DO", "自动刷新&任务", msg);
+  $done();
+}
+
+/** ============ 自动判断运行环境 ============ */
+// http-request 运行时会有 $request；cron 没有
+if (typeof $request !== "undefined" && $request && $request.url) {
+  handleCapture();
+} else {
+  handleCron();
+}
