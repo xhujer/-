@@ -43,7 +43,7 @@ async function captureCookie() {
     if (referer) $.setdata(referer, KEY_REFERER);
     if (ckObj.csrf_access_token) $.setdata(ckObj.csrf_access_token, KEY_CSRF);
 
-    $.msg("HDHive", "🎉 Cookie 已更新", "");
+    $.msg;("HDHive", "🎉 Cookie 已更新", "可以关闭自动获取开关");
   }
 }
 
