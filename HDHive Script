@@ -43,7 +43,7 @@ async function captureCookie() {
     if (referer) $.setdata(referer, KEY_REFERER);
     if (ckObj.csrf_access_token) $.setdata(ckObj.csrf_access_token, KEY_CSRF);
 
-    $.msg("HDHive", "🎉 Cookie 已更新", "已保存 token + csrf_access_token（如有）");
+    $.msg("HDHive", "🎉 Cookie 已更新", "");
   }
 }
 
@@ -89,7 +89,6 @@ function buildFlowText(flow) {
   if (flow.latest_checkin?.points !== undefined)
     l.push(`变动数值：${flow.latest_checkin.points > 0 ? "+" : ""}${flow.latest_checkin.points} 积分`);
   if (flow.latest_checkin?.remark) l.push(`内容描述：${flow.latest_checkin.remark}`);
-
   if (flow.recent_checkins?.length) {
     l.push("");
     l.push("📝 积分日志：");
@@ -98,7 +97,7 @@ function buildFlowText(flow) {
   return l.join("\n");
 }
 
-// ========= 签到（把“已签到”当成功，并强制显示积分日志） =========
+// ========= 签到 =========
 async function checkIn() {
   const rawCookie = $.getdata(KEY_COOKIE);
   if (!rawCookie) {
@@ -133,13 +132,13 @@ async function checkIn() {
     "next-url": "/manager/points-logs",
   };
 
-  // 拉日志需要这个 Accept，避免返回 HTML
+  // 拉日志需要这个 Accept
   headers["Accept"] = "text/x-component,*/*";
 
   // 有些接口用 Bearer（不确定也无害）
   headers["Authorization"] = `Bearer ${token}`;
 
-  // CSRF（安全起见双写）
+  // CSRF（双写）
   if (csrf) {
     headers["X-CSRF-Token"] = csrf;
     headers["X-Csrf-Token"] = csrf;
@@ -172,13 +171,12 @@ async function checkIn() {
 
     let json = null;
     try { json = JSON.parse(raw); } catch {}
-    if (!json) continue;     // 不是 JSON 就换下一个 endpoint
+    if (!json) continue;
     checkinRes = json;
     break;
   }
 
   // —— 不管签到接口结果如何，都尽力显示积分日志 ——
-  // 先判断签到结果文案
   let title = "❌ 签到失败";
   let showText = "未获取到有效签到响应";
   let already = false;
@@ -188,7 +186,6 @@ async function checkIn() {
     const desc = checkinRes.description || checkinRes.desc || "";
     const code = String(checkinRes.code ?? "");
 
-    // 你这次返回就是这里：desc = 你已经签到过了，明天再来吧
     already =
       /已经签到|明天再来|已签到|已经/.test(desc) ||
       /已经签到|明天再来|已签到|已经/.test(msg);
@@ -197,7 +194,7 @@ async function checkIn() {
       /成功|签到成功/.test(desc) || /成功|签到成功/.test(msg);
 
     const ok =
-      (status === 200 || status === 201 || status === 400) && // 站点把已签到当 400
+      (status === 200 || status === 201 || status === 400) &&
       (checkinRes.success === true || successWord || already);
 
     if (ok) {
@@ -209,10 +206,9 @@ async function checkIn() {
     }
   } else {
     title = "❌ 签到失败";
-    showText = `未获取到签到 JSON（可能接口不对/重定向/鉴权失败）\nHTTP ${status}\n返回片段：${String(raw).slice(0, 200)}`;
+    showText = `未获取到签到 JSON\nHTTP ${status}\n返回片段：${String(raw).slice(0, 200)}`;
   }
 
-  // 再拉积分日志（按抓包）
   let flow = await activeFetchPointsFlow(headers);
   if (!flow) {
     try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
