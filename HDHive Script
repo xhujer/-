@@ -1,6 +1,5 @@
 const $ = new Env("HDHive");
 
-// ========= 常量 =========
 const DOMAIN = "hdhive.com";
 
 const KEY_COOKIE = "hdhive_cookie_v15";
@@ -9,7 +8,6 @@ const KEY_UA = "hdhive_ua_v15";
 const KEY_CSRF = "hdhive_csrf_v15";
 const KEY_FLOW = "hdhive_points_flow_v4";
 
-// ========= 入口 =========
 (async () => {
   if (typeof $request !== "undefined") {
     await captureCookie();
@@ -18,13 +16,13 @@ const KEY_FLOW = "hdhive_points_flow_v4";
   }
 })().catch(e => $.logErr(e)).finally(() => $.done());
 
-// ========= 抓 Cookie =========
 async function captureCookie() {
   const url = $request.url || "";
   if (!url.includes(DOMAIN)) return;
 
-  // 避免签到请求覆盖
   if (/\/(go-api|api)\/customer\/(user\/)?checkin/i.test(url)) return;
+
+  if (!/\/manager\/|\/api\/|\/go-api\/|https:\/\/hdhive\.com\/?$/.test(url)) return;
 
   const h = $request.headers || {};
   const cookie = getCookieFromHeaders(h);
@@ -33,21 +31,22 @@ async function captureCookie() {
 
   if (!cookie || cookie.length < 20) return;
 
-  const ckObj = parseCookie(cookie);
+  const normCookie = normalizeCookie(cookie);
+
+  const ckObj = parseCookie(normCookie);
   if (!ckObj.token) return;
 
   const old = $.getdata(KEY_COOKIE);
-  if (cookie !== old) {
-    $.setdata(cookie, KEY_COOKIE);
+  if (normCookie !== old) {
+    $.setdata(normCookie, KEY_COOKIE);
     if (ua) $.setdata(ua, KEY_UA);
     if (referer) $.setdata(referer, KEY_REFERER);
     if (ckObj.csrf_access_token) $.setdata(ckObj.csrf_access_token, KEY_CSRF);
 
-    $.msg;("HDHive", "🎉 Cookie 已更新", "可以关闭自动获取开关");
+    $.msg("HDHive", "🎉 Cookie 已更新", "可以关闭自动获取开关");
   }
 }
 
-// ========= 按抓包拉积分日志（RSC -> initialData） =========
 async function activeFetchPointsFlow(headers) {
   const url = `https://${DOMAIN}/manager/points-logs?page=1&page_size=10&_rsc=1`;
 
@@ -80,7 +79,6 @@ async function activeFetchPointsFlow(headers) {
   }
 }
 
-// ========= 展示文本 =========
 function buildFlowText(flow) {
   if (!flow) return "";
   const l = [];
@@ -97,7 +95,6 @@ function buildFlowText(flow) {
   return l.join("\n");
 }
 
-// ========= 签到 =========
 async function checkIn() {
   const rawCookie = $.getdata(KEY_COOKIE);
   if (!rawCookie) {
@@ -119,32 +116,24 @@ async function checkIn() {
   const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/manager/points-logs`;
   const csrf = $.getdata(KEY_CSRF) || ckObj.csrf_access_token || "";
 
-  // ---- 统一 headers（签到 + 拉日志）----
   const headers = {
     "User-Agent": ua,
     "Origin": `https://${DOMAIN}`,
     "Referer": referer,
     "Accept-Language": "zh-CN,zh-Hans;q=0.9",
     "Cookie": normalizeCookie(rawCookie),
-
-    // RSC 关键头（按抓包）
     "rsc": "1",
     "next-url": "/manager/points-logs",
   };
 
-  // 拉日志需要这个 Accept
   headers["Accept"] = "text/x-component,*/*";
-
-  // 有些接口用 Bearer（不确定也无害）
   headers["Authorization"] = `Bearer ${token}`;
 
-  // CSRF（双写）
   if (csrf) {
     headers["X-CSRF-Token"] = csrf;
     headers["X-Csrf-Token"] = csrf;
   }
 
-  // ---- 签到接口 headers（POST JSON）----
   const postHeaders = Object.assign({}, headers, {
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json;charset=utf-8",
@@ -176,7 +165,6 @@ async function checkIn() {
     break;
   }
 
-  // —— 不管签到接口结果如何，都尽力显示积分日志 ——
   let title = "❌ 签到失败";
   let showText = "未获取到有效签到响应";
   let already = false;
@@ -221,7 +209,6 @@ async function checkIn() {
   $.msg("HDHive", title, `${showText}${flowText}`);
 }
 
-// ========= HTTP =========
 function httpGetText(url, headers) {
   return new Promise((resolve, reject) => {
     $.get({ url, headers }, (err, resp, data) => {
@@ -241,7 +228,6 @@ function httpPostRaw(req) {
   });
 }
 
-// ========= 解析 RSC：提取 initialData 数组 =========
 function extractInitialDataArray(raw) {
   const key = '"initialData":';
   const idx = raw.indexOf(key);
@@ -277,7 +263,6 @@ function extractInitialDataArray(raw) {
   return null;
 }
 
-// ========= 工具 =========
 function getCookieFromHeaders(h) {
   let v = null;
   for (const k in h) {
@@ -320,7 +305,6 @@ function formatTime(t) {
     .replace(/\+\d\d:\d\d$/, "");
 }
 
-// ========= Env =========
 function Env(name) {
   return {
     name,
