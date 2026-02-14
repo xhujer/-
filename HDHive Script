@@ -8,7 +8,6 @@ const KEY_UA = "hdhive_ua_v15";
 const KEY_CSRF = "hdhive_csrf_v15";
 const KEY_FLOW = "hdhive_points_flow_v4";
 
-// ✅ 新增：记录最后命中的签到接口
 const KEY_LAST_CHECKIN_URL = "hdhive_checkin_last_url";
 
 (async () => {
@@ -141,45 +140,47 @@ async function checkIn() {
     "Content-Type": "application/json;charset=utf-8",
   });
 
+  const last = $.getdata(KEY_LAST_CHECKIN_URL);
   const endpoints = [
+    ...(last ? [last] : []),
     `https://${DOMAIN}/api/customer/user/checkin`,
     `https://${DOMAIN}/go-api/customer/user/checkin`,
     `https://${DOMAIN}/api/customer/checkin`,
     `https://${DOMAIN}/go-api/customer/checkin`,
-  ];
+  ].filter((v, i, a) => a.indexOf(v) === i);
 
   let checkinRes = null;
   let status = 0;
   let raw = "";
   let hitUrl = "";
 
-  // ✅ 新增：每个候选接口都打印尝试日志；命中后记录
   for (const url of endpoints) {
-    console.log("HDHive try checkin:", url);
+    console.log("HDHive try checkin: " + url);
 
     const req = { url, method: "POST", headers: postHeaders, body: "{}" };
     const r = await httpPostRaw(req);
     if (!r) {
-      console.log("HDHive checkin no response:", url);
+      console.log("HDHive checkin no response: " + url);
       continue;
     }
 
     status = r.status;
     raw = r.data || "";
-    console.log("HDHive checkin status:", status, "url:", url);
+
+    console.log("HDHive checkin status: " + status + " url: " + url);
 
     let json = null;
     try { json = JSON.parse(raw); } catch {}
 
     if (!json) {
-      console.log("HDHive checkin non-JSON:", url, "raw:", String(raw).slice(0, 120));
+      console.log("HDHive checkin non-JSON: " + url + " raw: " + String(raw).slice(0, 120));
       continue;
     }
 
     hitUrl = url;
     checkinRes = json;
 
-    console.log("HDHive checkin endpoint hit:", hitUrl);
+    console.log("HDHive checkin endpoint hit: " + hitUrl);
     $.setdata(hitUrl, KEY_LAST_CHECKIN_URL);
 
     break;
@@ -194,11 +195,10 @@ async function checkIn() {
     showText = (desc || msg || "（无提示文本）");
   } else {
     showText = `HTTP ${status}\n返回片段：${String(raw).slice(0, 200)}`;
-
-    // ✅ 新增：把“最后一次命中的接口（如果有）”也打印出来帮助排查
-    const last = $.getdata(KEY_LAST_CHECKIN_URL) || "";
-    if (last) console.log("HDHive last hit checkin url:", last);
   }
+
+  const lastHit = $.getdata(KEY_LAST_CHECKIN_URL) || "";
+  if (lastHit) showText += `\n命中接口：${lastHit}`;
 
   let flow = await activeFetchPointsFlow(headers);
   if (!flow) {
