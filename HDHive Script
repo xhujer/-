@@ -3,11 +3,11 @@ const $ = new Env("HDHive");
 // ========= 常量 =========
 const DOMAIN = "hdhive.com";
 
-const KEY_COOKIE = "hdhive_cookie_v14";
-const KEY_REFERER = "hdhive_referer_v14";
-const KEY_UA = "hdhive_ua_v14";
-const KEY_CSRF = "hdhive_csrf_v14";
-const KEY_FLOW = "hdhive_points_flow_v3";
+const KEY_COOKIE = "hdhive_cookie_v15";
+const KEY_REFERER = "hdhive_referer_v15";
+const KEY_UA = "hdhive_ua_v15";
+const KEY_CSRF = "hdhive_csrf_v15";
+const KEY_FLOW = "hdhive_points_flow_v4";
 
 // ========= 入口 =========
 (async () => {
@@ -18,12 +18,12 @@ const KEY_FLOW = "hdhive_points_flow_v3";
   }
 })().catch(e => $.logErr(e)).finally(() => $.done());
 
-// ========= 抓 Cookie（增强：合并多行 cookie + 保存 csrf_access_token） =========
+// ========= 抓 Cookie =========
 async function captureCookie() {
   const url = $request.url || "";
   if (!url.includes(DOMAIN)) return;
 
-  // 避免签到请求覆盖（可按需删）
+  // 避免签到请求覆盖
   if (/\/(go-api|api)\/customer\/(user\/)?checkin/i.test(url)) return;
 
   const h = $request.headers || {};
@@ -41,17 +41,14 @@ async function captureCookie() {
     $.setdata(cookie, KEY_COOKIE);
     if (ua) $.setdata(ua, KEY_UA);
     if (referer) $.setdata(referer, KEY_REFERER);
-
     if (ckObj.csrf_access_token) $.setdata(ckObj.csrf_access_token, KEY_CSRF);
 
     $.msg("HDHive", "🎉 Cookie 已更新", "已保存 token + csrf_access_token（如有）");
   }
 }
 
-// ========= 核心：按抓包拉积分日志（Next.js RSC → 解析 initialData） =========
+// ========= 按抓包拉积分日志（RSC -> initialData） =========
 async function activeFetchPointsFlow(headers) {
-  // 你的抓包就是这个：/manager/points-logs?page=2&page_size=10&_rsc=xxxx
-  // 这里 page=1 获取最新 10 条
   const url = `https://${DOMAIN}/manager/points-logs?page=1&page_size=10&_rsc=1`;
 
   try {
@@ -83,7 +80,7 @@ async function activeFetchPointsFlow(headers) {
   }
 }
 
-// ========= 构建展示文本 =========
+// ========= 展示文本 =========
 function buildFlowText(flow) {
   if (!flow) return "";
   const l = [];
@@ -92,6 +89,7 @@ function buildFlowText(flow) {
   if (flow.latest_checkin?.points !== undefined)
     l.push(`变动数值：${flow.latest_checkin.points > 0 ? "+" : ""}${flow.latest_checkin.points} 积分`);
   if (flow.latest_checkin?.remark) l.push(`内容描述：${flow.latest_checkin.remark}`);
+
   if (flow.recent_checkins?.length) {
     l.push("");
     l.push("📝 积分日志：");
@@ -100,7 +98,7 @@ function buildFlowText(flow) {
   return l.join("\n");
 }
 
-// ========= 签到（严格判定，不再误报成功） =========
+// ========= 签到（把“已签到”当成功，并强制显示积分日志） =========
 async function checkIn() {
   const rawCookie = $.getdata(KEY_COOKIE);
   if (!rawCookie) {
@@ -119,15 +117,12 @@ async function checkIn() {
     $.getdata(KEY_UA) ||
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1";
 
-  // 抓包 referer 多为 manager 页
   const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/manager/points-logs`;
   const csrf = $.getdata(KEY_CSRF) || ckObj.csrf_access_token || "";
 
-  // ---- 基础头（同时兼容签到与 points-logs RSC） ----
+  // ---- 统一 headers（签到 + 拉日志）----
   const headers = {
     "User-Agent": ua,
-    "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json;charset=utf-8",
     "Origin": `https://${DOMAIN}`,
     "Referer": referer,
     "Accept-Language": "zh-CN,zh-Hans;q=0.9",
@@ -138,16 +133,24 @@ async function checkIn() {
     "next-url": "/manager/points-logs",
   };
 
-  // 如果服务端用 Bearer，就带上；如果不用，也不影响 points-logs（它靠 cookie）
+  // 拉日志需要这个 Accept，避免返回 HTML
+  headers["Accept"] = "text/x-component,*/*";
+
+  // 有些接口用 Bearer（不确定也无害）
   headers["Authorization"] = `Bearer ${token}`;
 
-  // CSRF（安全起见双写大小写）
+  // CSRF（安全起见双写）
   if (csrf) {
     headers["X-CSRF-Token"] = csrf;
     headers["X-Csrf-Token"] = csrf;
   }
 
-  // ---- 签到接口多路径尝试 ----
+  // ---- 签到接口 headers（POST JSON）----
+  const postHeaders = Object.assign({}, headers, {
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json;charset=utf-8",
+  });
+
   const endpoints = [
     `https://${DOMAIN}/api/customer/user/checkin`,
     `https://${DOMAIN}/go-api/customer/user/checkin`,
@@ -160,72 +163,69 @@ async function checkIn() {
   let raw = "";
 
   for (const url of endpoints) {
-    const req = { url, method: "POST", headers, body: "{}" };
+    const req = { url, method: "POST", headers: postHeaders, body: "{}" };
     const r = await httpPostRaw(req);
     if (!r) continue;
 
     status = r.status;
     raw = r.data || "";
 
-    // 必须是 JSON 才继续判断
     let json = null;
     try { json = JSON.parse(raw); } catch {}
-
-    // 不是 JSON：继续换 endpoint
-    if (!json) continue;
-
+    if (!json) continue;     // 不是 JSON 就换下一个 endpoint
     checkinRes = json;
     break;
   }
 
-  // 完全没拿到 JSON：明确告诉你失败（不会再误报成功）
-  if (!checkinRes) {
-    $.msg(
-      "HDHive",
-      "❌ 签到失败",
-      `未获取到有效 JSON 响应（可能接口不对/被重定向/鉴权失败）\nHTTP ${status}\n返回片段：${String(raw).slice(0, 200)}`
-    );
-    return;
+  // —— 不管签到接口结果如何，都尽力显示积分日志 ——
+  // 先判断签到结果文案
+  let title = "❌ 签到失败";
+  let showText = "未获取到有效签到响应";
+  let already = false;
+
+  if (checkinRes) {
+    const msg = checkinRes.message || checkinRes.msg || "";
+    const desc = checkinRes.description || checkinRes.desc || "";
+    const code = String(checkinRes.code ?? "");
+
+    // 你这次返回就是这里：desc = 你已经签到过了，明天再来吧
+    already =
+      /已经签到|明天再来|已签到|已经/.test(desc) ||
+      /已经签到|明天再来|已签到|已经/.test(msg);
+
+    const successWord =
+      /成功|签到成功/.test(desc) || /成功|签到成功/.test(msg);
+
+    const ok =
+      (status === 200 || status === 201 || status === 400) && // 站点把已签到当 400
+      (checkinRes.success === true || successWord || already);
+
+    if (ok) {
+      title = already ? "🟢 今日已签到" : "✅ 签到成功";
+      showText = (desc || msg || "签到请求成功");
+    } else {
+      title = "❌ 签到失败";
+      showText = `HTTP ${status}\ncode=${code}\nmsg=${msg || "(空)"}\ndesc=${desc || "(空)"}`;
+    }
+  } else {
+    title = "❌ 签到失败";
+    showText = `未获取到签到 JSON（可能接口不对/重定向/鉴权失败）\nHTTP ${status}\n返回片段：${String(raw).slice(0, 200)}`;
   }
 
-  const msg = checkinRes.message || checkinRes.msg || "";
-  const code = checkinRes.code;
-
-  // 更严格的成功判断
-  const ok =
-    (status === 200 || status === 201) &&
-    (
-      code === 0 || code === 200 || code === "0" ||
-      /成功|已签到|已经|明天/.test(msg) ||
-      checkinRes.data
-    );
-
-  if (!ok) {
-    $.msg("HDHive", "❌ 签到失败", `HTTP ${status}\ncode=${code}\nmsg=${msg || "(空)"}\nraw=${JSON.stringify(checkinRes).slice(0, 300)}`);
-    return;
-  }
-
-  const checked =
-    /已经|明天/.test(msg) ||
-    msg.toLowerCase().includes("already") ||
-    msg.toLowerCase().includes("checked");
-
-  // ---- 拉积分日志（按抓包） ----
+  // 再拉积分日志（按抓包）
   let flow = await activeFetchPointsFlow(headers);
   if (!flow) {
     try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
   }
 
-  const flowText = flow ? "\n\n" + buildFlowText(flow) : "\n\n（未拉到积分日志：请确认已 MITM 解密 hdhive.com，且 cookie 仍有效）";
+  const flowText = flow
+    ? "\n\n" + buildFlowText(flow)
+    : "\n\n（未拉到积分日志：可能是 MITM 未解密 / 返回非 RSC / Cookie 无权限）";
 
-  $.msg(
-    "HDHive",
-    checked ? "🟢 今日已签到" : "✅ 签到成功",
-    `${msg || "签到请求成功"}${flowText}`
-  );
+  $.msg("HDHive", title, `${showText}${flowText}`);
 }
 
-// ========= HTTP 工具 =========
+// ========= HTTP =========
 function httpGetText(url, headers) {
   return new Promise((resolve, reject) => {
     $.get({ url, headers }, (err, resp, data) => {
@@ -254,7 +254,6 @@ function extractInitialDataArray(raw) {
   let i = raw.indexOf("[", idx + key.length);
   if (i < 0) return null;
 
-  // bracket matching：能抗 RSC 里各种嵌套
   let depth = 0;
   let inStr = false;
   let esc = false;
@@ -282,7 +281,7 @@ function extractInitialDataArray(raw) {
   return null;
 }
 
-// ========= Cookie/Headers 工具 =========
+// ========= 工具 =========
 function getCookieFromHeaders(h) {
   let v = null;
   for (const k in h) {
