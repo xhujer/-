@@ -9,6 +9,7 @@ const KEY_CSRF = "hdhive_csrf_v15";
 const KEY_FLOW = "hdhive_points_flow_v4";
 
 const KEY_LAST_CHECKIN_URL = "hdhive_checkin_last_url";
+const KEY_LAST_HIT_NOTIFIED = "hdhive_checkin_last_hit_notified";
 
 (async () => {
   if (typeof $request !== "undefined") {
@@ -155,33 +156,28 @@ async function checkIn() {
   let hitUrl = "";
 
   for (const url of endpoints) {
-    console.log("HDHive try checkin: " + url);
-
     const req = { url, method: "POST", headers: postHeaders, body: "{}" };
     const r = await httpPostRaw(req);
-    if (!r) {
-      console.log("HDHive checkin no response: " + url);
-      continue;
-    }
+    if (!r) continue;
 
     status = r.status;
     raw = r.data || "";
 
-    console.log("HDHive checkin status: " + status + " url: " + url);
-
     let json = null;
     try { json = JSON.parse(raw); } catch {}
-
-    if (!json) {
-      console.log("HDHive checkin non-JSON: " + url + " raw: " + String(raw).slice(0, 120));
-      continue;
-    }
+    if (!json) continue;
 
     hitUrl = url;
     checkinRes = json;
 
-    console.log("HDHive checkin endpoint hit: " + hitUrl);
     $.setdata(hitUrl, KEY_LAST_CHECKIN_URL);
+
+    // ✅ 只在“首次命中”或“命中接口变化”时弹一次通知（不刷屏）
+    const notified = $.getdata(KEY_LAST_HIT_NOTIFIED) || "";
+    if (hitUrl && hitUrl !== notified) {
+      $.msg("HDHive", "✅ 命中接口", hitUrl);
+      $.setdata(hitUrl, KEY_LAST_HIT_NOTIFIED);
+    }
 
     break;
   }
