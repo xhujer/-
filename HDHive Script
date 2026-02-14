@@ -32,7 +32,6 @@ async function captureCookie() {
   if (!cookie || cookie.length < 20) return;
 
   const normCookie = normalizeCookie(cookie);
-
   const ckObj = parseCookie(normCookie);
   if (!ckObj.token) return;
 
@@ -165,36 +164,15 @@ async function checkIn() {
     break;
   }
 
-  let title = "❌ 签到失败";
+  let title = "📌 签到结果";
   let showText = "未获取到有效签到响应";
-  let already = false;
 
   if (checkinRes) {
     const msg = checkinRes.message || checkinRes.msg || "";
     const desc = checkinRes.description || checkinRes.desc || "";
-    const code = String(checkinRes.code ?? "");
-
-    already =
-      /已经签到|明天再来|已签到|已经/.test(desc) ||
-      /已经签到|明天再来|已签到|已经/.test(msg);
-
-    const successWord =
-      /成功|签到成功/.test(desc) || /成功|签到成功/.test(msg);
-
-    const ok =
-      (status === 200 || status === 201 || status === 400) &&
-      (checkinRes.success === true || successWord || already);
-
-    if (ok) {
-      title = already ? "🟢 今日已签到" : "✅ 签到成功";
-      showText = (desc || msg || "签到请求成功");
-    } else {
-      title = "❌ 签到失败";
-      showText = `HTTP ${status}\ncode=${code}\nmsg=${msg || "(空)"}\ndesc=${desc || "(空)"}`;
-    }
+    showText = (desc || msg || "（无提示文本）");
   } else {
-    title = "❌ 签到失败";
-    showText = `未获取到签到 JSON\nHTTP ${status}\n返回片段：${String(raw).slice(0, 200)}`;
+    showText = `HTTP ${status}\n返回片段：${String(raw).slice(0, 200)}`;
   }
 
   let flow = await activeFetchPointsFlow(headers);
