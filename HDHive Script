@@ -8,6 +8,9 @@ const KEY_UA = "hdhive_ua_v15";
 const KEY_CSRF = "hdhive_csrf_v15";
 const KEY_FLOW = "hdhive_points_flow_v4";
 
+const KEY_LAST_CHECKIN_URL = "hdhive_checkin_last_url";
+const KEY_LAST_HIT_NOTIFIED = "hdhive_checkin_last_hit_notified";
+
 (async () => {
   if (typeof $request !== "undefined") {
     await captureCookie();
@@ -138,16 +141,19 @@ async function checkIn() {
     "Content-Type": "application/json;charset=utf-8",
   });
 
+  const last = $.getdata(KEY_LAST_CHECKIN_URL);
   const endpoints = [
+    ...(last ? [last] : []),
     `https://${DOMAIN}/api/customer/user/checkin`,
     `https://${DOMAIN}/go-api/customer/user/checkin`,
     `https://${DOMAIN}/api/customer/checkin`,
     `https://${DOMAIN}/go-api/customer/checkin`,
-  ];
+  ].filter((v, i, a) => a.indexOf(v) === i);
 
   let checkinRes = null;
   let status = 0;
   let raw = "";
+  let hitUrl = "";
 
   for (const url of endpoints) {
     const req = { url, method: "POST", headers: postHeaders, body: "{}" };
@@ -160,7 +166,19 @@ async function checkIn() {
     let json = null;
     try { json = JSON.parse(raw); } catch {}
     if (!json) continue;
+
+    hitUrl = url;
     checkinRes = json;
+
+    $.setdata(hitUrl, KEY_LAST_CHECKIN_URL);
+
+    // ✅ 只在“首次命中”或“命中接口变化”时弹一次通知（不刷屏）
+    const notified = $.getdata(KEY_LAST_HIT_NOTIFIED) || "";
+    if (hitUrl && hitUrl !== notified) {
+      $.msg("HDHive", "✅ 命中接口", hitUrl);
+      $.setdata(hitUrl, KEY_LAST_HIT_NOTIFIED);
+    }
+
     break;
   }
 
@@ -174,6 +192,9 @@ async function checkIn() {
   } else {
     showText = `HTTP ${status}\n返回片段：${String(raw).slice(0, 200)}`;
   }
+
+  const lastHit = $.getdata(KEY_LAST_CHECKIN_URL) || "";
+  if (lastHit) showText += `\n命中接口：${lastHit}`;
 
   let flow = await activeFetchPointsFlow(headers);
   if (!flow) {
