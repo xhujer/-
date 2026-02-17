@@ -1,21 +1,35 @@
 /*
- * 富贵论坛小时签到脚本（Loon 专用版）
+ * 富贵论坛小时签到脚本（Loon 专用增强版）
  *
  * 作者: TimeJason（原脚本）
  * Loon 改写: ChatGPT
- * 更新日期: 2026-02-17
+ * 更新日期: 2026-02-18
  *
- * 功能:
- *   - 监听网页版签到请求，自动抓取并保存账号 Cookie 及 formhash。
- *   - 定时任务每小时自动执行签到，并对结果进行通知。
+ * 增强点:
+ *   A) 账号唯一键更稳：不再写死 Cookie 前缀；找不到则用 cookie hash 做唯一 id
+ *   B) 每次签到前自动刷新 formhash（失败则回退用旧 formhash）
+ *   C) 响应解析更健壮（兼容 HTML/JS/转义与更多提示文案）
+ *   D) Cookie 失效自动标记 + 降噪（默认 12 小时内不重复轰炸）
  */
 
 // ========== BoxJs Keys（与原脚本保持一致） ==========
-const FUGUI_HOUR_DATA_KEY = 'fugui_hour_datas';
-const KEY_NOTIFY_SUCCESS = 'fugui_hour_notify_success';
-const KEY_DEBUG_LOG = 'fugui_hour_debug_log';
+const FUGUI_HOUR_DATA_KEY = "fugui_hour_datas";
+const KEY_NOTIFY_SUCCESS = "fugui_hour_notify_success";
+const KEY_DEBUG_LOG = "fugui_hour_debug_log";
 
-const SCRIPT_NAME = '富贵论坛小时签';
+const SCRIPT_NAME = "富贵论坛小时签";
+
+// ========== 可调参数 ==========
+const INVALID_COOLDOWN_HOURS = 12; // Cookie 失效后，标记静默窗口
+const BETWEEN_ACCOUNTS_DELAY_MS = 2000; // 多账号间隔
+const PRE_SIGN_DELAY_RANGE_MS = [300, 800]; // 刷新 formhash 后到签到前的随机延迟
+
+// 用于刷新 formhash 的候选页面（按顺序尝试）
+const FORMHASH_PAGES = [
+  "https://www.fglt.net/xm_task_20130503-list.html",
+  "https://www.fglt.net/forum.php",
+  "https://www.fglt.net/",
+];
 
 // ========== Loon 工具封装 ==========
 function read(key) {
@@ -24,7 +38,7 @@ function read(key) {
 function write(val, key) {
   return $persistentStore.write(String(val), key);
 }
-function notify(title, subtitle = '', body = '') {
+function notify(title, subtitle = "", body = "") {
   $notification.post(title, subtitle, body);
 }
 function log(...args) {
@@ -36,7 +50,6 @@ function done(obj = {}) {
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
 function httpGet(options) {
   return new Promise((resolve, reject) => {
     $httpClient.get(options, (error, response, data) => {
@@ -49,97 +62,285 @@ function httpGet(options) {
 // ========== 入口 ==========
 (async () => {
   try {
-    // Rewrite 抓数据模式：命中小时签请求
-    if (typeof $request !== 'undefined' && $request.url && $request.url.includes('id=dsu_amupper&ppersubmit=true')) {
-      log('进入小时签数据获取模式...');
+    // Rewrite 抓数据模式：命中小时签请求（放宽匹配）
+    if (
+      typeof $request !== "undefined" &&
+      $request.url &&
+      $request.url.includes("plugin.php") &&
+      $request.url.includes("id=dsu_amupper") &&
+      ($request.url.includes("ppersubmit=true") || $request.url.includes("ppersubmit"))
+    ) {
+      log("进入小时签数据获取模式...");
       getAuthDataFromRequest($request);
       return done();
     }
 
     // Cron 模式：无 $request
-    if (typeof $request === 'undefined') {
-      log('进入小时签定时任务模式...');
+    if (typeof $request === "undefined") {
+      log("进入小时签定时任务模式...");
       await runTasks();
       return done();
     }
 
-    // 其他情况直接结束
     return done();
   } catch (e) {
-    log('异常：', e && e.message ? e.message : e);
-    notify(SCRIPT_NAME, '❌ 脚本异常', String(e && e.message ? e.message : e));
+    log("异常：", e && e.message ? e.message : e);
+    notify(SCRIPT_NAME, "❌ 脚本异常", String(e && e.message ? e.message : e));
     return done();
   }
 })();
 
-// ========== 业务逻辑 ==========
+// ========== 通用工具 ==========
+function safeJsonParse(str, fallback) {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return fallback;
+  }
+}
+
+function saveAccounts(accounts) {
+  write(JSON.stringify(accounts || []), FUGUI_HOUR_DATA_KEY);
+}
+
+function nowMs() {
+  return Date.now();
+}
+
+function randInt(min, max) {
+  const a = Math.min(min, max);
+  const b = Math.max(min, max);
+  return Math.floor(a + Math.random() * (b - a + 1));
+}
+
+// 简单 FNV-1a 32-bit hash（用于 cookie 缺少可识别字段时的唯一键）
+function fnv1a32(str) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = (hash * 0x01000193) >>> 0;
+  }
+  return ("00000000" + hash.toString(16)).slice(-8);
+}
+
 function getFormhashFromUrl(url) {
   const match = url.match(/formhash=([a-zA-Z0-9]+)/);
   return match ? match[1] : null;
 }
 
-function getUserIdFromCookie(cookie) {
-  const match = cookie.match(/JoRn_2132_auth=([^;]+)/);
-  return match ? match[1].substring(0, 10) : null;
+function getCookieHeader(headers) {
+  if (!headers) return "";
+  return headers["Cookie"] || headers["cookie"] || "";
 }
 
-function safeJsonParse(str, fallback) {
-  try { return JSON.parse(str); } catch { return fallback; }
+// 更稳的账号标识提取：优先 *_auth=，其次 *_saltkey=，最后 cookie hash
+function getUserKeyFromCookie(cookie) {
+  if (!cookie) return null;
+
+  const authMatch = cookie.match(/(?:^|;\s*)[^=]+_auth=([^;]+)/);
+  if (authMatch && authMatch[1]) {
+    // 展示用取前 10 位即可；仍保留整串用于稳定性（这里用前 10 位作为 userId）
+    return authMatch[1].substring(0, 10);
+  }
+
+  const saltMatch = cookie.match(/(?:^|;\s*)[^=]+_saltkey=([^;]+)/);
+  if (saltMatch && saltMatch[1]) {
+    return ("salt_" + saltMatch[1]).substring(0, 10);
+  }
+
+  // fallback: hash(cookie)
+  return "h_" + fnv1a32(cookie).substring(0, 8);
 }
 
+function ensureAccountFields(acc) {
+  if (!acc || typeof acc !== "object") return acc;
+  if (typeof acc.invalidUntil !== "number") acc.invalidUntil = 0;
+  if (typeof acc.lastStatus !== "string") acc.lastStatus = "";
+  if (typeof acc.lastFailReason !== "string") acc.lastFailReason = "";
+  return acc;
+}
+
+// ========== 抓取数据逻辑（Rewrite） ==========
 function getAuthDataFromRequest(req) {
   const url = req.url;
   const headers = req.headers || {};
-  const cookie = headers['Cookie'] || headers['cookie'];
+  const cookie = getCookieHeader(headers);
 
   if (!cookie) {
-    notify(SCRIPT_NAME, '❌ 获取失败', '未能读取到 Cookie。请确保在浏览器中已登录富贵论坛。');
+    notify(SCRIPT_NAME, "❌ 获取失败", "未能读取到 Cookie。请确保在浏览器中已登录富贵论坛。");
     return;
   }
 
   const formhash = getFormhashFromUrl(url);
   if (!formhash) {
-    notify(SCRIPT_NAME, '❌ 获取失败', '未能从URL中找到 formhash！');
+    notify(SCRIPT_NAME, "❌ 获取失败", "未能从URL中找到 formhash！");
     return;
   }
 
-  const userId = getUserIdFromCookie(cookie);
+  const userId = getUserKeyFromCookie(cookie);
   if (!userId) {
-    notify(SCRIPT_NAME, '❌ 获取失败', '未能从 Cookie 中找到用户身份凭证 (auth)！');
+    notify(SCRIPT_NAME, "❌ 获取失败", "未能从 Cookie 中识别账号标识！");
     return;
   }
 
   const nickname = `网页用户_${userId}`;
-  const newAccountData = { userId, nickname, cookie, formhash };
+  const newAccountData = ensureAccountFields({ userId, nickname, cookie, formhash });
 
   const accountsStr = read(FUGUI_HOUR_DATA_KEY);
   const accounts = accountsStr ? safeJsonParse(accountsStr, []) : [];
 
-  const idx = accounts.findIndex(acc => acc.userId === userId);
+  // 兼容旧数据：补字段
+  for (const a of accounts) ensureAccountFields(a);
+
+  const idx = accounts.findIndex((acc) => acc.userId === userId);
   if (idx > -1) {
     accounts[idx].cookie = newAccountData.cookie;
     accounts[idx].formhash = newAccountData.formhash;
-    notify(SCRIPT_NAME, '✅ 配置更新成功', `账号: [${accounts[idx].nickname}]\n已更新为最新的有效配置。`);
+    accounts[idx].invalidUntil = 0; // 重新抓取视为恢复
+    accounts[idx].lastStatus = "";
+    accounts[idx].lastFailReason = "";
+    notify(SCRIPT_NAME, "✅ 配置更新成功", `账号: [${accounts[idx].nickname}]\n已更新为最新的有效配置。`);
   } else {
     accounts.push(newAccountData);
-    notify(SCRIPT_NAME, '✅ 配置添加成功', `账号: [${nickname}]\n已完成初始化，你可以在 BoxJs 中修改昵称。`);
+    notify(SCRIPT_NAME, "✅ 配置添加成功", `账号: [${nickname}]\n已完成初始化，你可以在 BoxJs 中修改昵称。`);
   }
 
-  write(JSON.stringify(accounts), FUGUI_HOUR_DATA_KEY);
+  saveAccounts(accounts);
 }
 
+// ========== formhash 刷新逻辑（B） ==========
+function parseFormhashFromHtml(html) {
+  if (!html) return null;
+
+  // 常见：<input type="hidden" name="formhash" value="xxxx" />
+  const m1 = html.match(/name=["']formhash["']\s+value=["']([a-zA-Z0-9]+)["']/i);
+  if (m1 && m1[1]) return m1[1];
+
+  // 也可能出现 formhash=xxxx
+  const m2 = html.match(/formhash=([a-zA-Z0-9]+)/i);
+  if (m2 && m2[1]) return m2[1];
+
+  return null;
+}
+
+async function fetchFormhash(cookie, debugLog) {
+  for (const pageUrl of FORMHASH_PAGES) {
+    try {
+      const { data } = await httpGet({
+        url: pageUrl,
+        headers: {
+          Cookie: cookie,
+          "User-Agent":
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+          Referer: "https://www.fglt.net/",
+        },
+      });
+
+      const formhash = parseFormhashFromHtml(data);
+      if (debugLog) log(`[调试] fetchFormhash page=${pageUrl} formhash=${formhash || "null"}`);
+
+      if (formhash) return formhash;
+    } catch (e) {
+      if (debugLog) log(`[调试] fetchFormhash page=${pageUrl} error=${e && e.message ? e.message : e}`);
+      // 继续尝试下一个
+    }
+  }
+  return null;
+}
+
+// ========== 响应解析（C） ==========
+function stripHtml(raw) {
+  if (!raw) return "";
+  return String(raw)
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, "")
+    .replace(/<\/?[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractReward(data) {
+  if (!data) return "";
+
+  // 原逻辑+扩展：特奖励 / 奖励
+  const m1 = data.match(/特奖励[：:\s]*([^()<\s]+|[^()<\s][^()<]*?)(?=(\(|<|$|\s))/);
+  if (m1 && m1[1]) return stripHtml(m1[1]).trim();
+
+  const m2 = data.match(/奖励[：:\s]*([^()<\s]+|[^()<\s][^()<]*?)(?=(\(|<|$|\s))/);
+  if (m2 && m2[1]) return stripHtml(m2[1]).trim();
+
+  return "";
+}
+
+function parseSignResponse(data) {
+  const raw = String(data || "");
+  const text = stripHtml(raw);
+
+  // Discuz 插件常见 errorhandle：errorhandle_xxx('reason')
+  const errMatch = raw.match(/errorhandle_[a-zA-Z0-9_]+\('([^']+)'\)/);
+  const errReason = errMatch && errMatch[1] ? errMatch[1] : "";
+
+  const loginSignals = [
+    "需要登录",
+    "您需要先登录",
+    "登录后",
+    "Please login",
+    "member.php",
+    "登录",
+    "密码",
+  ];
+  const repeatSignals = ["您已签到", "已签到完毕", "重复", "already", "已打卡"];
+  const successSignals = ["感谢", "签到成功", "恭喜", "success", "打卡成功", "成功"];
+
+  const lower = raw.toLowerCase();
+  const lowerText = text.toLowerCase();
+
+  const hasAny = (arr) =>
+    arr.some((s) => raw.includes(s) || text.includes(s) || lower.includes(String(s).toLowerCase()) || lowerText.includes(String(s).toLowerCase()));
+
+  // 1) 需登录/失效
+  if (hasAny(loginSignals)) {
+    return { type: "invalid_cookie", message: errReason || "Cookie 已失效或需要重新登录" };
+  }
+
+  // 2) 重复
+  if (hasAny(repeatSignals)) {
+    return { type: "repeat", message: "重复签到。下个整点再来！" };
+  }
+
+  // 3) 成功
+  if (hasAny(successSignals)) {
+    const reward = extractReward(raw) || "奖励";
+    return { type: "success", message: `签到成功 - 获得 ${reward}` };
+  }
+
+  // 4) 未知失败：优先用 errorhandle reason
+  if (errReason) {
+    return { type: "fail", message: errReason };
+  }
+
+  // 5) 兜底：取纯文本前 60 字
+  const fallback = (text || raw).slice(0, 60);
+  return { type: "fail", message: fallback ? `未知错误：${fallback}` : "未知错误" };
+}
+
+// ========== 定时任务入口 ==========
 async function runTasks() {
   const accountsStr = read(FUGUI_HOUR_DATA_KEY);
   if (!accountsStr) {
-    notify(SCRIPT_NAME, '❌ 未找到配置', '请先在浏览器中手动执行一次“小时签到”以初始化脚本。');
+    notify(SCRIPT_NAME, "❌ 未找到配置", "请先在浏览器中手动执行一次“小时签到”以初始化脚本。");
     return;
   }
 
   const accounts = safeJsonParse(accountsStr, []);
   if (!accounts || accounts.length === 0) {
-    notify(SCRIPT_NAME, '🤔 配置为空', '没有找到任何账号信息，请先抓取数据。');
+    notify(SCRIPT_NAME, "🤔 配置为空", "没有找到任何账号信息，请先抓取数据。");
     return;
   }
+
+  // 兼容旧数据：补字段
+  for (const a of accounts) ensureAccountFields(a);
 
   log(`共发现 ${accounts.length} 个账号，开始执行小时签任务...`);
 
@@ -147,33 +348,77 @@ async function runTasks() {
   let allSuccessOrRepeat = true;
 
   for (let i = 0; i < accounts.length; i++) {
-    const result = await claimReward(accounts[i]);
-    if (result.includes('❌')) allSuccessOrRepeat = false;
-    summary.push(result);
-    if (i < accounts.length - 1) await wait(2000);
+    const { line, hardFail } = await claimReward(accounts, i);
+    summary.push(line);
+
+    if (hardFail) allSuccessOrRepeat = false;
+    if (i < accounts.length - 1) await wait(BETWEEN_ACCOUNTS_DELAY_MS);
   }
+
+  // 保存可能更新过的账号信息（如 formhash / invalidUntil）
+  saveAccounts(accounts);
 
   const hour = new Date().getHours();
   const finalTitle = `富贵论坛小时签 (${hour}:00)`;
-  const finalMessage = summary.join('\n');
+  const finalMessage = summary.join("\n");
 
-  const notifySuccess = read(KEY_NOTIFY_SUCCESS) !== 'false';
+  const notifySuccess = read(KEY_NOTIFY_SUCCESS) !== "false";
 
   log(`--- 任务执行摘要 ---\n${finalMessage}\n--------------------`);
 
   if (allSuccessOrRepeat && !notifySuccess) {
-    log('✅ 所有任务执行成功或重复，根据设置不发送通知。');
+    log("✅ 所有任务执行成功/重复/静默，根据设置不发送通知。");
   } else {
     notify(SCRIPT_NAME, finalTitle, finalMessage);
   }
 }
 
-async function claimReward(accountData) {
-  const { nickname, cookie, formhash } = accountData || {};
+// ========== 单账号签到（A/B/C/D 落地） ==========
+async function claimReward(accounts, index) {
+  const accountData = accounts[index] || {};
+  ensureAccountFields(accountData);
 
-  if (!cookie || !formhash) {
-    return `👤 账号 [${nickname || '未知'}]: ❌ 缺少 Cookie 或 formhash 配置，请重新抓取。`;
+  const { nickname, cookie } = accountData;
+  const debugLog = read(KEY_DEBUG_LOG) === "true";
+
+  const who = `👤 账号 [${nickname || "未知"}]: `;
+
+  if (!cookie) {
+    accountData.lastStatus = "config_missing";
+    accountData.lastFailReason = "缺少 Cookie";
+    return { line: who + "❌ 缺少 Cookie 配置，请重新抓取。", hardFail: true };
   }
+
+  // D) 失效静默窗口：直接降噪
+  if (accountData.invalidUntil && accountData.invalidUntil > nowMs()) {
+    const leftMin = Math.ceil((accountData.invalidUntil - nowMs()) / 60000);
+    return {
+      line: who + `⏸ 已标记 Cookie 失效（剩余约 ${leftMin} 分钟静默）。请重新抓取。`,
+      hardFail: false,
+    };
+  }
+
+  // B) 刷新 formhash（失败则回退使用旧 formhash）
+  let freshFormhash = null;
+  try {
+    freshFormhash = await fetchFormhash(cookie, debugLog);
+  } catch (e) {
+    if (debugLog) log(`[调试] fetchFormhash exception: ${e && e.message ? e.message : e}`);
+  }
+
+  if (freshFormhash) {
+    accountData.formhash = freshFormhash;
+  }
+
+  const formhash = accountData.formhash;
+  if (!formhash) {
+    accountData.lastStatus = "formhash_missing";
+    accountData.lastFailReason = "缺少 formhash 且刷新失败";
+    return { line: who + "❌ 缺少 formhash，且自动刷新失败。请重新抓取一次或检查刷新页面。", hardFail: true };
+  }
+
+  // 刷新后随机小延迟，降低风控概率
+  await wait(randInt(PRE_SIGN_DELAY_RANGE_MS[0], PRE_SIGN_DELAY_RANGE_MS[1]));
 
   const requestUrl =
     `https://www.fglt.net/plugin.php?id=dsu_amupper&ppersubmit=true&formhash=${formhash}` +
@@ -182,48 +427,64 @@ async function claimReward(accountData) {
   const options = {
     url: requestUrl,
     headers: {
-      'Cookie': cookie,
-      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-      'X-Requested-With': 'XMLHttpRequest',
-      'Referer': 'https://www.fglt.net/xm_task_20130503-list.html'
-    }
+      Cookie: cookie,
+      "User-Agent":
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: "https://www.fglt.net/xm_task_20130503-list.html",
+    },
   };
 
-  log(`▶️ 开始为账号 [${nickname}] 进行小时签...`);
-
-  const debugLog = read(KEY_DEBUG_LOG) === 'true';
+  log(`▶️ 开始为账号 [${nickname}] 进行小时签...（formhash=${formhash}）`);
 
   try {
     const { response, data } = await httpGet(options);
+    const status = (response && (response.status || response.statusCode)) || "unknown";
 
     if (debugLog) {
-      log(`[调试日志] 账号 [${nickname}] - 状态码: ${(response && (response.status || response.statusCode)) || 'unknown'} - 原始响应: ${data}`);
+      log(`[调试日志] 账号 [${nickname}] - 状态码: ${status} - 原始响应片段: ${String(data || "").slice(0, 200)}`);
     }
-
-    let resultSummary = `👤 账号 [${nickname}]: `;
 
     if (!data) {
-      return resultSummary + '❌ 空响应';
+      accountData.lastStatus = "empty";
+      accountData.lastFailReason = "空响应";
+      return { line: who + "❌ 空响应", hardFail: true };
     }
 
-    if (data.includes('您已签到完毕')) {
-      resultSummary += '🔁 重复签到。下个整点再来！';
-    } else if (data.includes('感谢您积极打卡') || data.includes('签到成功') || data.includes('恭喜你')) {
-      const match = data.match(/特奖励：(.*?)(\(|\s|$)/);
-      const fallbackMatch = !match && data.match(/奖励(：|：\s*)(.*?)(\(|\s|$)/);
-      const reward = match ? match[1].trim() : (fallbackMatch ? fallbackMatch[2].trim() : '奖励');
-      resultSummary += `✅ 签到成功 - 获得 ${reward}`;
-    } else if (data.includes('需要登录')) {
-      resultSummary += '❌ 签到失败 - Cookie 已失效，请重新抓取。';
-    } else {
-      const failMatch = data.match(/errorhandle_dsu_amupper\('([^']+)'/);
-      const failReason = failMatch ? failMatch[1] : '未知错误';
-      resultSummary += `❌ 签到失败 - ${failReason}`;
+    const parsed = parseSignResponse(data);
+
+    if (parsed.type === "repeat") {
+      accountData.lastStatus = "repeat";
+      accountData.lastFailReason = "";
+      return { line: who + "🔁 " + parsed.message, hardFail: false };
     }
 
-    return resultSummary;
+    if (parsed.type === "success") {
+      accountData.lastStatus = "success";
+      accountData.lastFailReason = "";
+      // 成功则清空失效标记
+      accountData.invalidUntil = 0;
+      return { line: who + "✅ " + parsed.message, hardFail: false };
+    }
+
+    if (parsed.type === "invalid_cookie") {
+      accountData.lastStatus = "invalid_cookie";
+      accountData.lastFailReason = parsed.message;
+
+      // D) 标记失效并进入静默窗口
+      accountData.invalidUntil = nowMs() + INVALID_COOLDOWN_HOURS * 3600 * 1000;
+
+      return { line: who + "❌ 签到失败 - Cookie 已失效，请重新抓取。", hardFail: true };
+    }
+
+    // fail
+    accountData.lastStatus = "fail";
+    accountData.lastFailReason = parsed.message || "未知错误";
+    return { line: who + "❌ 签到失败 - " + (parsed.message || "未知错误"), hardFail: true };
   } catch (e) {
-    log('请求异常：', e && e.message ? e.message : e);
-    return `👤 账号 [${nickname}]: ❌ 请求异常或响应格式错误。`;
+    log("请求异常：", e && e.message ? e.message : e);
+    accountData.lastStatus = "exception";
+    accountData.lastFailReason = e && e.message ? e.message : "请求异常";
+    return { line: who + "❌ 请求异常或响应格式错误。", hardFail: true };
   }
 }
