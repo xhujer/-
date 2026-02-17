@@ -6,6 +6,7 @@
 
 const CONFIG = {
   name: "富贵签到",
+  // ✅ 统一用 https://www.fglt.net（Cookie 对 fglt.net / www.fglt.net 也能用，且更稳定）
   signUrl:
     "https://www.fglt.net/plugin.php?id=dsu_amupper&ppersubmit=true&formhash=@formhash&mobile=2",
   backupUrl: "https://www.fglt.net/forum.php",
@@ -61,7 +62,7 @@ function captureCookie() {
       $persistentStore.write(cookie, STORE_KEY_COOKIE);
       notify("Cookie 已保存：可等待定时签到或手动运行 cron", "✅ 抓取成功");
     } else {
-      notify("未捕获到 Cookie：请确保已登录后再打开 fglt.net", "⚠️ 抓取失败");
+      notify("未捕获到 Cookie：请确保已登录后再打开/刷新 fglt.net", "⚠️ 抓取失败");
     }
   } catch (e) {
     notify(String(e && e.message ? e.message : e), "❌ 抓取异常");
