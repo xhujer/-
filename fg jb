@@ -91,8 +91,7 @@ function getAuthDataFromRequest(req) {
     return;
   }
 
-  const nickname = `网页用户_${userId}`;
-  const newAccountData = { userId, nickname, cookie, formhash };
+  const newAccountData = { userId, cookie, formhash };
 
   const accountsStr = read(FUGUI_HOUR_DATA_KEY);
   const accounts = accountsStr ? safeJsonParse(accountsStr, []) : [];
@@ -101,10 +100,10 @@ function getAuthDataFromRequest(req) {
   if (idx > -1) {
     accounts[idx].cookie = cookie;
     accounts[idx].formhash = formhash;
-    notify(SCRIPT_NAME, "✅ 配置更新成功", `账号: [${accounts[idx].nickname}]\n已更新为最新的有效配置。`);
+    notify(SCRIPT_NAME, "✅ 配置更新成功", "已更新为最新的有效配置。");
   } else {
     accounts.push(newAccountData);
-    notify(SCRIPT_NAME, "✅ 配置添加成功", `账号: [${nickname}]\n已完成初始化，你可以在 BoxJs 中修改昵称。`);
+    notify(SCRIPT_NAME, "✅ 配置添加成功", "已完成初始化。");
   }
 
   write(JSON.stringify(accounts), FUGUI_HOUR_DATA_KEY);
@@ -119,7 +118,7 @@ async function runTasks() {
 
   const accounts = safeJsonParse(accountsStr, []);
   if (!accounts || accounts.length === 0) {
-    notify(SCRIPT_NAME, "🤔 配置为空", "没有找到任何账号信息，请先抓取数据。");
+    notify(SCRIPT_NAME, "配置为空", "没有找到任何账号信息，请先抓取数据。");
     return;
   }
 
@@ -145,11 +144,10 @@ async function runTasks() {
 }
 
 async function claimReward(accountData) {
-  const { nickname, cookie, formhash } = accountData || {};
-  const who = `👤 账号 [${nickname || "未知"}]: `;
+  const { cookie, formhash } = accountData || {};
 
   if (!cookie || !formhash) {
-    return who + "❌ 缺少 Cookie 或 formhash 配置，请重新抓取。";
+    return "❌ 缺少 Cookie 或 formhash 配置，请重新抓取。";
   }
 
   const requestUrl =
@@ -174,32 +172,35 @@ async function claimReward(accountData) {
     const code = (response && (response.status || response.statusCode)) || "unknown";
 
     if (debugLog) {
-      console.log(
-        `[${SCRIPT_NAME}] [调试] 账号 [${nickname}] - 状态码: ${code} - 原始响应: ${String(data || "")}`
-      );
+      console.log(`[${SCRIPT_NAME}] [调试] 状态码: ${code} - 原始响应: ${String(data || "")}`);
     }
 
-    if (!data) return who + "❌ 空响应";
+    if (!data) return "❌ 空响应";
 
     if (data.includes("您已签到完毕")) {
-      return who + "🔁 重复签到。下次再来！";
+      return "🔁 重复签到。下次再来！";
     }
 
-    if (data.includes("感谢您积极打卡") || data.includes("签到成功") || data.includes("恭喜你") || data.includes("累计签到")) {
+    if (
+      data.includes("感谢您积极打卡") ||
+      data.includes("签到成功") ||
+      data.includes("恭喜你") ||
+      data.includes("累计签到")
+    ) {
       const match = data.match(/特奖励[:：]\s*(.*?)(\(|\s|。|，|<|$)/);
       const fallbackMatch = !match && data.match(/奖励[:：]\s*(.*?)(\(|\s|。|，|<|$)/);
       const reward = match ? match[1].trim() : (fallbackMatch ? fallbackMatch[1].trim() : "奖励");
-      return who + `✅ 签到成功 - 获得 ${reward}`;
+      return `✅ 签到成功 - 获得 ${reward}`;
     }
 
     if (data.includes("需要登录")) {
-      return who + "❌ 签到失败 - Cookie 已失效，请重新抓取。";
+      return "❌ Cookie 已失效，请重新抓取。";
     }
 
     const failMatch = data.match(/errorhandle_dsu_amupper\('([^']+)'/);
     const failReason = failMatch ? failMatch[1] : `HTTP ${code}`;
-    return who + `❌ 签到失败 - ${failReason}`;
+    return `❌ ${failReason}`;
   } catch (e) {
-    return who + "❌ 请求异常或响应格式错误。";
+    return "❌ 请求异常或响应格式错误。";
   }
 }
