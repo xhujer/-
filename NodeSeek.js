@@ -27,10 +27,8 @@ function notify(title, subtitle = "", body = "") {
   const t = cleanText(title) || "通知";
   const s = cleanText(subtitle);
   let b = cleanText(body);
-
   const MAX = 900;
   if (b.length > MAX) b = b.slice(0, MAX) + "…";
-
   $notification.post(t, s, b);
 }
 
@@ -73,11 +71,32 @@ function getCookieFromHeaders(h) {
   return normalizeCookie(v);
 }
 
+function parseCookie(str) {
+  const obj = {};
+  String(str || "").split(";").forEach((p) => {
+    const i = p.indexOf("=");
+    if (i > 0) obj[p.slice(0, i).trim()] = p.slice(i + 1).trim();
+  });
+  return obj;
+}
+
+function pickUidFromCookie(nsCookie) {
+  const c = parseCookie(nsCookie);
+  return (
+    c.uid ||
+    c.user_id ||
+    c.userid ||
+    c.member_id ||
+    c.memberId ||
+    ""
+  );
+}
+
 function getArg(key) {
   try {
     if (typeof $argument === "string" && $argument.length) {
       const params = {};
-      $argument.split("&").forEach(p => {
+      $argument.split("&").forEach((p) => {
         const idx = p.indexOf("=");
         if (idx > -1) params[p.slice(0, idx)] = decodeURIComponent(p.slice(idx + 1));
       });
@@ -148,30 +167,39 @@ async function getUserInfo(memberId, nsCookie) {
   memberId = String(memberId || "").trim();
   if (!memberId) return "";
 
-  const url = `https://${DOMAIN}/api/account/getInfo/${memberId}?readme=1`;
+  async function fetch(uid) {
+    const url = `https://${DOMAIN}/api/account/getInfo/${uid}?readme=1`;
+    const headers = {
+      "Accept": "application/json, text/plain, */*",
+      "Origin": `https://${DOMAIN}`,
+      "Referer": `https://${DOMAIN}/space/${uid}`,
+      "X-Requested-With": "XMLHttpRequest",
+      "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+      "Cookie": nsCookie || "",
+    };
 
-  const headers = {
-    "Accept": "application/json, text/plain, */*",
-    "Origin": `https://${DOMAIN}`,
-    "Referer": `https://${DOMAIN}/space/${memberId}`,
-    "X-Requested-With": "XMLHttpRequest",
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
-  };
+    const { resp, data } = await httpGet({ url, headers });
+    const raw = String(data || "");
+    const code = resp?.status || resp?.statusCode || 0;
 
-  if (nsCookie) headers["Cookie"] = nsCookie;
+    let json = null;
+    try { json = JSON.parse(raw); } catch {}
 
-  const { resp, data } = await httpGet({ url, headers });
-
-  const raw = String(data || "");
-  const code = resp?.status || resp?.statusCode || 0;
-
-  let json = null;
-  try { json = JSON.parse(raw); } catch {}
-
-  const d = json && json.detail;
-  if (!d) {
-    return `用户信息：获取失败（HTTP ${code}）\n返回片段：${cleanText(raw).slice(0, 200) || "（空）"}`;
+    return { code, raw, json };
   }
+
+  let r = await fetch(memberId);
+
+  const msg = r?.json?.message || r?.json?.msg || "";
+  if (String(msg).toLowerCase().includes("wrong uid")) {
+    const uid2 = pickUidFromCookie(nsCookie);
+    if (uid2 && uid2 !== memberId) {
+      r = await fetch(uid2);
+    }
+  }
+
+  const d = r?.json?.detail;
+  if (!d) return "";
 
   return [
     "用户信息：",
