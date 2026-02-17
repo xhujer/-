@@ -27,8 +27,10 @@ function notify(title, subtitle = "", body = "") {
   const t = cleanText(title) || "通知";
   const s = cleanText(subtitle);
   let b = cleanText(body);
+
   const MAX = 900;
   if (b.length > MAX) b = b.slice(0, MAX) + "…";
+
   $notification.post(t, s, b);
 }
 
@@ -85,6 +87,17 @@ function getArg(key) {
   return null;
 }
 
+function nowText() {
+  const n = new Date();
+  const Y = n.getFullYear();
+  const M = String(n.getMonth() + 1).padStart(2, "0");
+  const D = String(n.getDate()).padStart(2, "0");
+  const h = String(n.getHours()).padStart(2, "0");
+  const m = String(n.getMinutes()).padStart(2, "0");
+  const s = String(n.getSeconds()).padStart(2, "0");
+  return `${Y}-${M}-${D} ${h}:${m}:${s}`;
+}
+
 async function captureCookie() {
   const url = String($request?.url || "");
   if (!url.includes("nodeseek.com")) return;
@@ -114,9 +127,9 @@ async function signIn(nsCookie, randomFlag) {
     "Cookie": nsCookie,
   };
 
-  const body = "{}"; // 关键：强制带 body，避免某些场景被降级/跳转后变 GET
-
+  const body = "{}";
   const { resp, data } = await httpPost({ url, headers, body });
+
   const raw = String(data || "");
   const code = resp?.status || resp?.statusCode || 0;
 
@@ -128,21 +141,27 @@ async function signIn(nsCookie, randomFlag) {
     return msg ? `签到信息：${msg}` : "签到信息：（无提示文本）";
   }
 
-  return `签到信息：解析失败（HTTP ${code}，返回片段：${cleanText(raw).slice(0, 180)}）`;
+  return `签到信息：解析失败（HTTP ${code}）\n返回片段：${cleanText(raw).slice(0, 200) || "（空）"}`;
 }
 
-async function getUserInfo(memberId) {
+async function getUserInfo(memberId, nsCookie) {
+  memberId = String(memberId || "").trim();
   if (!memberId) return "";
 
   const url = `https://${DOMAIN}/api/account/getInfo/${memberId}?readme=1`;
+
   const headers = {
     "Accept": "application/json, text/plain, */*",
     "Origin": `https://${DOMAIN}`,
     "Referer": `https://${DOMAIN}/space/${memberId}`,
+    "X-Requested-With": "XMLHttpRequest",
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
   };
 
+  if (nsCookie) headers["Cookie"] = nsCookie;
+
   const { resp, data } = await httpGet({ url, headers });
+
   const raw = String(data || "");
   const code = resp?.status || resp?.statusCode || 0;
 
@@ -150,7 +169,9 @@ async function getUserInfo(memberId) {
   try { json = JSON.parse(raw); } catch {}
 
   const d = json && json.detail;
-  if (!d) return `用户信息：获取失败（HTTP ${code}，可能 MemberId 不对/接口被拦）`;
+  if (!d) {
+    return `用户信息：获取失败（HTTP ${code}）\n返回片段：${cleanText(raw).slice(0, 200) || "（空）"}`;
+  }
 
   return [
     "用户信息：",
@@ -160,17 +181,6 @@ async function getUserInfo(memberId) {
     `【主题帖数】：${d.nPost ?? ""}`,
     `【评论数】：${d.nComment ?? ""}`,
   ].join("\n");
-}
-
-function nowText() {
-  const n = new Date();
-  const Y = n.getFullYear();
-  const M = String(n.getMonth() + 1).padStart(2, "0");
-  const D = String(n.getDate()).padStart(2, "0");
-  const h = String(n.getHours()).padStart(2, "0");
-  const m = String(n.getMinutes()).padStart(2, "0");
-  const s = String(n.getSeconds()).padStart(2, "0");
-  return `${Y}-${M}-${D} ${h}:${m}:${s}`;
 }
 
 (async () => {
@@ -200,13 +210,13 @@ function nowText() {
 
     const memberId =
       argMemberId !== null ? String(argMemberId).trim()
-      : (String(memberStored || "").trim());
+      : String(memberStored || "").trim();
 
     write(String(randomFlag), KEY_RANDOM);
     if (memberId) write(memberId, KEY_MEMBER_ID);
 
     const signText = await signIn(nsCookie, randomFlag);
-    const infoText = await getUserInfo(memberId);
+    const infoText = await getUserInfo(memberId, nsCookie);
 
     const body = [infoText, signText, `时间：${nowText()}`].filter(Boolean).join("\n");
 
