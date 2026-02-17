@@ -1,63 +1,121 @@
 /*
- * 富贵论坛小时签到脚本（旧版风格 + 增强版）
+ * 富贵论坛小时签到脚本（Loon 原生增强版）
  *
- * 作者: TimeJason（原脚本）
- * 增强改写: ChatGPT
+ * 原作者: TimeJason（原脚本）
+ * Loon 改写&增强: ChatGPT
  * 更新日期: 2026-02-18
  *
  * 功能:
- *   - Rewrite 抓取 Cookie + formhash
- *   - Cron 每小时执行签到
+ *   - Rewrite 抓取 Cookie & formhash
+ *   - Cron 每小时签到
  *
  * 增强:
- *   A) 账号唯一键更稳：优先 *_auth=，找不到则 cookie hash
- *   B) 每次签到前自动刷新 formhash（失败则回退旧 formhash）
+ *   A) 账号唯一键更稳：优先 *_auth=，否则 cookie hash
+ *   B) 每次签到前自动刷新 formhash（失败回退旧 formhash）
  *   C) 响应解析更健壮（HTML/JS/转义/文案变动）
  *   D) Cookie 失效自动标记 + 静默降噪（默认 12 小时）
  */
 
-const $ = new Env("富贵论坛小时签");
-
-// --- BoxJs Keys ---
+// ========== BoxJs Keys ==========
 const FUGUI_HOUR_DATA_KEY = "fugui_hour_datas";
 const KEY_NOTIFY_SUCCESS = "fugui_hour_notify_success";
 const KEY_DEBUG_LOG = "fugui_hour_debug_log";
 
-// --- 可调参数 ---
-const HOST = "https://www.fglt.net";
-const INVALID_SILENCE_HOURS = 12; // D) Cookie 失效后静默小时数（减少轰炸）
-const BETWEEN_ACCOUNTS_DELAY_MS = 2000;
+const SCRIPT_NAME = "富贵论坛小时签";
 
-// B) 用于刷新 formhash 的候选页面（按顺序尝试）
-const FORMHASH_PAGES = [
+// ========== 站点配置 ==========
+const HOST = "https://www.fglt.net";
+const REFRESH_FORMHASH_PAGES = [
   `${HOST}/xm_task_20130503-list.html`,
   `${HOST}/forum.php`,
   `${HOST}/`,
 ];
 
-// ========== 运行模式判断 ==========
-if (
-  typeof $request !== "undefined" &&
-  $request.url &&
-  $request.url.includes("plugin.php") &&
-  $request.url.includes("id=dsu_amupper") &&
-  $request.url.includes("ppersubmit=true")
-) {
-  $.log("进入小时签数据获取模式...");
-  getAuthData();
-  $.done();
-} else if (typeof $request === "undefined") {
-  (async () => {
-    $.log("进入小时签定时任务模式...");
-    await runTasks();
-  })()
-    .catch((e) => $.logErr(e))
-    .finally(() => $.done());
-} else {
-  $.done();
+// D) 失效静默时长（小时）
+const INVALID_SILENCE_HOURS = 12;
+
+// 多账号间隔
+const BETWEEN_ACCOUNTS_DELAY_MS = 2000;
+
+// ========== Loon 原生封装 ==========
+function read(key) {
+  return $persistentStore.read(key);
+}
+function write(val, key) {
+  return $persistentStore.write(String(val), key);
+}
+function notify(title, subtitle = "", body = "") {
+  $notification.post(title, subtitle, body);
 }
 
-// ========== 工具函数 ==========
+// ✅ 关键：单参数日志输出（避免 Loon CRON 吞多参数）
+function log(...args) {
+  const msg = args
+    .map((v) => {
+      if (v === undefined) return "undefined";
+      if (v === null) return "null";
+      if (typeof v === "object") {
+        try {
+          return JSON.stringify(v);
+        } catch {
+          return String(v);
+        }
+      }
+      return String(v);
+    })
+    .join(" ");
+  console.log(`[${SCRIPT_NAME}] ${msg}`);
+}
+
+function done(obj = {}) {
+  $done(obj);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function httpGet(options) {
+  return new Promise((resolve, reject) => {
+    $httpClient.get(options, (error, response, data) => {
+      if (error) return reject(error);
+      resolve({ response, data });
+    });
+  });
+}
+
+// ========== 入口 ==========
+(async () => {
+  try {
+    // Rewrite 抓数据：放宽匹配
+    if (
+      typeof $request !== "undefined" &&
+      $request.url &&
+      $request.url.includes("plugin.php") &&
+      $request.url.includes("id=dsu_amupper") &&
+      $request.url.includes("ppersubmit=true")
+    ) {
+      log("进入小时签数据获取模式...");
+      getAuthDataFromRequest($request);
+      return done();
+    }
+
+    // Cron
+    if (typeof $request === "undefined") {
+      log("进入小时签定时任务模式...");
+      await runTasks();
+      return done();
+    }
+
+    return done();
+  } catch (e) {
+    log("异常：", e && e.message ? e.message : e);
+    notify(SCRIPT_NAME, "❌ 脚本异常", String(e && e.message ? e.message : e));
+    return done();
+  }
+})();
+
+// ========== 工具 ==========
 function safeJsonParse(str, fallback) {
   try {
     return JSON.parse(str);
@@ -70,24 +128,19 @@ function nowMs() {
   return Date.now();
 }
 
-function randInt(min, max) {
-  const a = Math.min(min, max);
-  const b = Math.max(min, max);
-  return Math.floor(a + Math.random() * (b - a + 1));
+function toInt(v, def = 0) {
+  const n = parseInt(String(v), 10);
+  return Number.isFinite(n) ? n : def;
 }
 
-// FNV-1a 32-bit hash：用于 cookie 无可识别字段时生成稳定 uid
+// FNV-1a 32-bit hash（用于 cookie 缺少 auth 时生成稳定 uid）
 function fnv1a32(str) {
-  let hash = 0x811c9dc5;
+  let h = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = (hash * 0x01000193) >>> 0;
+    h ^= str.charCodeAt(i);
+    h = (h + (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
   }
-  return ("00000000" + hash.toString(16)).slice(-8);
-}
-
-function getCookieFromRequestHeaders(headers) {
-  return (headers && (headers["Cookie"] || headers["cookie"])) || "";
+  return ("00000000" + h.toString(16)).slice(-8);
 }
 
 function getFormhashFromUrl(url) {
@@ -95,94 +148,96 @@ function getFormhashFromUrl(url) {
   return match ? match[1] : null;
 }
 
-// A) 更稳账号标识：优先 *_auth=，否则 hash(cookie)
-function getStableUserIdFromCookie(cookie) {
-  const c = String(cookie || "");
-  const auth = c.match(/(?:^|;\s*)[^=;]+_auth=([^;]+)/);
-  if (auth && auth[1]) return auth[1].substring(0, 10);
-  return `h_${fnv1a32(c)}`;
+// A) 不写死前缀：匹配 *_auth=xxxx
+function getAuthTokenFromCookie(cookie) {
+  const m = String(cookie || "").match(/(?:^|;\s*)[^=;]+_auth=([^;]+)/);
+  return m ? m[1] : null;
 }
 
-// 兼容旧数据：补字段
-function ensureAccountFields(acc) {
+function getStableUserId(cookie) {
+  const auth = getAuthTokenFromCookie(cookie);
+  if (auth) return auth.substring(0, 10);
+  return `h_${fnv1a32(String(cookie || ""))}`;
+}
+
+function migrateAccountDefaults(acc) {
   if (!acc || typeof acc !== "object") return acc;
-  if (typeof acc.invalidUntil !== "number") acc.invalidUntil = 0;
-  if (typeof acc.lastStatus !== "string") acc.lastStatus = "";
-  if (typeof acc.lastFailReason !== "string") acc.lastFailReason = "";
+  if (typeof acc.invalidUntil === "undefined") acc.invalidUntil = 0;
+  if (typeof acc.lastStatus === "undefined") acc.lastStatus = "";
+  if (typeof acc.lastFailReason === "undefined") acc.lastFailReason = "";
+  if (typeof acc.lastRunAt === "undefined") acc.lastRunAt = 0;
   return acc;
 }
 
-function saveAccounts(accounts) {
-  $.setdata(JSON.stringify(accounts || []), FUGUI_HOUR_DATA_KEY);
-}
-
 // ========== Rewrite 抓取 ==========
-function getAuthData() {
-  const url = $request.url;
-  const cookie = getCookieFromRequestHeaders($request.headers);
+function getAuthDataFromRequest(req) {
+  const url = req.url;
+  const headers = req.headers || {};
+  const cookie = headers["Cookie"] || headers["cookie"];
 
   if (!cookie) {
-    return $.msg($.name, "❌ 获取失败", "未能读取到 Cookie。请确保在浏览器中已登录富贵论坛。");
+    notify(SCRIPT_NAME, "❌ 获取失败", "未能读取到 Cookie。请确保在浏览器中已登录富贵论坛。");
+    return;
   }
 
   const formhash = getFormhashFromUrl(url);
   if (!formhash) {
-    return $.msg($.name, "❌ 获取失败", "未能从URL中找到 formhash！");
+    notify(SCRIPT_NAME, "❌ 获取失败", "未能从URL中找到 formhash（请确认命中的请求URL包含 formhash=xxxx）。");
+    return;
   }
 
-  const userId = getStableUserIdFromCookie(cookie);
+  const userId = getStableUserId(cookie);
   const nickname = `网页用户_${userId}`;
 
-  const newAccountData = ensureAccountFields({
+  const newAccountData = {
     userId,
     nickname,
     cookie,
     formhash,
-  });
+    invalidUntil: 0,
+    lastStatus: "",
+    lastFailReason: "",
+    lastRunAt: 0,
+  };
 
-  const accountsStr = $.getdata(FUGUI_HOUR_DATA_KEY);
+  const accountsStr = read(FUGUI_HOUR_DATA_KEY);
   const accounts = accountsStr ? safeJsonParse(accountsStr, []) : [];
-  accounts.forEach(ensureAccountFields);
 
-  const idx = accounts.findIndex((a) => a.userId === userId);
+  const idx = accounts.findIndex((acc) => acc.userId === userId);
   if (idx > -1) {
-    accounts[idx].cookie = cookie;
-    accounts[idx].formhash = formhash;
-    accounts[idx].invalidUntil = 0;
-    accounts[idx].lastStatus = "";
-    accounts[idx].lastFailReason = "";
-    $.msg($.name, "✅ 配置更新成功", `账号: [${accounts[idx].nickname}]\n已更新为最新的有效配置。`);
+    accounts[idx] = { ...migrateAccountDefaults(accounts[idx]), ...newAccountData };
+    notify(SCRIPT_NAME, "✅ 配置更新成功", `账号: [${accounts[idx].nickname}]\n已更新为最新的有效配置。`);
   } else {
     accounts.push(newAccountData);
-    $.msg($.name, "✅ 配置添加成功", `账号: [${nickname}]\n已完成初始化，你可以在 BoxJs 中修改昵称。`);
+    notify(SCRIPT_NAME, "✅ 配置添加成功", `账号: [${nickname}]\n已完成初始化，你可以在 BoxJs 中修改昵称。`);
   }
 
-  saveAccounts(accounts);
+  write(JSON.stringify(accounts), FUGUI_HOUR_DATA_KEY);
 }
 
 // ========== B) 刷新 formhash ==========
-function parseFormhashFromHtml(html) {
+function extractFormhashFromHtml(html) {
   const s = String(html || "");
-  // input hidden
-  let m = s.match(/name=["']formhash["'][^>]*value=["']([a-zA-Z0-9]+)["']/i);
-  if (m && m[1]) return m[1];
-  // url param
+
+  let m = s.match(/name\s*=\s*["']formhash["'][^>]*value\s*=\s*["']([a-zA-Z0-9]+)["']/i);
+  if (m) return m[1];
+
   m = s.match(/(?:\?|&)formhash=([a-zA-Z0-9]+)/i);
-  if (m && m[1]) return m[1];
-  // js object/string
+  if (m) return m[1];
+
   m = s.match(/formhash\s*[:=]\s*["']([a-zA-Z0-9]+)["']/i);
-  if (m && m[1]) return m[1];
+  if (m) return m[1];
+
   return null;
 }
 
 async function fetchFormhash(cookie) {
-  const debugLog = $.getdata(KEY_DEBUG_LOG) === "true";
+  const debugLog = read(KEY_DEBUG_LOG) === "true";
 
-  for (let i = 0; i < FORMHASH_PAGES.length; i++) {
-    const pageUrl = FORMHASH_PAGES[i];
-
+  for (let i = 0; i < REFRESH_FORMHASH_PAGES.length; i++) {
+    const pageUrl = REFRESH_FORMHASH_PAGES[i];
     try {
-      const res = await $.http.get({
+      const { response, data } = await httpGet({
         url: pageUrl,
         headers: {
           Cookie: cookie,
@@ -192,28 +247,27 @@ async function fetchFormhash(cookie) {
         },
       });
 
-      const body = res && (res.body || res); // Env.js 下通常是 response.body
-      const formhash = parseFormhashFromHtml(body);
+      const code = (response && (response.status || response.statusCode)) || "unknown";
+      const formhash = extractFormhashFromHtml(data);
 
-      if (debugLog) $.log(`[调试] fetchFormhash page=${pageUrl} formhash=${formhash || "null"}`);
+      if (debugLog) log(`[调试] fetchFormhash page=${pageUrl} status=${code} formhash=${formhash || "null"}`);
 
       if (formhash) return formhash;
     } catch (e) {
-      if (debugLog) $.log(`[调试] fetchFormhash page=${pageUrl} error=${e && e.message ? e.message : e}`);
+      if (debugLog) log(`[调试] fetchFormhash page=${pageUrl} error=${e && e.message ? e.message : e}`);
     }
-
-    await $.wait(300);
+    await wait(300);
   }
 
   return null;
 }
 
 // ========== C) 响应解析增强 ==========
-function stripHtml(raw) {
-  if (!raw) return "";
-  return String(raw)
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, " ")
+function stripHtml(html) {
+  if (!html) return "";
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
@@ -223,211 +277,209 @@ function stripHtml(raw) {
     .trim();
 }
 
-function extractReward(raw) {
-  const s = String(raw || "");
-  let m = s.match(/特奖励[:：]\s*(.*?)(\(|\s|<|$)/);
-  if (m && m[1]) return stripHtml(m[1]).trim();
-
-  m = s.match(/奖励[:：]\s*(.*?)(\(|\s|<|$)/);
-  if (m && m[1]) return stripHtml(m[1]).trim();
-
-  const text = stripHtml(s);
-  m = text.match(/(?:特奖励|奖励)[:：]\s*([^\s()]+(?:\s*[^\s()]+)?)/);
-  if (m && m[1]) return m[1].trim();
-
-  return "";
-}
-
 function parseSignResponse(raw) {
   const data = String(raw || "");
   const text = stripHtml(data);
-  const lower = data.toLowerCase();
-  const lowerText = text.toLowerCase();
 
-  // Cookie 失效 / 需登录
+  // 登录失效
   if (
     /需要登录|请先登录|您需要先登录|member\.php\?mod=logging|login/i.test(data) ||
     /需要登录|请先登录|登录后/i.test(text)
   ) {
-    return { type: "invalid_cookie", message: "Cookie 已失效，请重新抓取" };
+    return { status: "invalid_cookie", message: "❌ 签到失败 - Cookie 已失效，请重新抓取。" };
   }
 
-  // 重复签到
+  // 重复
   if (/您已签到完毕|已签到|重复签到|already/i.test(data) || /已签到|重复/i.test(text)) {
-    return { type: "repeat", message: "重复签到。下个整点再来！" };
+    return { status: "repeat", message: "🔁 重复签到。下个整点再来！" };
   }
 
-  // 明确 errorhandle
+  // errorhandle
   const err = data.match(/errorhandle_dsu_amupper\('([^']+)'\)/i);
   if (err && err[1]) {
-    return { type: "fail", message: err[1] };
+    return { status: "fail", message: `❌ 签到失败 - ${err[1]}` };
   }
 
-  // 成功判断
-  const successHit = /感谢|恭喜|签到成功|success/i.test(lower) || /感谢|恭喜|签到成功/i.test(text);
+  // 成功
+  const successHit = /感谢|恭喜|签到成功|success/i.test(data) || /感谢|恭喜|签到成功/i.test(text);
   if (successHit) {
-    const reward = extractReward(data) || "奖励";
-    return { type: "success", message: `签到成功 - 获得 ${reward}` };
+    let reward = null;
+
+    let m = data.match(/特奖励[:：]\s*(.*?)(\(|\s|<|$)/);
+    if (m && m[1]) reward = m[1].trim();
+
+    if (!reward) {
+      m = data.match(/奖励[:：]\s*(.*?)(\(|\s|<|$)/);
+      if (m && m[1]) reward = m[1].trim();
+    }
+
+    if (!reward) reward = "奖励";
+
+    return { status: "success", message: `✅ 签到成功 - 获得 ${reward}` };
   }
 
-  // 兜底：给一段可读文本
-  const snippet = (text || data).slice(0, 60);
-  return { type: "fail", message: snippet ? `未知错误：${snippet}` : "未知错误" };
+  const snippet = text ? text.slice(0, 60) : "";
+  if (snippet) return { status: "fail", message: `❌ 签到失败 - ${snippet}` };
+
+  return { status: "fail", message: "❌ 签到失败 - 未知错误" };
 }
 
-// ========== Cron 主流程 ==========
+// ========== Cron 任务 ==========
 async function runTasks() {
-  const accountsStr = $.getdata(FUGUI_HOUR_DATA_KEY);
+  const accountsStr = read(FUGUI_HOUR_DATA_KEY);
   if (!accountsStr) {
-    return $.msg($.name, "❌ 未找到配置", "请先在浏览器中手动执行一次“小时签到”以初始化脚本。");
+    notify(SCRIPT_NAME, "❌ 未找到配置", "请先在浏览器中手动执行一次“小时签到”以初始化脚本。");
+    return;
   }
 
   let accounts = safeJsonParse(accountsStr, []);
   if (!accounts || accounts.length === 0) {
-    return $.msg($.name, "🤔 配置为空", "没有找到任何账号信息，请先抓取数据。");
+    notify(SCRIPT_NAME, "🤔 配置为空", "没有找到任何账号信息，请先抓取数据。");
+    return;
   }
 
-  accounts = accounts.map(ensureAccountFields);
+  accounts = accounts.map(migrateAccountDefaults);
 
-  $.log(`共发现 ${accounts.length} 个账号，开始执行小时签任务...`);
+  log(`共发现 ${accounts.length} 个账号，开始执行小时签任务...`);
 
   const summary = [];
   let allSuccessOrRepeat = true;
+  let changed = false;
 
   for (let i = 0; i < accounts.length; i++) {
-    $.index = i + 1;
-    const result = await claimReward(accounts[i]);
+    const { result, updatedAccount, changed: c } = await claimReward(accounts[i]);
     summary.push(result);
-
     if (result.includes("❌")) allSuccessOrRepeat = false;
-    if (i < accounts.length - 1) await $.wait(BETWEEN_ACCOUNTS_DELAY_MS);
+    accounts[i] = updatedAccount;
+    if (c) changed = true;
+    if (i < accounts.length - 1) await wait(BETWEEN_ACCOUNTS_DELAY_MS);
   }
 
-  saveAccounts(accounts);
+  if (changed) write(JSON.stringify(accounts), FUGUI_HOUR_DATA_KEY);
 
   const hour = new Date().getHours();
   const finalTitle = `富贵论坛小时签 (${hour}:00)`;
   const finalMessage = summary.join("\n");
-  const notifySuccess = $.getdata(KEY_NOTIFY_SUCCESS) !== "false";
 
-  $.log(`\n--- 任务执行摘要 ---\n${finalMessage}\n--------------------`);
+  const notifySuccess = read(KEY_NOTIFY_SUCCESS) !== "false";
+
+  log(`--- 任务执行摘要 ---\n${finalMessage}\n--------------------`);
 
   if (allSuccessOrRepeat && !notifySuccess) {
-    $.log("✅ 所有任务执行成功或重复，根据设置不发送通知。");
+    log("✅ 所有任务执行成功或重复，根据设置不发送通知。");
   } else {
-    $.msg($.name, finalTitle, finalMessage);
+    notify(SCRIPT_NAME, finalTitle, finalMessage);
   }
 }
 
 // ========== 单账号签到（A/B/C/D） ==========
 async function claimReward(accountData) {
-  const debugLog = $.getdata(KEY_DEBUG_LOG) === "true";
+  const updated = migrateAccountDefaults({ ...(accountData || {}) });
+  const debugLog = read(KEY_DEBUG_LOG) === "true";
 
-  ensureAccountFields(accountData);
-  const { nickname, cookie } = accountData;
-  let { formhash } = accountData;
+  const { nickname, cookie } = updated;
+  let { formhash } = updated;
 
-  const who = `👤 账号 [${nickname || "未知"}]: `;
+  const prefix = `👤 账号 [${nickname || "未知"}]: `;
   const now = nowMs();
 
+  updated.lastRunAt = now;
+
   if (!cookie) {
-    accountData.lastStatus = "config_missing";
-    accountData.lastFailReason = "缺少 Cookie";
-    return who + "❌ 缺少 Cookie 配置，请重新抓取。";
+    updated.lastStatus = "fail";
+    updated.lastFailReason = "缺少 Cookie";
+    return { result: prefix + "❌ 缺少 Cookie 配置，请重新抓取。", updatedAccount: updated, changed: true };
   }
 
-  // D) 失效静默期：降噪提示
-  if (accountData.invalidUntil && now < accountData.invalidUntil) {
-    const leftMin = Math.max(1, Math.ceil((accountData.invalidUntil - now) / 60000));
-    return who + `⚠️ 已标记 Cookie 失效，静默中（约 ${leftMin} 分钟后再尝试）。请重新抓取。`;
+  // D) 失效静默期
+  const invalidUntil = toInt(updated.invalidUntil, 0);
+  if (invalidUntil && now < invalidUntil) {
+    const leftMin = Math.max(1, Math.ceil((invalidUntil - now) / 60000));
+    return {
+      result: prefix + `⚠️ 已标记 Cookie 失效，静默中（约 ${leftMin} 分钟后再尝试）。请重新抓取。`,
+      updatedAccount: updated,
+      changed: false,
+    };
   }
 
-  // B) 刷新 formhash（失败回退旧的）
+  // B) 刷新 formhash（失败回退）
   const refreshed = await fetchFormhash(cookie).catch(() => null);
   if (refreshed) {
     if (refreshed !== formhash) {
       formhash = refreshed;
-      accountData.formhash = refreshed;
+      updated.formhash = refreshed;
     }
   }
 
   if (!formhash) {
-    accountData.lastStatus = "formhash_missing";
-    accountData.lastFailReason = "缺少 formhash 且刷新失败";
-    return who + "❌ 缺少 formhash（请重新抓取，或检查刷新页面是否包含 formhash）。";
+    updated.lastStatus = "fail";
+    updated.lastFailReason = "缺少 formhash";
+    return {
+      result: prefix + "❌ 缺少 formhash（请重新抓取，或确认刷新页面可获取 formhash）。",
+      updatedAccount: updated,
+      changed: true,
+    };
   }
-
-  // 随机小延迟，降低风控
-  await $.wait(randInt(300, 900));
 
   const requestUrl =
     `${HOST}/plugin.php?id=dsu_amupper&ppersubmit=true&formhash=${formhash}` +
     `&infloat=yes&handlekey=dsu_amupper&inajax=1&ajaxtarget=fwin_content_dsu_amupper`;
 
-  $.log(`\n▶️ 开始为账号 [${nickname}] 进行小时签...`);
+  const options = {
+    url: requestUrl,
+    headers: {
+      Cookie: cookie,
+      "User-Agent":
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: `${HOST}/xm_task_20130503-list.html`,
+    },
+  };
+
+  log(`▶️ 开始为账号 [${nickname}] 进行小时签...`);
 
   try {
-    const resp = await $.http.get({
-      url: requestUrl,
-      headers: {
-        Cookie: cookie,
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
-        "X-Requested-With": "XMLHttpRequest",
-        Referer: `${HOST}/xm_task_20130503-list.html`,
-      },
-    });
+    await wait(400);
 
-    const status = resp && (resp.status || resp.statusCode || (resp.response && resp.response.status));
-    const data = resp && (resp.body || resp.data || resp);
+    const { response, data } = await httpGet(options);
+    const code = (response && (response.status || response.statusCode)) || "unknown";
 
-    if (debugLog) {
-      $.log(`[调试日志] 账号 [${nickname}] - 状态码: ${status || "unknown"} - 响应片段: ${String(data || "").slice(0, 200)}`);
-    }
+    if (debugLog) log(`[调试日志] 账号 [${nickname}] - 状态码: ${code} - 响应片段: ${String(data || "").slice(0, 300)}`);
 
     if (!data) {
-      accountData.lastStatus = "empty";
-      accountData.lastFailReason = "空响应";
-      return who + "❌ 空响应";
+      updated.lastStatus = "fail";
+      updated.lastFailReason = "空响应";
+      return { result: prefix + "❌ 空响应", updatedAccount: updated, changed: true };
     }
 
     const parsed = parseSignResponse(data);
 
-    if (parsed.type === "invalid_cookie") {
-      accountData.lastStatus = "invalid_cookie";
-      accountData.lastFailReason = parsed.message;
-
-      // D) 标记失效并进入静默窗口
-      accountData.invalidUntil = now + INVALID_SILENCE_HOURS * 3600 * 1000;
-
-      return who + `❌ 签到失败 - Cookie 已失效，请重新抓取。（已静默 ${INVALID_SILENCE_HOURS} 小时）`;
+    if (parsed.status === "invalid_cookie") {
+      const silenceMs = INVALID_SILENCE_HOURS * 3600 * 1000;
+      updated.invalidUntil = now + silenceMs;
+      updated.lastStatus = "invalid_cookie";
+      updated.lastFailReason = "Cookie已失效";
+      return {
+        result: prefix + parsed.message + `（已静默 ${INVALID_SILENCE_HOURS} 小时，避免重复通知）`,
+        updatedAccount: updated,
+        changed: true,
+      };
     }
 
-    if (parsed.type === "repeat") {
-      accountData.lastStatus = "repeat";
-      accountData.lastFailReason = "";
-      return who + "🔁 " + parsed.message;
+    if (parsed.status === "success" || parsed.status === "repeat") {
+      if (updated.invalidUntil) updated.invalidUntil = 0;
+      updated.lastStatus = parsed.status;
+      updated.lastFailReason = "";
+      return { result: prefix + parsed.message, updatedAccount: updated, changed: true };
     }
 
-    if (parsed.type === "success") {
-      accountData.lastStatus = "success";
-      accountData.lastFailReason = "";
-      accountData.invalidUntil = 0;
-      return who + "✅ " + parsed.message;
-    }
-
-    accountData.lastStatus = "fail";
-    accountData.lastFailReason = parsed.message || "未知错误";
-    return who + "❌ 签到失败 - " + (parsed.message || "未知错误");
+    updated.lastStatus = "fail";
+    updated.lastFailReason = parsed.message;
+    return { result: prefix + parsed.message, updatedAccount: updated, changed: true };
   } catch (e) {
-    accountData.lastStatus = "exception";
-    accountData.lastFailReason = e && e.message ? e.message : "请求异常";
-    $.logErr(e);
-    return who + "❌ 请求异常或响应格式错误。";
+    log("请求异常：", e && e.message ? e.message : e);
+    updated.lastStatus = "fail";
+    updated.lastFailReason = "请求异常";
+    return { result: prefix + "❌ 请求异常或响应格式错误。", updatedAccount: updated, changed: true };
   }
 }
-
-/*
- * ✅ 下面的 Env.js 兼容层，直接保留你旧版那一整段即可
- * （从 “// Env.js 兼容层” 开始到文件结束）
- */
