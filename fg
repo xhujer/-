@@ -4,9 +4,9 @@
 #!version=1.0.0
 
 [Script]
-http-request ^https?:\/\/(www\.)?fglt\.net\/plugin\.php\?id=dsu_amupper&ppersubmit=true.* script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb, tag=富贵论坛-小时签抓取, requires-body=false, timeout=10, enable=true
+http-request ^https?:\/\/(www\.)?fglt\.net\/plugin\.php\?id=dsu_amupper&ppersubmit=true.* script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb tag=富贵论坛-小时签抓取 requires-body=false timeout=10 enable=true
 
-cron "0 * * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb, tag=富贵论坛-小时签到, timeout=25, enable=true
+cron "0 * * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb tag=富贵论坛-小时签到 timeout=25 enable=true
 
 [MITM]
 hostname = %APPEND% www.fglt.net, fglt.net
