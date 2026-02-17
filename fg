@@ -1,0 +1,12 @@
+#!name=富贵论坛每日签到（合一版）
+#!desc=访问 fglt.net 自动抓 Cookie；每日定时签到（脚本合一）
+#!author=you
+#!version=1.0.0
+
+[Script]
+http-request ^https?:\/\/www\.fglt\.net\/ url script-path=https://example.com/fglt_all_in_one.js, requires-body=false, timeout=10, tag=富贵论坛-抓Cookie
+
+cron "5 9 * * *" script-path=https://example.com/fglt_all_in_one.js, timeout=20, tag=富贵论坛-每日签到
+
+[MITM]
+hostname = %APPEND% www.fglt.net
