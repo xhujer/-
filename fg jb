@@ -1,7 +1,4 @@
-const FUGUI_HOUR_DATA_KEY = "fugui_hour_datas";
-const KEY_NOTIFY_SUCCESS = "fugui_hour_notify_success";
-const KEY_DEBUG_LOG = "fugui_hour_debug_log";
-
+const DATA_KEY = "fugui_sign_accounts";
 const SCRIPT_NAME = "富贵论坛签到";
 
 function read(key) {
@@ -35,12 +32,12 @@ function httpGet(options) {
       $request.url &&
       $request.url.includes("id=dsu_amupper&ppersubmit=true")
     ) {
-      getAuthDataFromRequest($request);
+      capture($request);
       return done();
     }
 
     if (typeof $request === "undefined") {
-      await runTasks();
+      await run();
       return done();
     }
 
@@ -69,17 +66,16 @@ function getUserIdFromCookie(cookie) {
   return match ? match[1].substring(0, 10) : null;
 }
 
-function getAuthDataFromRequest(req) {
-  const url = req.url;
+function capture(req) {
   const headers = req.headers || {};
   const cookie = headers["Cookie"] || headers["cookie"];
 
   if (!cookie) {
-    notify(SCRIPT_NAME, "❌ 获取失败", "未能读取到 Cookie。请确保在浏览器中已登录富贵论坛。");
+    notify(SCRIPT_NAME, "❌ 获取失败", "未能读取到 Cookie。请确保已登录富贵论坛。");
     return;
   }
 
-  const formhash = getFormhashFromUrl(url);
+  const formhash = getFormhashFromUrl(req.url);
   if (!formhash) {
     notify(SCRIPT_NAME, "❌ 获取失败", "未能从URL中找到 formhash！");
     return;
@@ -91,71 +87,60 @@ function getAuthDataFromRequest(req) {
     return;
   }
 
-  const newAccountData = { userId, cookie, formhash };
+  const newAcc = { userId, cookie, formhash };
 
-  const accountsStr = read(FUGUI_HOUR_DATA_KEY);
-  const accounts = accountsStr ? safeJsonParse(accountsStr, []) : [];
+  const oldStr = read(DATA_KEY);
+  const accounts = oldStr ? safeJsonParse(oldStr, []) : [];
 
-  const idx = accounts.findIndex((acc) => acc.userId === userId);
+  const idx = accounts.findIndex((a) => a.userId === userId);
   if (idx > -1) {
     accounts[idx].cookie = cookie;
     accounts[idx].formhash = formhash;
-    notify(SCRIPT_NAME, "✅ 配置更新成功", "已更新为最新的有效配置。");
+    notify(SCRIPT_NAME, "✅ 配置更新成功", "已更新为最新有效配置。");
   } else {
-    accounts.push(newAccountData);
+    accounts.push(newAcc);
     notify(SCRIPT_NAME, "✅ 配置添加成功", "已完成初始化。");
   }
 
-  write(JSON.stringify(accounts), FUGUI_HOUR_DATA_KEY);
+  write(JSON.stringify(accounts), DATA_KEY);
 }
 
-async function runTasks() {
-  const accountsStr = read(FUGUI_HOUR_DATA_KEY);
-  if (!accountsStr) {
-    notify(SCRIPT_NAME, "❌ 未找到配置", "请先在浏览器中手动执行一次“签到”以初始化脚本。");
+async function run() {
+  const str = read(DATA_KEY);
+  if (!str) {
+    notify(SCRIPT_NAME, "❌ 未找到配置", "请先在浏览器中手动触发一次签到请求以初始化。");
     return;
   }
 
-  const accounts = safeJsonParse(accountsStr, []);
+  const accounts = safeJsonParse(str, []);
   if (!accounts || accounts.length === 0) {
-    notify(SCRIPT_NAME, "配置为空", "没有找到任何账号信息，请先抓取数据。");
+    notify(SCRIPT_NAME, "❌ 配置为空", "没有找到任何账号信息，请先抓取数据。");
     return;
   }
 
   const summary = [];
-  let allSuccessOrRepeat = true;
-
   for (let i = 0; i < accounts.length; i++) {
-    const result = await claimReward(accounts[i]);
-    if (result.includes("❌")) allSuccessOrRepeat = false;
-    summary.push(result);
+    summary.push(await sign(accounts[i]));
     if (i < accounts.length - 1) await wait(2000);
   }
 
-  const finalTitle = "富贵论坛签到";
-  const finalMessage = summary.join("\n");
-
-  console.log(finalMessage);
-
-  const notifySuccess = read(KEY_NOTIFY_SUCCESS) !== "false";
-  if (allSuccessOrRepeat && !notifySuccess) return;
-
-  notify(SCRIPT_NAME, finalTitle, finalMessage);
+  const msg = summary.join("\n");
+  console.log(msg);
+  notify(SCRIPT_NAME, "签到结果", msg);
 }
 
-async function claimReward(accountData) {
-  const { cookie, formhash } = accountData || {};
+async function sign(acc) {
+  const cookie = acc && acc.cookie;
+  const formhash = acc && acc.formhash;
 
-  if (!cookie || !formhash) {
-    return "❌ 缺少 Cookie 或 formhash 配置，请重新抓取。";
-  }
+  if (!cookie || !formhash) return "❌ 缺少 Cookie 或 formhash，请重新抓取。";
 
-  const requestUrl =
+  const url =
     `https://www.fglt.net/plugin.php?id=dsu_amupper&ppersubmit=true&formhash=${formhash}` +
     `&infloat=yes&handlekey=dsu_amupper&inajax=1&ajaxtarget=fwin_content_dsu_amupper`;
 
   const options = {
-    url: requestUrl,
+    url,
     headers: {
       Cookie: cookie,
       "User-Agent":
@@ -165,42 +150,32 @@ async function claimReward(accountData) {
     },
   };
 
-  const debugLog = read(KEY_DEBUG_LOG) === "true";
-
   try {
     const { response, data } = await httpGet(options);
     const code = (response && (response.status || response.statusCode)) || "unknown";
 
-    if (debugLog) {
-      console.log(`[${SCRIPT_NAME}] [调试] 状态码: ${code} - 原始响应: ${String(data || "")}`);
-    }
-
     if (!data) return "❌ 空响应";
 
-    if (data.includes("您已签到完毕")) {
-      return "🔁 重复签到。下次再来！";
-    }
+    if (String(data).includes("您已签到完毕")) return "🔁 重复签到。";
 
     if (
-      data.includes("感谢您积极打卡") ||
-      data.includes("签到成功") ||
-      data.includes("恭喜你") ||
-      data.includes("累计签到")
+      String(data).includes("感谢您积极打卡") ||
+      String(data).includes("签到成功") ||
+      String(data).includes("恭喜你") ||
+      String(data).includes("累计签到")
     ) {
-      const match = data.match(/特奖励[:：]\s*(.*?)(\(|\s|。|，|<|$)/);
-      const fallbackMatch = !match && data.match(/奖励[:：]\s*(.*?)(\(|\s|。|，|<|$)/);
+      const match = String(data).match(/特奖励[:：]\s*(.*?)(\(|\s|。|，|<|$)/);
+      const fallbackMatch = !match && String(data).match(/奖励[:：]\s*(.*?)(\(|\s|。|，|<|$)/);
       const reward = match ? match[1].trim() : (fallbackMatch ? fallbackMatch[1].trim() : "奖励");
-      return `✅ 签到成功 - 获得 ${reward}`;
+      return `✅ 签到成功 - ${reward}`;
     }
 
-    if (data.includes("需要登录")) {
-      return "❌ Cookie 已失效，请重新抓取。";
-    }
+    if (String(data).includes("需要登录")) return "❌ Cookie 已失效，请重新抓取。";
 
-    const failMatch = data.match(/errorhandle_dsu_amupper\('([^']+)'/);
+    const failMatch = String(data).match(/errorhandle_dsu_amupper\('([^']+)'/);
     const failReason = failMatch ? failMatch[1] : `HTTP ${code}`;
     return `❌ ${failReason}`;
-  } catch (e) {
+  } catch {
     return "❌ 请求异常或响应格式错误。";
   }
 }
