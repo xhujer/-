@@ -1,12 +1,14 @@
-#!name=富贵论坛每日签到（合一版-修复抓包）
-#!desc=访问 fglt.net 自动抓 Cookie；每日定时签到（修复：去掉 url 关键字 + 兼容 www/非www）
+#!name=富贵论坛每日签到（合一版-最终修复）
+#!desc=访问 fglt.net 自动抓 Cookie；每日定时签到（修复：enable=true + 更稳raw地址）
 #!author=you
-#!version=1.0.2
+#!version=1.0.3
 
 [Script]
-http-request ^https?:\/\/(www\.)?fglt\.net\/.* script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb, tag=富贵论坛-抓Cookie, requires-body=false, timeout=10
+# ✅ 关键：enable=true（官方语法），并兼容 www/非www + 全路径
+http-request ^https?:\/\/(www\.)?fglt\.net\/.* script-path=https://raw.githubusercontent.com/xhujer/-/main/fg%20jb,tag=富贵论坛-抓Cookie,requires-body=false,timeout=10,enable=true
 
-cron "5 9 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb, tag=富贵论坛-每日签到, timeout=20
+# ✅ 关键：enable=true
+cron "5 9 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/main/fg%20jb,tag=富贵论坛-每日签到,timeout=20,enable=true
 
 [MITM]
 hostname = %APPEND% www.fglt.net, fglt.net
