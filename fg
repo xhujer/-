@@ -1,14 +1,6 @@
-# =========================
-# 富贵论坛 小时签到（Loon）
-# Script: https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb
-# =========================
-
 [Script]
-# 1) 抓 Cookie + formhash（浏览器触发：访问小时签到请求）
-http-request ^https?:\/\/www\.fglt\.net\/plugin\.php\?id=dsu_amupper&ppersubmit=true.*formhash= script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb, tag=富贵论坛_小时签_抓数据, requires-body=false, timeout=30
-
-# 2) 定时每小时运行一次（整点）
-cron "0 * * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb, tag=富贵论坛_小时签_定时, timeout=60
+cron "5 9 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb, timeout=30, tag=富贵论坛-签到, enabled=true
+http-request ^https?:\/\/www\.fglt\.net\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/fg%20jb, timeout=30, tag=富贵论坛-抓Cookie, enabled=true
 
 [MITM]
-hostname = www.fglt.net
+hostname = %APPEND% fglt.net, www.fglt.net
