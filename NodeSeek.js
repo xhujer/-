@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "NodeSeek签到";
-const DOMAIN = "nodeseek.com";
+const DOMAIN = "www.nodeseek.com";
 
 const KEY_COOKIE = "nodeseek_cookie";
 const KEY_RANDOM = "nodeseek_random";
@@ -27,10 +27,8 @@ function notify(title, subtitle = "", body = "") {
   const t = cleanText(title) || "通知";
   const s = cleanText(subtitle);
   let b = cleanText(body);
-
   const MAX = 900;
   if (b.length > MAX) b = b.slice(0, MAX) + "…";
-
   $notification.post(t, s, b);
 }
 
@@ -105,17 +103,22 @@ async function captureCookie() {
 
 async function signIn(nsCookie, randomFlag) {
   const url = `https://${DOMAIN}/api/attendance?random=${randomFlag ? "true" : "false"}`;
+
   const headers = {
-    "Accept": "*/*",
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json;charset=utf-8",
     "Origin": `https://${DOMAIN}`,
     "Referer": `https://${DOMAIN}/board`,
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+    "X-Requested-With": "XMLHttpRequest",
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
     "Cookie": nsCookie,
-    "Content-Length": "0",
   };
 
-  const { data } = await httpPost({ url, headers, body: "" });
+  const body = "{}"; // 关键：强制带 body，避免某些场景被降级/跳转后变 GET
+
+  const { resp, data } = await httpPost({ url, headers, body });
   const raw = String(data || "");
+  const code = resp?.status || resp?.statusCode || 0;
 
   let json = null;
   try { json = JSON.parse(raw); } catch {}
@@ -125,7 +128,7 @@ async function signIn(nsCookie, randomFlag) {
     return msg ? `签到信息：${msg}` : "签到信息：（无提示文本）";
   }
 
-  return `签到信息：解析失败（返回片段：${cleanText(raw).slice(0, 160)}）`;
+  return `签到信息：解析失败（HTTP ${code}，返回片段：${cleanText(raw).slice(0, 180)}）`;
 }
 
 async function getUserInfo(memberId) {
@@ -133,20 +136,21 @@ async function getUserInfo(memberId) {
 
   const url = `https://${DOMAIN}/api/account/getInfo/${memberId}?readme=1`;
   const headers = {
-    "Accept": "*/*",
+    "Accept": "application/json, text/plain, */*",
     "Origin": `https://${DOMAIN}`,
     "Referer": `https://${DOMAIN}/space/${memberId}`,
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
   };
 
-  const { data } = await httpGet({ url, headers });
+  const { resp, data } = await httpGet({ url, headers });
   const raw = String(data || "");
+  const code = resp?.status || resp?.statusCode || 0;
 
   let json = null;
   try { json = JSON.parse(raw); } catch {}
 
   const d = json && json.detail;
-  if (!d) return "用户信息：获取失败（可能 MemberId 不对）";
+  if (!d) return `用户信息：获取失败（HTTP ${code}，可能 MemberId 不对/接口被拦）`;
 
   return [
     "用户信息：",
@@ -195,8 +199,8 @@ function nowText() {
       : (randomStored ? (String(randomStored).toLowerCase() !== "false") : true);
 
     const memberId =
-      argMemberId !== null ? String(argMemberId)
-      : (memberStored || "");
+      argMemberId !== null ? String(argMemberId).trim()
+      : (String(memberStored || "").trim());
 
     write(String(randomFlag), KEY_RANDOM);
     if (memberId) write(memberId, KEY_MEMBER_ID);
