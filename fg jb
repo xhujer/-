@@ -1,129 +1,238 @@
-/*
-  富贵论坛：抓 Cookie + 定时签到（Loon 合一脚本）
-  - http-request 阶段：存在 $request -> 抓取 Cookie 存储
-  - cron 阶段：不存在 $request -> 读取 Cookie -> forum.php 提取 formhash -> 调签到接口
-*/
+const NAME = "富贵论坛小时签";
 
-const CONFIG = {
-  name: "富贵签到",
-  // ✅ 统一用 https://www.fglt.net（Cookie 对 fglt.net / www.fglt.net 也能用，且更稳定）
-  signUrl:
-    "https://www.fglt.net/plugin.php?id=dsu_amupper&ppersubmit=true&formhash=@formhash&mobile=2",
-  backupUrl: "https://www.fglt.net/forum.php",
-  regFormhash: /formhash\s*(?:=|:|" value="|' value='|"?\s*=\s*"?)\s*([a-zA-Z0-9]+)/,
-  regDup: /已签到|已经签到/i,
-  regOk: /特奖励|奖励|签到成功|恭喜/i,
-  regInfo: /感谢您积极打卡[\s\S]*/i,
-};
+const FUGUI_HOUR_DATA_KEY = "fugui_hour_datas_loon";
+const KEY_NOTIFY_SUCCESS = "fugui_hour_notify_success_loon";
+const KEY_DEBUG_LOG = "fugui_hour_debug_log_loon";
 
-const STORE_KEY_COOKIE = "fglt_cookie";
-const STORE_KEY_DATE = "fglt_last_sign_date";
-
-// ===== 工具 =====
-function notify(body, sub = "") {
-  $notification.post(CONFIG.name, sub || "", body || "");
+if (
+  typeof $request !== "undefined" &&
+  $request.url &&
+  $request.url.includes("id=dsu_amupper&ppersubmit=true")
+) {
+  captureAuthData();
+  $done({});
+} else if (typeof $request === "undefined") {
+  runTasks()
+    .catch((e) => notify("❌ 执行异常", String(e && e.message ? e.message : e)))
+    .finally(() => $done({}));
+} else {
+  $done({});
 }
 
-function todayKey() {
-  return new Date().toDateString();
+function read(key) {
+  return $persistentStore.read(key);
 }
 
-function stripHtml(s) {
-  return String(s || "").replace(/<[^>]+>/g, "").trim();
+function write(val, key) {
+  return $persistentStore.write(val, key);
 }
 
-function httpGet(url, cookie) {
+function notify(subtitle, message) {
+  $notification.post(NAME, subtitle || "", message || "");
+}
+
+function log(...args) {
+  console.log(`[${NAME}]`, ...args);
+}
+
+function debugEnabled() {
+  return read(KEY_DEBUG_LOG) === "true";
+}
+
+function shouldNotifySuccess() {
+  return read(KEY_NOTIFY_SUCCESS) !== "false";
+}
+
+function wait(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function httpGet(options) {
   return new Promise((resolve, reject) => {
-    const req = {
-      url,
-      headers: {
-        Cookie: cookie,
-        "User-Agent":
-          "Mozilla/5.0 (iPhone; CPU iPhone OS like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile",
-        Accept: "*/*",
-      },
-      timeout: 15000,
-    };
-
-    $httpClient.get(req, (err, resp, data) => {
+    $httpClient.get(options, (err, resp, data) => {
       if (err) return reject(err);
-      resolve(data || "");
+      resolve({ resp, data: data || "" });
     });
   });
 }
 
-// ===== 模式 1：抓 Cookie（http-request）=====
-function captureCookie() {
+function getFormhashFromUrl(url) {
+  const m = String(url || "").match(/formhash=([a-zA-Z0-9]+)/);
+  return m ? m[1] : null;
+}
+
+function getUserIdFromCookie(cookie) {
+  const m = String(cookie || "").match(/JoRn_2132_auth=([^;]+)/);
+  return m ? m[1].substring(0, 10) : null;
+}
+
+function nowHourLabel() {
+  const h = new Date().getHours();
+  return `${h}:00`;
+}
+
+function captureAuthData() {
   try {
-    const headers = ($request && $request.headers) || {};
+    log("进入小时签数据获取模式...");
+
+    const url = $request.url || "";
+    const headers = $request.headers || {};
     const cookie = headers.Cookie || headers.cookie || "";
 
-    if (cookie) {
-      $persistentStore.write(cookie, STORE_KEY_COOKIE);
-      notify("Cookie 已保存：可等待定时签到或手动运行 cron", "✅ 抓取成功");
-    } else {
-      notify("未捕获到 Cookie：请确保已登录后再打开/刷新 fglt.net", "⚠️ 抓取失败");
+    if (!cookie) {
+      notify("❌ 获取失败", "未能读取到 Cookie。请确保在浏览器中已登录富贵论坛。");
+      return;
     }
+
+    const formhash = getFormhashFromUrl(url);
+    if (!formhash) {
+      notify("❌ 获取失败", "未能从 URL 中找到 formhash！");
+      return;
+    }
+
+    const userId = getUserIdFromCookie(cookie);
+    if (!userId) {
+      notify("❌ 获取失败", "未能从 Cookie 中找到用户身份凭证 (auth)！");
+      return;
+    }
+
+    const nickname = `网页用户_${userId}`;
+    const newAccount = { userId, nickname, cookie, formhash };
+
+    let accounts = [];
+    const raw = read(FUGUI_HOUR_DATA_KEY);
+    if (raw) {
+      try {
+        accounts = JSON.parse(raw) || [];
+      } catch {
+        accounts = [];
+      }
+    }
+
+    const idx = accounts.findIndex((a) => a.userId === userId);
+    if (idx > -1) {
+      accounts[idx].cookie = cookie;
+      accounts[idx].formhash = formhash;
+      notify("✅ 配置更新成功", `账号: [${accounts[idx].nickname}]\n已更新为最新的有效配置。`);
+    } else {
+      accounts.push(newAccount);
+      notify("✅ 配置添加成功", `账号: [${nickname}]\n已完成初始化。`);
+    }
+
+    write(JSON.stringify(accounts), FUGUI_HOUR_DATA_KEY);
+    log(`已保存账号数: ${accounts.length}`);
   } catch (e) {
-    notify(String(e && e.message ? e.message : e), "❌ 抓取异常");
+    notify("❌ 获取失败", `处理数据时发生异常: ${String(e && e.message ? e.message : e)}`);
+    log("captureAuthData error:", e);
   }
-  $done({});
 }
 
-// ===== 模式 2：定时签到（cron）=====
-async function getFormhash(cookie) {
-  const html = await httpGet(CONFIG.backupUrl, cookie);
-  const m = html.match(CONFIG.regFormhash);
-  if (m && m[1]) return m[1];
-  throw new Error("无法提取 formhash：Cookie 可能失效或未登录");
-}
+async function runTasks() {
+  log("进入小时签定时任务模式...");
 
-async function signOnce() {
-  const today = todayKey();
-  const last = $persistentStore.read(STORE_KEY_DATE) || "";
-  if (last === today) return; // 今天已执行过，静默跳过
-
-  const cookie = $persistentStore.read(STORE_KEY_COOKIE) || "";
-  if (!cookie) {
-    notify("未找到 Cookie：请先用 Safari 打开并登录 fglt.net 触发抓 Cookie", "⚠️ 无法签到");
+  const raw = read(FUGUI_HOUR_DATA_KEY);
+  if (!raw) {
+    notify("❌ 未找到配置", "请先在浏览器中手动点一次签到（触发抓取）以初始化脚本。");
     return;
   }
 
-  const formhash = await getFormhash(cookie);
-  const url = CONFIG.signUrl.replace("@formhash", formhash);
-  const res = await httpGet(url, cookie);
-
-  if (CONFIG.regDup.test(res)) {
-    notify("今日已签到（重复）", "✅");
-    $persistentStore.write(today, STORE_KEY_DATE);
-    return;
-  }
-
-  if (CONFIG.regOk.test(res)) {
-    let info = (res.match(CONFIG.regInfo) || [])[0];
-    info = stripHtml(info);
-    notify(info || "签到成功！", "🎉");
-    $persistentStore.write(today, STORE_KEY_DATE);
-    return;
-  }
-
-  notify("已请求签到，但未匹配到成功文字（建议手动确认）", "⚠️ 未知结果");
-  // 未知也记录，避免反复尝试
-  $persistentStore.write(today, STORE_KEY_DATE);
-}
-
-async function runCron() {
+  let accounts;
   try {
-    await signOnce();
-  } catch (e) {
-    notify(String(e && e.message ? e.message : e), "❌ 签到失败");
+    accounts = JSON.parse(raw) || [];
+  } catch {
+    notify("❌ 配置损坏", "账号数据无法解析，请重新抓取一次。");
+    return;
   }
-  $done({});
+
+  if (accounts.length === 0) {
+    notify("🤔 配置为空", "没有找到任何账号信息，请先抓取数据。");
+    return;
+  }
+
+  log(`共发现 ${accounts.length} 个账号，开始执行小时签...`);
+
+  const summary = [];
+  let allSuccessOrRepeat = true;
+
+  for (let i = 0; i < accounts.length; i++) {
+    const result = await claimReward(accounts[i]);
+    if (result.includes("❌")) allSuccessOrRepeat = false;
+    summary.push(result);
+
+    if (i < accounts.length - 1) await wait(2000);
+  }
+
+  const title = `富贵论坛小时签 (${nowHourLabel()})`;
+  const message = summary.join("\n");
+
+  log("--- 任务执行摘要 ---\n" + message + "\n--------------------");
+
+  if (allSuccessOrRepeat && !shouldNotifySuccess()) {
+    log("所有任务成功或重复，且已关闭成功通知，跳过通知。");
+  } else {
+    notify(title, message);
+  }
 }
 
-// ===== 入口：根据是否存在 $request 判断当前运行场景 =====
-if (typeof $request !== "undefined") {
-  captureCookie();
-} else {
-  runCron();
+async function claimReward(account) {
+  const { nickname, cookie, formhash } = account || {};
+  if (!cookie || !formhash) {
+    return `👤 账号 [${nickname || "未知"}]: ❌ 缺少 Cookie 或 formhash 配置，请重新抓取。`;
+  }
+
+  const requestUrl =
+    `https://www.fglt.net/plugin.php?id=dsu_amupper&ppersubmit=true&formhash=${formhash}` +
+    `&infloat=yes&handlekey=dsu_amupper&inajax=1&ajaxtarget=fwin_content_dsu_amupper`;
+
+  const opts = {
+    url: requestUrl,
+    headers: {
+      Cookie: cookie,
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: "https://www.fglt.net/xm_task_20130503-list.html",
+    },
+    timeout: 15000,
+  };
+
+  log(`开始为账号 [${nickname}] 进行小时签...`);
+
+  try {
+    const { resp, data } = await httpGet(opts);
+
+    if (debugEnabled()) {
+      log(
+        `[调试] 账号[${nickname}] 状态码:${resp && (resp.status || resp.statusCode)} 响应:${data}`
+      );
+    }
+
+    let result = `👤 账号 [${nickname}]: `;
+
+    if (data.includes("您已签到完毕")) {
+      result += "🔁 重复签到。下个整点再来！";
+      return result;
+    }
+
+    if (data.includes("感谢您积极打卡") || data.includes("签到成功") || data.includes("恭喜你")) {
+      const m = data.match(/特奖励：(.*?)(\(|\s|$)/);
+      const fallback = !m && data.match(/奖励(：|：\s*)(.*?)(\(|\s|$)/);
+      const reward = m ? m[1].trim() : fallback ? fallback[2].trim() : "奖励";
+      result += `✅ 签到成功 - 获得 ${reward}`;
+      return result;
+    }
+
+    if (data.includes("需要登录")) {
+      result += "❌ 签到失败 - Cookie 已失效，请重新抓取。";
+      return result;
+    }
+
+    const failMatch = data.match(/errorhandle_dsu_amupper\('([^']+)'/);
+    const failReason = failMatch ? failMatch[1] : "未知错误";
+    result += `❌ 签到失败 - ${failReason}`;
+    return result;
+  } catch (e) {
+    log("claimReward error:", e);
+    return `👤 账号 [${nickname}]: ❌ 请求异常或响应格式错误。`;
+  }
 }
