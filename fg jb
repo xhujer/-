@@ -1,0 +1,128 @@
+/*
+  富贵论坛：抓 Cookie + 定时签到（Loon 合一脚本）
+  - http-request 阶段：存在 $request -> 抓取 Cookie 存储
+  - cron 阶段：不存在 $request -> 读取 Cookie -> forum.php 提取 formhash -> 调签到接口
+*/
+
+const CONFIG = {
+  name: "富贵签到",
+  signUrl:
+    "https://www.fglt.net/plugin.php?id=dsu_amupper&ppersubmit=true&formhash=@formhash&mobile=2",
+  backupUrl: "https://www.fglt.net/forum.php",
+  regFormhash: /formhash\s*(?:=|:|" value="|' value='|"?\s*=\s*"?)\s*([a-zA-Z0-9]+)/,
+  regDup: /已签到|已经签到/i,
+  regOk: /特奖励|奖励|签到成功|恭喜/i,
+  regInfo: /感谢您积极打卡[\s\S]*/i,
+};
+
+const STORE_KEY_COOKIE = "fglt_cookie";
+const STORE_KEY_DATE = "fglt_last_sign_date";
+
+// ===== 工具 =====
+function notify(body, sub = "") {
+  $notification.post(CONFIG.name, sub || "", body || "");
+}
+
+function todayKey() {
+  return new Date().toDateString();
+}
+
+function stripHtml(s) {
+  return String(s || "").replace(/<[^>]+>/g, "").trim();
+}
+
+function httpGet(url, cookie) {
+  return new Promise((resolve, reject) => {
+    const req = {
+      url,
+      headers: {
+        Cookie: cookie,
+        "User-Agent":
+          "Mozilla/5.0 (iPhone; CPU iPhone OS like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile",
+        Accept: "*/*",
+      },
+      timeout: 15000,
+    };
+
+    $httpClient.get(req, (err, resp, data) => {
+      if (err) return reject(err);
+      resolve(data || "");
+    });
+  });
+}
+
+// ===== 模式 1：抓 Cookie（http-request）=====
+function captureCookie() {
+  try {
+    const headers = ($request && $request.headers) || {};
+    const cookie = headers.Cookie || headers.cookie || "";
+
+    if (cookie) {
+      $persistentStore.write(cookie, STORE_KEY_COOKIE);
+      notify("Cookie 已保存：可等待定时签到或手动运行 cron", "✅ 抓取成功");
+    } else {
+      notify("未捕获到 Cookie：请确保已登录后再打开 fglt.net", "⚠️ 抓取失败");
+    }
+  } catch (e) {
+    notify(String(e && e.message ? e.message : e), "❌ 抓取异常");
+  }
+  $done({});
+}
+
+// ===== 模式 2：定时签到（cron）=====
+async function getFormhash(cookie) {
+  const html = await httpGet(CONFIG.backupUrl, cookie);
+  const m = html.match(CONFIG.regFormhash);
+  if (m && m[1]) return m[1];
+  throw new Error("无法提取 formhash：Cookie 可能失效或未登录");
+}
+
+async function signOnce() {
+  const today = todayKey();
+  const last = $persistentStore.read(STORE_KEY_DATE) || "";
+  if (last === today) return; // 今天已执行过，静默跳过
+
+  const cookie = $persistentStore.read(STORE_KEY_COOKIE) || "";
+  if (!cookie) {
+    notify("未找到 Cookie：请先用 Safari 打开并登录 fglt.net 触发抓 Cookie", "⚠️ 无法签到");
+    return;
+  }
+
+  const formhash = await getFormhash(cookie);
+  const url = CONFIG.signUrl.replace("@formhash", formhash);
+  const res = await httpGet(url, cookie);
+
+  if (CONFIG.regDup.test(res)) {
+    notify("今日已签到（重复）", "✅");
+    $persistentStore.write(today, STORE_KEY_DATE);
+    return;
+  }
+
+  if (CONFIG.regOk.test(res)) {
+    let info = (res.match(CONFIG.regInfo) || [])[0];
+    info = stripHtml(info);
+    notify(info || "签到成功！", "🎉");
+    $persistentStore.write(today, STORE_KEY_DATE);
+    return;
+  }
+
+  notify("已请求签到，但未匹配到成功文字（建议手动确认）", "⚠️ 未知结果");
+  // 未知也记录，避免反复尝试
+  $persistentStore.write(today, STORE_KEY_DATE);
+}
+
+async function runCron() {
+  try {
+    await signOnce();
+  } catch (e) {
+    notify(String(e && e.message ? e.message : e), "❌ 签到失败");
+  }
+  $done({});
+}
+
+// ===== 入口：根据是否存在 $request 判断当前运行场景 =====
+if (typeof $request !== "undefined") {
+  captureCookie();
+} else {
+  runCron();
+}
