@@ -13,23 +13,6 @@ function write(val, key) {
 function notify(title, subtitle = "", body = "") {
   $notification.post(title, subtitle, body);
 }
-function log(...args) {
-  const msg = args
-    .map((v) => {
-      if (v === undefined) return "undefined";
-      if (v === null) return "null";
-      if (typeof v === "object") {
-        try {
-          return JSON.stringify(v);
-        } catch {
-          return String(v);
-        }
-      }
-      return String(v);
-    })
-    .join(" ");
-  console.log(`[${SCRIPT_NAME}] ${msg}`);
-}
 function done(obj = {}) {
   $done(obj);
 }
@@ -52,20 +35,17 @@ function httpGet(options) {
       $request.url &&
       $request.url.includes("id=dsu_amupper&ppersubmit=true")
     ) {
-      log("富贵论坛获取模式...");
       getAuthDataFromRequest($request);
       return done();
     }
 
     if (typeof $request === "undefined") {
-      log("富贵论坛签到任务模式...");
       await runTasks();
       return done();
     }
 
     return done();
   } catch (e) {
-    log("异常：", e && e.message ? e.message : e);
     notify(SCRIPT_NAME, "❌ 脚本异常", String(e && e.message ? e.message : e));
     return done();
   }
@@ -133,7 +113,7 @@ function getAuthDataFromRequest(req) {
 async function runTasks() {
   const accountsStr = read(FUGUI_HOUR_DATA_KEY);
   if (!accountsStr) {
-    notify(SCRIPT_NAME, "❌ 未找到配置", "请先在浏览器中手动执行一次“小时签到”以初始化脚本。");
+    notify(SCRIPT_NAME, "❌ 未找到配置", "请先在浏览器中手动执行一次“签到”以初始化脚本。");
     return;
   }
 
@@ -142,8 +122,6 @@ async function runTasks() {
     notify(SCRIPT_NAME, "🤔 配置为空", "没有找到任何账号信息，请先抓取数据。");
     return;
   }
-
-  log(`共发现 ${accounts.length} 个账号，开始执行小时签任务...`);
 
   const summary = [];
   let allSuccessOrRepeat = true;
@@ -155,19 +133,15 @@ async function runTasks() {
     if (i < accounts.length - 1) await wait(2000);
   }
 
-  const hour = new Date().getHours();
-  const finalTitle = `富贵论坛小时签 (${hour}:00)`;
+  const finalTitle = "富贵论坛签到";
   const finalMessage = summary.join("\n");
 
+  console.log(finalMessage);
+
   const notifySuccess = read(KEY_NOTIFY_SUCCESS) !== "false";
+  if (allSuccessOrRepeat && !notifySuccess) return;
 
-  log(`--- 任务执行摘要 ---\n${finalMessage}\n--------------------`);
-
-  if (allSuccessOrRepeat && !notifySuccess) {
-    log("✅ 所有任务执行成功或重复，根据设置不发送通知。");
-  } else {
-    notify(SCRIPT_NAME, finalTitle, finalMessage);
-  }
+  notify(SCRIPT_NAME, finalTitle, finalMessage);
 }
 
 async function claimReward(accountData) {
@@ -193,26 +167,28 @@ async function claimReward(accountData) {
     },
   };
 
-  log(`▶️ 开始为账号 [${nickname}] 进行小时签...`);
-
   const debugLog = read(KEY_DEBUG_LOG) === "true";
 
   try {
     const { response, data } = await httpGet(options);
     const code = (response && (response.status || response.statusCode)) || "unknown";
 
-    if (debugLog) log(`[调试日志] 账号 [${nickname}] - 状态码: ${code} - 原始响应: ${String(data || "")}`);
+    if (debugLog) {
+      console.log(
+        `[${SCRIPT_NAME}] [调试] 账号 [${nickname}] - 状态码: ${code} - 原始响应: ${String(data || "")}`
+      );
+    }
 
     if (!data) return who + "❌ 空响应";
 
     if (data.includes("您已签到完毕")) {
-      return who + "🔁 重复签到。下个整点再来！";
+      return who + "🔁 重复签到。下次再来！";
     }
 
-    if (data.includes("感谢您积极打卡") || data.includes("签到成功") || data.includes("恭喜你")) {
-      const match = data.match(/特奖励：(.*?)(\(|\s|$)/);
-      const fallbackMatch = !match && data.match(/奖励(：|：\s*)(.*?)(\(|\s|$)/);
-      const reward = match ? match[1].trim() : fallbackMatch ? fallbackMatch[2].trim() : "奖励";
+    if (data.includes("感谢您积极打卡") || data.includes("签到成功") || data.includes("恭喜你") || data.includes("累计签到")) {
+      const match = data.match(/特奖励[:：]\s*(.*?)(\(|\s|。|，|<|$)/);
+      const fallbackMatch = !match && data.match(/奖励[:：]\s*(.*?)(\(|\s|。|，|<|$)/);
+      const reward = match ? match[1].trim() : (fallbackMatch ? fallbackMatch[1].trim() : "奖励");
       return who + `✅ 签到成功 - 获得 ${reward}`;
     }
 
@@ -221,10 +197,9 @@ async function claimReward(accountData) {
     }
 
     const failMatch = data.match(/errorhandle_dsu_amupper\('([^']+)'/);
-    const failReason = failMatch ? failMatch[1] : "未知错误";
+    const failReason = failMatch ? failMatch[1] : `HTTP ${code}`;
     return who + `❌ 签到失败 - ${failReason}`;
   } catch (e) {
-    log("请求异常：", e && e.message ? e.message : e);
     return who + "❌ 请求异常或响应格式错误。";
   }
 }
