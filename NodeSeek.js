@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "NodeSeek签到";
-const DOMAIN = "www.nodeseek.com";
+const DOMAIN = "nodeseek.com";
 
 const KEY_COOKIE = "nodeseek_cookie";
 const KEY_RANDOM = "nodeseek_random";
@@ -89,7 +89,7 @@ function getArg(key) {
 
 async function captureCookie() {
   const url = String($request?.url || "");
-  if (!url.includes(DOMAIN) && !url.includes("nodeseek.com")) return;
+  if (!url.includes("nodeseek.com")) return;
 
   const cookie = getCookieFromHeaders($request?.headers || {});
   if (!cookie || cookie.length < 20) return;
@@ -206,10 +206,7 @@ function nowText() {
 
     const body = [infoText, signText, `时间：${nowText()}`].filter(Boolean).join("\n");
 
-    // ✅ 日志只输出结果（不输出流程）
     printResult(body);
-
-    // ✅ 通知也只发一次结果
     notify(SCRIPT_NAME, "📌 结果", body);
 
     return done();
