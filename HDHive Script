@@ -16,12 +16,15 @@ const KEY_FLOW = "hdhive_points_flow_v4";
   }
 })().catch(e => $.logErr(e)).finally(() => $.done());
 
+function looksLikeJwt(t) {
+  return typeof t === "string" && /^[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+$/.test(t);
+}
+
 async function captureCookie() {
   const url = $request.url || "";
   if (!url.includes(DOMAIN)) return;
 
   if (/\/(go-api|api)\/customer\/(user\/)?checkin/i.test(url)) return;
-
   if (!/\/manager\/|\/api\/|\/go-api\/|https:\/\/hdhive\.com\/?$/.test(url)) return;
 
   const h = $request.headers || {};
@@ -33,8 +36,8 @@ async function captureCookie() {
 
   const normCookie = normalizeCookie(cookie);
   const ckObj = parseCookie(normCookie);
-  if (!ckObj.token) return;
 
+  // ✅ 不再要求 ckObj.token 才保存 Cookie（否则会抓不到）
   const old = $.getdata(KEY_COOKIE);
   if (normCookie !== old) {
     $.setdata(normCookie, KEY_COOKIE);
@@ -102,12 +105,7 @@ async function checkIn() {
   }
 
   const ckObj = parseCookie(rawCookie);
-  const token = ckObj.token;
-  if (!token) {
-    $.msg("HDHive", "❌ Cookie 失效", "缺少 token");
-    return;
-  }
-
+  const token = ckObj.token || ""; // 可能不是 JWT
   const ua =
     $.getdata(KEY_UA) ||
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1";
@@ -126,7 +124,11 @@ async function checkIn() {
   };
 
   headers["Accept"] = "text/x-component,*/*";
-  headers["Authorization"] = `Bearer ${token}`;
+
+  // ✅ 只有 token 看起来像 JWT 才带 Authorization（避免 invalid token）
+  if (looksLikeJwt(token)) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
 
   if (csrf) {
     headers["X-CSRF-Token"] = csrf;
@@ -160,6 +162,7 @@ async function checkIn() {
     let json = null;
     try { json = JSON.parse(raw); } catch {}
     if (!json) continue;
+
     checkinRes = json;
     break;
   }
