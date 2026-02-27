@@ -25,7 +25,6 @@ async function captureCookie() {
   if (!url.includes(DOMAIN)) return;
 
   if (/\/(go-api|api)\/customer\/(user\/)?checkin/i.test(url)) return;
-
   if (!/\/manager\/|\/api\/|\/go-api\/|https:\/\/hdhive\.com\/?$/.test(url)) return;
 
   const h = $request.headers || {};
@@ -45,7 +44,22 @@ async function captureCookie() {
     if (referer) $.setdata(referer, KEY_REFERER);
     if (ckObj.csrf_access_token) $.setdata(ckObj.csrf_access_token, KEY_CSRF);
 
-    $.msg("HDHive", "🎉 Cookie 已更新", "可以关闭自动获取开关");
+    const cookieKeys = Object.keys(ckObj).map(k => k.toLowerCase());
+    const hitNames = cookieKeys.filter(k =>
+      k.includes("remember") ||
+      k.includes("refresh") ||
+      k.includes("renew") ||
+      k.includes("long") ||
+      k.includes("persistent") ||
+      k.includes("auth")
+    );
+
+    const hasRememberLike = hitNames.length > 0;
+    const tip = hasRememberLike
+      ? `已检测到可能的长期字段：${hitNames.slice(0, 6).join(", ")}`
+      : "未检测到明显的 remember/refresh 类字段（如果网站提供“记住我”，请确认登录时已勾选）";
+
+    $.msg("HDHive", "🎉 Cookie 已更新", tip);
   }
 }
 
