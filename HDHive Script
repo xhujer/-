@@ -6,9 +6,6 @@ const KEY_COOKIE = "hdhive_cookie_v16";
 const KEY_REFERER = "hdhive_referer_v16";
 const KEY_UA = "hdhive_ua_v16";
 const KEY_CSRF = "hdhive_csrf_v16";
-const KEY_FLOW = "hdhive_points_flow_v16";
-
-const DEBUG = false;
 
 (async () => {
   if (typeof $request !== "undefined") {
@@ -20,22 +17,12 @@ const DEBUG = false;
 
 /* ========== 工具函数 ========== */
 
-function log(...args) {
-  if (DEBUG) console.log(...args);
-}
-
 function looksLikeJwt(t) {
   if (!t || !t.includes(".")) return false;
   try {
     const payload = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
     const now = Math.floor(Date.now() / 1000);
-
     if (payload.exp && payload.exp < now) return false;
-
-    if (payload.iat && (now - payload.iat) > 86400 * 30) {
-      console.log("⚠️ JWT 可能过旧");
-    }
-
     return true;
   } catch {
     return false;
@@ -73,7 +60,7 @@ function formatTime(t) {
     .replace(/\+\d\d:\d\d$/, "");
 }
 
-/* ========== Cookie 捕获（优化版） ========== */
+/* ========== Cookie 捕获 ========== */
 
 async function captureCookie() {
   const url = $request.url || "";
@@ -81,14 +68,12 @@ async function captureCookie() {
 
   const h = $request.headers || {};
   const cookie = getHeader(h, "Cookie");
-
   if (!cookie) return;
 
   const norm = normalizeCookie(cookie);
   const newObj = parseCookie(norm);
   const oldObj = parseCookie($.getdata(KEY_COOKIE) || "");
 
-  // 只在 token 变化时更新（避免刷通知）
   if (newObj.token !== oldObj.token) {
     $.setdata(norm, KEY_COOKIE);
     $.setdata(getHeader(h, "User-Agent") || "", KEY_UA);
@@ -98,24 +83,21 @@ async function captureCookie() {
       $.setdata(newObj.csrf_access_token, KEY_CSRF);
     }
 
-    $.msg("HDHive", "🍪 Cookie 更新成功", "已自动同步最新凭证");
+    $.msg("HDHive", "🍪 Cookie 更新成功", "已同步最新凭证");
   }
 }
 
-/* ========== 积分日志（双解析） ========== */
+/* ========== 积分日志 ========== */
 
 async function fetchPoints(headers) {
   const url = `https://${DOMAIN}/manager/points-logs?page=1&page_size=10&_rsc=1`;
 
   try {
     const raw = await httpGetText(url, headers);
-
     if (!raw) return null;
 
-    // 🔥 RSC解析
     let list = extractArray(raw, '"initialData":');
 
-    // 🔥 fallback JSON解析
     if (!list) {
       try {
         const json = JSON.parse(raw);
@@ -125,10 +107,8 @@ async function fetchPoints(headers) {
 
     if (!Array.isArray(list) || !list.length) return null;
 
-    const latest = list[0];
-
     return {
-      latest,
+      latest: list[0],
       recent: list.slice(0, 3)
     };
   } catch {
@@ -159,12 +139,12 @@ function extractArray(raw, key) {
   return null;
 }
 
-/* ========== 主签到逻辑（增强） ========== */
+/* ========== 主签到 ========== */
 
 async function checkIn() {
   const cookie = $.getdata(KEY_COOKIE);
   if (!cookie) {
-    $.msg("HDHive", "❌ 未登录", "请打开 App 抓取 Cookie");
+    $.msg("HDHive", "签到结果", "❌ 未获取 Cookie，请先打开 App");
     return;
   }
 
@@ -204,49 +184,60 @@ async function checkIn() {
     if (!r) continue;
 
     if ([401, 403].includes(r.status)) {
-      $.msg("HDHive", "❌ 登录失效", "请重新抓取 Cookie");
+      $.msg("HDHive", "签到结果", "❌ 登录失效，请重新抓 Cookie");
       return;
     }
 
     try {
-      const json = JSON.parse(r.data);
-      result = json;
+      result = JSON.parse(r.data);
       break;
     } catch {}
   }
 
-  /* ========== 结果判断（增强） ========== */
-
-  let title = "📌 签到结果";
-  let desc = "未知状态";
-
-  if (result) {
-    const text = JSON.stringify(result);
-
-    if (/成功|success/i.test(text)) {
-      title = "✅ 签到成功";
-      desc = "今日签到已完成";
-    } else if (/已签到|already/i.test(text)) {
-      title = "☑️ 今日已签到";
-      desc = "无需重复操作";
-    } else {
-      desc = text.slice(0, 80);
-    }
-  }
-
-  /* ========== 获取积分 ========== */
+  /* ===== 积分日志为准 ===== */
 
   const flow = await fetchPoints(headers);
+
+  let title = "签到结果";
+  let desc = "";
+
+  const text = result ? JSON.stringify(result) : "";
+
+  if (/已签到|already/i.test(text)) {
+    desc = "✅ 今日已签到（积分日志确认）";
+  } else if (/成功|success/i.test(text)) {
+    desc = "✅ 签到成功（接口返回）";
+  } else {
+    desc = "⚠️ 状态未知";
+  }
 
   let extra = "";
 
   if (flow?.latest) {
-    const p = flow.latest.points;
-    extra += `\n🎁 积分变动：${p > 0 ? "+" : ""}${p}`;
-    extra += `\n🕒 时间：${formatTime(flow.latest.created_at)}`;
+    const l = flow.latest;
+
+    const points = l.points > 0 ? `+${l.points}` : l.points;
+    const remark = l.remark || l.change_type || "未知";
+
+    extra += `\n${remark}`;
+    extra += `\n\n用户ID：${l.user_id || "-"}`;
+    extra += `\n最新变动：${formatTime(l.created_at)}`;
+    extra += `\n变动数值：${points} 积分`;
+    extra += `\n内容描述：${remark}`;
+
+    if (flow.recent?.length) {
+      extra += `\n\n📝 积分日志：\n`;
+      extra += flow.recent.map(x => {
+        const p = x.points > 0 ? `+${x.points}` : x.points;
+        const r = x.remark || x.change_type || "";
+        return `- ${formatTime(x.created_at)}：${p}（${r}）`;
+      }).join("\n");
+    }
+  } else {
+    extra += "\n\n（未获取到积分日志）";
   }
 
-  $.msg("HDHive", title, desc + extra);
+  $.msg("HDHive", title, `${desc}\n${extra}`);
 }
 
 /* ========== HTTP ========== */
