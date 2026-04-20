@@ -188,7 +188,6 @@ async function checkIn() {
 
   let output = "";
 
-  output += `HDHive\n\n`;
   output += `✅ ${statusText}\n\n`;
 
   if (flow?.latest) {
