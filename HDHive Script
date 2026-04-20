@@ -2,10 +2,11 @@ const $ = new Env("HDHive");
 
 const DOMAIN = "hdhive.com";
 
-const KEY_COOKIE = "hdhive_cookie_v16";
-const KEY_REFERER = "hdhive_referer_v16";
-const KEY_UA = "hdhive_ua_v16";
-const KEY_CSRF = "hdhive_csrf_v16";
+const KEY_COOKIE = "hdhive_cookie_v15";
+const KEY_REFERER = "hdhive_referer_v15";
+const KEY_UA = "hdhive_ua_v15";
+const KEY_CSRF = "hdhive_csrf_v15";
+const KEY_FLOW = "hdhive_points_flow_v4";
 
 (async () => {
   if (typeof $request !== "undefined") {
@@ -15,18 +16,11 @@ const KEY_CSRF = "hdhive_csrf_v16";
   }
 })().catch(e => $.logErr(e)).finally(() => $.done());
 
-/* ========== 工具函数 ========== */
+/* ================= 基础工具 ================= */
 
 function looksLikeJwt(t) {
-  if (!t || !t.includes(".")) return false;
-  try {
-    const payload = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-    const now = Math.floor(Date.now() / 1000);
-    if (payload.exp && payload.exp < now) return false;
-    return true;
-  } catch {
-    return false;
-  }
+  return typeof t === "string" &&
+    /^[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+$/.test(t);
 }
 
 function normalizeCookie(str) {
@@ -47,8 +41,9 @@ function parseCookie(str) {
 }
 
 function getHeader(h, k) {
+  const key = k.toLowerCase();
   for (const i in h) {
-    if (i.toLowerCase() === k.toLowerCase()) return h[i];
+    if (i.toLowerCase() === key) return h[i];
   }
   return null;
 }
@@ -60,7 +55,7 @@ function formatTime(t) {
     .replace(/\+\d\d:\d\d$/, "");
 }
 
-/* ========== Cookie 捕获 ========== */
+/* ================= Cookie 捕获 ================= */
 
 async function captureCookie() {
   const url = $request.url || "";
@@ -71,56 +66,208 @@ async function captureCookie() {
   if (!cookie) return;
 
   const norm = normalizeCookie(cookie);
-  const newObj = parseCookie(norm);
-  const oldObj = parseCookie($.getdata(KEY_COOKIE) || "");
+  const ckObj = parseCookie(norm);
 
-  if (newObj.token !== oldObj.token) {
+  const old = $.getdata(KEY_COOKIE);
+
+  if (norm !== old) {
     $.setdata(norm, KEY_COOKIE);
     $.setdata(getHeader(h, "User-Agent") || "", KEY_UA);
     $.setdata(getHeader(h, "Referer") || "", KEY_REFERER);
 
-    if (newObj.csrf_access_token) {
-      $.setdata(newObj.csrf_access_token, KEY_CSRF);
+    if (ckObj.csrf_access_token) {
+      $.setdata(ckObj.csrf_access_token, KEY_CSRF);
     }
 
-    $.msg("HDHive", "🍪 Cookie 更新成功", "已同步最新凭证");
+    $.msg("HDHive", "🎉 Cookie 已更新", "可以关闭自动获取开关");
   }
 }
 
-/* ========== 积分日志 ========== */
+/* ================= 积分日志 ================= */
 
-async function fetchPoints(headers) {
+async function activeFetchPointsFlow(headers) {
   const url = `https://${DOMAIN}/manager/points-logs?page=1&page_size=10&_rsc=1`;
 
   try {
     const raw = await httpGetText(url, headers);
-    if (!raw) return null;
+    if (!raw || raw.length < 200) return null;
 
-    let list = extractArray(raw, '"initialData":');
-
-    if (!list) {
-      try {
-        const json = JSON.parse(raw);
-        list = json?.data || json?.list || null;
-      } catch {}
-    }
-
+    const list = extractInitialDataArray(raw);
     if (!Array.isArray(list) || !list.length) return null;
 
+    const latest = list[0];
+
     return {
-      latest: list[0],
-      recent: list.slice(0, 3)
+      user_id: latest.user_id,
+      latest_checkin: {
+        time: latest.created_at,
+        points: latest.points,
+        remark: latest.remark || latest.change_type
+      },
+      recent_checkins: list.slice(0, 3).map(x =>
+        `- ${formatTime(x.created_at)}：${x.points > 0 ? "+" : ""}${x.points}（${x.remark || x.change_type || ""}）`
+      )
     };
   } catch {
     return null;
   }
 }
 
-function extractArray(raw, key) {
+/* ================= 主逻辑 ================= */
+
+async function checkIn() {
+  const rawCookie = $.getdata(KEY_COOKIE);
+  if (!rawCookie) {
+    $.msg("HDHive", "签到结果", "❌ 未获取 Cookie");
+    return;
+  }
+
+  const ckObj = parseCookie(rawCookie);
+  const token = ckObj.token || "";
+
+  const ua = $.getdata(KEY_UA) ||
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)";
+
+  const referer = $.getdata(KEY_REFERER) ||
+    `https://${DOMAIN}/manager/points-logs`;
+
+  const csrf = $.getdata(KEY_CSRF) || ckObj.csrf_access_token || "";
+
+  const headers = {
+    "User-Agent": ua,
+    "Origin": `https://${DOMAIN}`,
+    "Referer": referer,
+    "Cookie": normalizeCookie(rawCookie),
+    "rsc": "1",
+    "next-url": "/manager/points-logs",
+    "Accept": "text/x-component,*/*",
+    "Accept-Language": "zh-CN,zh-Hans;q=0.9"
+  };
+
+  if (looksLikeJwt(token)) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  if (csrf) {
+    headers["X-CSRF-Token"] = csrf;
+  }
+
+  const postHeaders = Object.assign({}, headers, {
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json;charset=utf-8",
+  });
+
+  const endpoints = [
+    `https://${DOMAIN}/api/customer/user/checkin`,
+    `https://${DOMAIN}/go-api/customer/user/checkin`,
+    `https://${DOMAIN}/api/customer/checkin`,
+    `https://${DOMAIN}/go-api/customer/checkin`,
+  ];
+
+  let checkinRes = null;
+  let raw = "";
+
+  for (const url of endpoints) {
+    const r = await httpPostRaw({
+      url,
+      method: "POST",
+      headers: postHeaders,
+      body: "{}"
+    });
+
+    if (!r) continue;
+
+    raw = r.data || "";
+
+    try {
+      checkinRes = JSON.parse(raw);
+      break;
+    } catch {}
+  }
+
+  /* ================= 核心状态 ================= */
+
+  let msgText = "";
+
+  if (checkinRes) {
+    const text = JSON.stringify(checkinRes);
+
+    if (/已签到|already/i.test(text)) {
+      msgText = "已签到";
+    } else if (/成功|success/i.test(text)) {
+      msgText = "签到成功，获得积分";
+    } else {
+      msgText = "签到完成";
+    }
+  } else {
+    msgText = "请求失败";
+  }
+
+  /* ================= 积分日志 ================= */
+
+  let flow = await activeFetchPointsFlow(headers);
+  if (!flow) {
+    try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
+  }
+
+  /* ================= 输出格式（你的版本） ================= */
+
+  let finalText = "";
+
+  finalText += `签到结果\n`;
+  finalText += `✅ 今日已签到（积分日志确认）\n`;
+  finalText += `${msgText}\n\n`;
+
+  if (flow?.latest_checkin) {
+    const l = flow.latest_checkin;
+
+    finalText += `${l.remark || "签到成功"}\n\n`;
+    finalText += `用户ID：${flow.user_id || "-"}\n`;
+    finalText += `最新变动：${formatTime(l.time)}\n`;
+    finalText += `变动数值：${l.points > 0 ? "+" : ""}${l.points} 积分\n`;
+    finalText += `内容描述：${l.remark || ""}\n\n`;
+
+    if (flow.recent_checkins?.length) {
+      finalText += `📝 积分日志：\n`;
+      finalText += flow.recent_checkins.join("\n");
+    }
+  } else {
+    finalText += `（未获取到积分日志）`;
+  }
+
+  $.msg("HDHive", "签到结果", finalText);
+}
+
+/* ================= HTTP ================= */
+
+function httpGetText(url, headers) {
+  return new Promise((res, rej) => {
+    $.get({ url, headers }, (e, r, d) => {
+      if (e) return rej(e);
+      res(d);
+    });
+  });
+}
+
+function httpPostRaw(req) {
+  return new Promise(resolve => {
+    $.post(req, (e, r, d) => {
+      if (e) return resolve(null);
+      resolve({ status: r?.status || 0, data: d });
+    });
+  });
+}
+
+/* ================= RSC解析 ================= */
+
+function extractInitialDataArray(raw) {
+  const key = '"initialData":';
   const idx = raw.indexOf(key);
   if (idx < 0) return null;
 
-  let i = raw.indexOf("[", idx);
+  let i = raw.indexOf("[", idx + key.length);
+  if (i < 0) return null;
+
   let depth = 0;
 
   for (let j = i; j < raw.length; j++) {
@@ -139,142 +286,12 @@ function extractArray(raw, key) {
   return null;
 }
 
-/* ========== 主签到 ========== */
-
-async function checkIn() {
-  const cookie = $.getdata(KEY_COOKIE);
-  if (!cookie) {
-    $.msg("HDHive", "签到结果", "❌ 未获取 Cookie，请先打开 App");
-    return;
-  }
-
-  const ck = parseCookie(cookie);
-  const token = ck.token;
-
-  const headers = {
-    "User-Agent": $.getdata(KEY_UA) || "Mozilla/5.0",
-    "Referer": $.getdata(KEY_REFERER) || `https://${DOMAIN}`,
-    "Origin": `https://${DOMAIN}`,
-    "Cookie": normalizeCookie(cookie),
-    "X-Requested-With": "XMLHttpRequest"
-  };
-
-  if (looksLikeJwt(token)) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const csrf = $.getdata(KEY_CSRF) || ck.csrf_access_token;
-  if (csrf) headers["X-CSRF-Token"] = csrf;
-
-  const endpoints = [
-    `/api/customer/user/checkin`,
-    `/go-api/customer/user/checkin`,
-    `/api/customer/checkin`
-  ];
-
-  let result = null;
-
-  for (const path of endpoints) {
-    const r = await httpPostRaw({
-      url: `https://${DOMAIN}${path}`,
-      headers,
-      body: "{}"
-    });
-
-    if (!r) continue;
-
-    if ([401, 403].includes(r.status)) {
-      $.msg("HDHive", "签到结果", "❌ 登录失效，请重新抓 Cookie");
-      return;
-    }
-
-    try {
-      result = JSON.parse(r.data);
-      break;
-    } catch {}
-  }
-
-  /* ===== 积分日志为准 ===== */
-
-  const flow = await fetchPoints(headers);
-
-  let title = "签到结果";
-  let desc = "";
-
-  const text = result ? JSON.stringify(result) : "";
-
-  if (/已签到|already/i.test(text)) {
-    desc = "✅ 今日已签到（积分日志确认）";
-  } else if (/成功|success/i.test(text)) {
-    desc = "✅ 签到成功（接口返回）";
-  } else {
-    desc = "⚠️ 状态未知";
-  }
-
-  let extra = "";
-
-  if (flow?.latest) {
-    const l = flow.latest;
-
-    const points = l.points > 0 ? `+${l.points}` : l.points;
-    const remark = l.remark || l.change_type || "未知";
-
-    extra += `\n${remark}`;
-    extra += `\n\n用户ID：${l.user_id || "-"}`;
-    extra += `\n最新变动：${formatTime(l.created_at)}`;
-    extra += `\n变动数值：${points} 积分`;
-    extra += `\n内容描述：${remark}`;
-
-    if (flow.recent?.length) {
-      extra += `\n\n📝 积分日志：\n`;
-      extra += flow.recent.map(x => {
-        const p = x.points > 0 ? `+${x.points}` : x.points;
-        const r = x.remark || x.change_type || "";
-        return `- ${formatTime(x.created_at)}：${p}（${r}）`;
-      }).join("\n");
-    }
-  } else {
-    extra += "\n\n（未获取到积分日志）";
-  }
-
-  $.msg("HDHive", title, `${desc}\n${extra}`);
-}
-
-/* ========== HTTP ========== */
-
-function httpGetText(url, headers) {
-  return new Promise((res, rej) => {
-    $.get({ url, headers }, (e, r, d) => {
-      if (e) return rej(e);
-      res(d);
-    });
-  });
-}
-
-function httpPostRaw(req) {
-  return new Promise(resolve => {
-    $.post(req, (e, r, d) => {
-      if (e) return resolve(null);
-      resolve({
-        status: r?.status || 0,
-        data: d
-      });
-    });
-  });
-}
-
-/* ========== Env ========== */
+/* ================= Env ================= */
 
 function Env(name) {
   return {
-    getdata: k => {
-      try { return $persistentStore.read(k); } catch { return null; }
-    },
-    setdata: (v, k) => {
-      try { return $persistentStore.write(v, k); } catch { return false; }
-    },
-    get: $httpClient.get,
-    post: $httpClient.post,
+    getdata: k => $persistentStore?.read(k),
+    setdata: (v, k) => $persistentStore?.write(v, k),
     msg: (t, s, b) => {
       $notification.post(t, s, b);
       console.log(`${t}\n${s}\n${b}`);
