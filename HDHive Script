@@ -117,11 +117,27 @@ async function checkIn() {
     try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
   }
 
+  // next-action 未触发时（返回 __PAGE_RSC__），用积分日志推断签到结果
+  let displayResult = checkinResult;
+  if (checkinResult === "__PAGE_RSC__" || checkinResult === null) {
+    if (flow?.latest_checkin) {
+      const today = new Date().toISOString().slice(0, 10);
+      const latestDate = (flow.latest_checkin.time || "").slice(0, 10);
+      if (latestDate === today) {
+        displayResult = `✅ 今日已签到（积分日志确认）\n${flow.latest_checkin.remark || ""}`;
+      } else {
+        displayResult = "⚠️ 签到接口异常（next-action 未生效），积分日志无今日记录\n请检查 NEXT_ACTION_ID 是否需要重新抓包";
+      }
+    } else {
+      displayResult = "⚠️ 签到接口异常，无法确认结果，请手动检查";
+    }
+  }
+
   const flowText = flow
     ? "\n\n" + buildFlowText(flow)
     : "\n\n（未拉到积分日志，使用缓存或暂无数据）";
 
-  $.msg("HDHive", "📌 签到结果", `${checkinResult}${flowText}`);
+  $.msg("HDHive", "📌 签到结果", `${displayResult}${flowText}`);
 }
 
 // ─────────────────────────────────────────────
@@ -129,11 +145,16 @@ async function checkIn() {
 // ─────────────────────────────────────────────
 async function doCheckin(headers) {
   const url = `https://${DOMAIN}/manager/points-logs`;
+
+  // 关键：Surge $httpClient 对 body 的处理：
+  // - Content-Type: text/plain 时必须传字符串，不能是对象
+  // - 部分版本会对 "[false]" 做 URL encode，加 body-encoding 强制原样发送
   const req = {
     url,
     method: "POST",
     headers,
-    body: "[false]",  // 抓包确认的真实请求体，非 JSON API，是 Server Action 格式
+    body: "[false]",
+    "body-encoding": "utf8",  // Surge 专属：强制 UTF-8 字符串，不做额外编码
   };
 
   const r = await httpPostRaw(req);
@@ -145,33 +166,34 @@ async function doCheckin(headers) {
     return null;
   }
 
-  // 响应是 text/x-component（RSC 流），逐行解析找 error/success 节点
-  // 格式示例：
-  //   0:{...}
-  //   1:{"error":{"success":false,"message":"签到失败","description":"你已经签到过了","code":"400"}}
-  //   1:{"result":{"success":true,"message":"签到成功","description":"获得 5 积分"}}
   return parseCheckinRscResponse(r.data);
 }
 
 function parseCheckinRscResponse(raw) {
   if (!raw) return "响应为空";
 
-  // 未登录时服务端可能返回跳转 HTML 或空 RSC
+  // 未登录检测
   if (raw.includes("请先登录") || raw.includes("Unauthorized")) {
     $.msg("HDHive", "❌ Cookie 已过期", "服务端返回未授权，请重新打开 App 触发抓取");
     return null;
   }
 
-  // Server Action 失效检测：
-  // 正常签到响应只有 2 行（0:{...} 和 1:{error/result:{...}}）
-  // 如果响应包含页面框架标志，说明 next-action 头未生效，
-  // 服务端把请求当成普通页面渲染了（next-action ID 过期需重新抓包）
-  if (raw.includes('"$Sreact.fragment"') || raw.includes('"OutletBoundary"') || raw.includes('"initialData"')) {
-    console.log("⚠️ Server Action 未触发，服务端返回了页面 RSC，next-action ID 可能已过期");
-    return "❌ 签到接口失效，next-action ID 已过期，请重新抓包更新脚本中的 NEXT_ACTION_ID";
+  // Server Action 未触发检测：
+  // 正常签到响应只有 2 行；出现页面框架标志说明 next-action 未生效
+  // 此时服务端把 POST 当普通页面渲染了，返回了完整 RSC 页面
+  // ── 注意：RSC 格式是  1:"$Sreact.fragment"  外面有行号前缀，不是纯 JSON ──
+  if (raw.includes("$Sreact.fragment") || raw.includes("OutletBoundary") || raw.includes("MetadataBoundary")) {
+    console.log("⚠️ next-action 未生效，服务端返回了页面 RSC（next-action ID 可能已过期）");
+    // 不作为错误弹出，调用方会用积分日志判断是否已签到
+    return "__PAGE_RSC__";
   }
 
-  // 逐行解析 RSC 流
+  // 逐行解析 Server Action RSC 流
+  // 正常格式：
+  //   0:{"a":"$@1","f":"","b":"xxx","q":"","i":false}
+  //   1:{"error":{"success":false,"message":"签到失败","description":"你已经签到过了，明天再来吧","code":"400"}}
+  // 或成功：
+  //   1:{"result":{"success":true,"description":"获得 5 积分"}}
   const lines = raw.split("\n");
   for (const line of lines) {
     const colonIdx = line.indexOf(":");
@@ -180,12 +202,10 @@ function parseCheckinRscResponse(raw) {
     let obj = null;
     try { obj = JSON.parse(jsonStr); } catch { continue; }
 
-    // 签到已完成或失败：{"error":{...}}
     if (obj?.error) {
       const e = obj.error;
       return e.description || e.message || JSON.stringify(e);
     }
-    // 签到成功：{"result":{...}} 或 {"success":true,...}
     if (obj?.result) {
       const r = obj.result;
       return r.description || r.message || JSON.stringify(r);
@@ -195,7 +215,6 @@ function parseCheckinRscResponse(raw) {
     }
   }
 
-  // 兜底：返回原始片段
   return `RSC 响应解析失败，片段：${raw.slice(0, 150)}`;
 }
 
