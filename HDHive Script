@@ -146,21 +146,25 @@ async function checkIn() {
 async function doCheckin(headers) {
   const url = `https://${DOMAIN}/manager/points-logs`;
 
-  // 关键：Surge $httpClient 对 body 的处理：
-  // - Content-Type: text/plain 时必须传字符串，不能是对象
-  // - 部分版本会对 "[false]" 做 URL encode，加 body-encoding 强制原样发送
+  // Loon / Surge 的 $httpClient 可能会过滤 next-action 等非标准头
+  // 解决方案：在 Loon [Rewrite] 段加 header-add 规则（见配套配置文件）
+  // 当前兜底：即使头被过滤，也会从积分日志确认结果，功能完整
+
+  console.log(`[HDHive] 发送签到请求，next-action=${headers["next-action"] || "未设置"}`);
+
   const req = {
     url,
     method: "POST",
     headers,
     body: "[false]",
-    "body-encoding": "utf8",  // Surge 专属：强制 UTF-8 字符串，不做额外编码
+    "body-encoding": "utf8",
   };
 
   const r = await httpPostRaw(req);
   if (!r) return "网络错误，请求未发出";
 
-  // 检测登录态失效
+  console.log(`[HDHive] 签到响应 HTTP ${r.status}，body 前80字节：${r.data.slice(0, 80)}`);
+
   if (r.status === 401 || r.status === 403) {
     $.msg("HDHive", "❌ Cookie 已过期", `HTTP ${r.status}，请重新打开 App 触发抓取`);
     return null;
@@ -400,14 +404,34 @@ function formatTime(t) {
 // Env 封装（$persistentStore 异常保护）
 // ─────────────────────────────────────────────
 function Env(name) {
+  // 兼容 Loon 和 Surge
+  // Loon:  $persistentStore / $httpClient / $notification / $done
+  // Surge: 同上，接口一致
+  const isLoon = typeof $loon !== "undefined";
+
+  function persistRead(k) {
+    try { return $persistentStore?.read(k) ?? null; } catch { return null; }
+  }
+  function persistWrite(v, k) {
+    try { return $persistentStore?.write(v, k) ?? false; } catch { return false; }
+  }
+  function httpPost(o, c) {
+    // Loon $httpClient.post 支持非标准头，无需额外处理
+    return $httpClient?.post(o, c);
+  }
+  function httpGet(o, c) {
+    return $httpClient?.get(o, c);
+  }
+
   return {
     name,
-    getdata: k    => { try { return $persistentStore?.read(k)    ?? null;  } catch { return null;  } },
-    setdata: (v,k)=> { try { return $persistentStore?.write(v,k) ?? false; } catch { return false; } },
-    post: (o, c)  => $httpClient?.post(o, c),
-    get:  (o, c)  => $httpClient?.get(o, c),
-    msg:  (t,s,b) => { $notification?.post(t,s,b); console.log(`===${t}===\n${s}\n${b}`); },
-    logErr: e     => console.log(`❗️${name}: ${e}`),
-    done:   ()    => $done?.({})
+    isLoon,
+    getdata: k     => persistRead(k),
+    setdata: (v,k) => persistWrite(v, k),
+    post: httpPost,
+    get:  httpGet,
+    msg:  (t,s,b)  => { $notification?.post(t,s,b); console.log(`===${t}===\n${s}\n${b}`); },
+    logErr: e      => console.log(`❗️${name}: ${e}`),
+    done:   ()     => $done?.({})
   };
 }
