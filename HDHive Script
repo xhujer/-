@@ -16,7 +16,7 @@ const KEY_FLOW = "hdhive_points_flow_v4";
   }
 })().catch(e => $.logErr(e)).finally(() => $.done());
 
-/* ================= 基础工具 ================= */
+/* ================= 工具 ================= */
 
 function looksLikeJwt(t) {
   return typeof t === "string" &&
@@ -55,7 +55,7 @@ function formatTime(t) {
     .replace(/\+\d\d:\d\d$/, "");
 }
 
-/* ================= Cookie 捕获 ================= */
+/* ================= Cookie ================= */
 
 async function captureCookie() {
   const url = $request.url || "";
@@ -85,32 +85,26 @@ async function captureCookie() {
 
 /* ================= 积分日志 ================= */
 
-async function activeFetchPointsFlow(headers) {
+async function fetchPoints(headers) {
   const url = `https://${DOMAIN}/manager/points-logs?page=1&page_size=10&_rsc=1`;
 
-  try {
-    const raw = await httpGetText(url, headers);
-    if (!raw || raw.length < 200) return null;
+  const raw = await httpGetText(url, headers);
+  if (!raw || raw.length < 200) return null;
 
-    const list = extractInitialDataArray(raw);
-    if (!Array.isArray(list) || !list.length) return null;
+  const list = extractInitialDataArray(raw);
+  if (!Array.isArray(list) || !list.length) return null;
 
-    const latest = list[0];
-
-    return {
-      user_id: latest.user_id,
-      latest_checkin: {
-        time: latest.created_at,
-        points: latest.points,
-        remark: latest.remark || latest.change_type
-      },
-      recent_checkins: list.slice(0, 3).map(x =>
-        `- ${formatTime(x.created_at)}：${x.points > 0 ? "+" : ""}${x.points}（${x.remark || x.change_type || ""}）`
-      )
-    };
-  } catch {
-    return null;
-  }
+  return {
+    user_id: list[0].user_id,
+    latest_checkin: {
+      time: list[0].created_at,
+      points: list[0].points,
+      remark: list[0].remark || list[0].change_type
+    },
+    recent_checkins: list.slice(0, 3).map(x =>
+      `- ${formatTime(x.created_at)}：${x.points > 0 ? "+" : ""}${x.points}（${x.remark || x.change_type || ""}）`
+    )
+  };
 }
 
 /* ================= 主逻辑 ================= */
@@ -152,20 +146,20 @@ async function checkIn() {
     headers["X-CSRF-Token"] = csrf;
   }
 
-  const postHeaders = Object.assign({}, headers, {
+  const postHeaders = {
+    ...headers,
     "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json;charset=utf-8",
-  });
+    "Content-Type": "application/json;charset=utf-8"
+  };
 
   const endpoints = [
     `https://${DOMAIN}/api/customer/user/checkin`,
     `https://${DOMAIN}/go-api/customer/user/checkin`,
     `https://${DOMAIN}/api/customer/checkin`,
-    `https://${DOMAIN}/go-api/customer/checkin`,
+    `https://${DOMAIN}/go-api/customer/checkin`
   ];
 
-  let checkinRes = null;
-  let raw = "";
+  let result = null;
 
   for (const url of endpoints) {
     const r = await httpPostRaw({
@@ -177,20 +171,18 @@ async function checkIn() {
 
     if (!r) continue;
 
-    raw = r.data || "";
-
     try {
-      checkinRes = JSON.parse(raw);
+      result = JSON.parse(r.data);
       break;
     } catch {}
   }
 
-  /* ================= 核心状态 ================= */
+  /* ================= 状态判断 ================= */
 
-  let msgText = "";
+  let msgText = "未知状态";
 
-  if (checkinRes) {
-    const text = JSON.stringify(checkinRes);
+  if (result) {
+    const text = JSON.stringify(result);
 
     if (/已签到|already/i.test(text)) {
       msgText = "已签到";
@@ -199,18 +191,16 @@ async function checkIn() {
     } else {
       msgText = "签到完成";
     }
-  } else {
-    msgText = "请求失败";
   }
 
-  /* ================= 积分日志 ================= */
+  /* ================= 积分 ================= */
 
-  let flow = await activeFetchPointsFlow(headers);
+  let flow = await fetchPoints(headers);
   if (!flow) {
     try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
   }
 
-  /* ================= 输出格式（你的版本） ================= */
+  /* ================= 输出（你要的格式） ================= */
 
   let finalText = "";
 
@@ -238,22 +228,25 @@ async function checkIn() {
   $.msg("HDHive", "签到结果", finalText);
 }
 
-/* ================= HTTP ================= */
+/* ================= Loon HTTP ================= */
 
 function httpGetText(url, headers) {
-  return new Promise((res, rej) => {
-    $.get({ url, headers }, (e, r, d) => {
-      if (e) return rej(e);
-      res(d);
+  return new Promise(resolve => {
+    $httpClient.get({ url, headers }, (err, resp, data) => {
+      if (err) return resolve("");
+      resolve(typeof data === "string" ? data : "");
     });
   });
 }
 
 function httpPostRaw(req) {
   return new Promise(resolve => {
-    $.post(req, (e, r, d) => {
-      if (e) return resolve(null);
-      resolve({ status: r?.status || 0, data: d });
+    $httpClient.post(req, (err, resp, data) => {
+      if (err) return resolve(null);
+      resolve({
+        status: resp?.status || resp?.statusCode || 0,
+        data: typeof data === "string" ? data : ""
+      });
     });
   });
 }
