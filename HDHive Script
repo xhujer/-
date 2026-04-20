@@ -2,14 +2,11 @@ const $ = new Env("HDHive");
 
 const DOMAIN = "hdhive.com";
 
-const KEY_COOKIE  = "hdhive_cookie_v15";
+const KEY_COOKIE = "hdhive_cookie_v15";
 const KEY_REFERER = "hdhive_referer_v15";
-const KEY_UA      = "hdhive_ua_v15";
-const KEY_CSRF    = "hdhive_csrf_v15";
-const KEY_FLOW    = "hdhive_points_flow_v15";
-
-// 抓包确认的 Server Action ID（如失效需重新抓包更新）
-const NEXT_ACTION_ID = "402b7e1f30165a6ded288e0043f2dbb11db4a998a1";
+const KEY_UA = "hdhive_ua_v15";
+const KEY_CSRF = "hdhive_csrf_v15";
+const KEY_FLOW = "hdhive_points_flow_v15"; // 修复：统一版本号为 v15
 
 (async () => {
   if (typeof $request !== "undefined") {
@@ -19,15 +16,27 @@ const NEXT_ACTION_ID = "402b7e1f30165a6ded288e0043f2dbb11db4a998a1";
   }
 })().catch(e => $.logErr(e)).finally(() => $.done());
 
-// ─────────────────────────────────────────────
-// Cookie 捕获
-// ─────────────────────────────────────────────
+function looksLikeJwt(t) {
+  if (typeof t !== "string") return false;
+  if (!/^[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+$/.test(t)) return false;
+  // 修复：校验 JWT 是否过期
+  try {
+    const payload = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      console.log("⚠️ JWT token 已过期");
+      return false;
+    }
+  } catch {
+    // payload 解析失败时仍允许使用，避免误拦截
+  }
+  return true;
+}
+
 async function captureCookie() {
   const url = $request.url || "";
   if (!url.includes(DOMAIN)) return;
 
-  // 排除签到自身触发的请求，避免死循环
-  if (/\/manager\/points-logs/.test(url) && $request.method === "POST") return;
+  if (/\/(go-api|api)\/customer\/(user\/)?checkin/i.test(url)) return;
 
   if (!/\/manager\/|\/api\/|\/go-api\/|https:\/\/hdhive\.com\/?$/.test(url)) return;
 
@@ -40,208 +49,33 @@ async function captureCookie() {
 
   const normCookie = normalizeCookie(cookie);
   const ckObj = parseCookie(normCookie);
-  const old = $.getdata(KEY_COOKIE);
 
+  const old = $.getdata(KEY_COOKIE);
   if (normCookie !== old) {
     $.setdata(normCookie, KEY_COOKIE);
     if (ua) $.setdata(ua, KEY_UA);
     if (referer) $.setdata(referer, KEY_REFERER);
     if (ckObj.csrf_access_token) $.setdata(ckObj.csrf_access_token, KEY_CSRF);
+
     $.msg("HDHive", "🎉 Cookie 已更新", "可以关闭自动获取开关");
   }
 }
 
-// ─────────────────────────────────────────────
-// 主签到流程
-// ─────────────────────────────────────────────
-async function checkIn() {
-  const rawCookie = $.getdata(KEY_COOKIE);
-  if (!rawCookie) {
-    $.msg("HDHive", "❌ 无法签到", "未获取 Cookie，请打开 App 触发一次请求");
-    return;
-  }
-
-  const ckObj = parseCookie(rawCookie);
-  const token = ckObj.token || "";
-  const ua = $.getdata(KEY_UA) ||
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Mobile/15E148 Safari/604.1";
-  const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/manager/points-logs`;
-  const csrf = $.getdata(KEY_CSRF) || ckObj.csrf_access_token || "";
-
-  // ── 公共请求头基础部分 ──
-  const baseHeaders = {
-    "User-Agent": ua,
-    "Origin": `https://${DOMAIN}`,
-    "Referer": referer,
-    "Accept-Language": "zh-CN,zh-Hans;q=0.9",
-    "Cookie": normalizeCookie(rawCookie),
-    "sec-fetch-site": "same-origin",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-dest": "empty",
-  };
-
-  // JWT 校验：格式正确且未过期才加 Authorization
-  if (looksLikeValidJwt(token)) {
-    baseHeaders["Authorization"] = `Bearer ${token}`;
-  }
-
-  // ── 签到专用请求头（抓包确认的完整头部） ──
-  const checkinHeaders = Object.assign({}, baseHeaders, {
-    "Accept": "text/x-component",
-    "Content-Type": "text/plain;charset=UTF-8",
-    // 关键：Next.js Server Action ID，对应服务端签到函数
-    "next-action": NEXT_ACTION_ID,
-    "next-router-state-tree": encodeURIComponent(JSON.stringify(
-      ["",{"children":["manager",{"children":["points-logs",{"children":["__PAGE__",{},null,null,false]},null,null,false]},null,null,false]},null,null,true]
-    )),
-    "rsc": "1",
-  });
-  if (csrf) {
-    checkinHeaders["X-CSRF-Token"] = csrf;
-    checkinHeaders["X-Csrf-Token"] = csrf;
-  }
-
-  // ── 执行签到 ──
-  // 真实端点：POST /manager/points-logs，请求体 [false]
-  const checkinResult = await doCheckin(checkinHeaders);
-
-  // ── 拉取积分日志 ──
-  const rscHeaders = Object.assign({}, baseHeaders, {
-    "Accept": "*/*",
-    "rsc": "1",
-    "next-url": "/manager/points-logs",
-  });
-
-  let flow = await fetchPointsFlow(rscHeaders);
-  if (!flow) {
-    try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
-  }
-
-  // next-action 未触发时（返回 __PAGE_RSC__），用积分日志推断签到结果
-  let displayResult = checkinResult;
-  if (checkinResult === "__PAGE_RSC__" || checkinResult === null) {
-    if (flow?.latest_checkin) {
-      const today = new Date().toISOString().slice(0, 10);
-      const latestDate = (flow.latest_checkin.time || "").slice(0, 10);
-      if (latestDate === today) {
-        displayResult = `✅ 今日已签到（积分日志确认）\n${flow.latest_checkin.remark || ""}`;
-      } else {
-        displayResult = "⚠️ 签到接口异常（next-action 未生效），积分日志无今日记录\n请检查 NEXT_ACTION_ID 是否需要重新抓包";
-      }
-    } else {
-      displayResult = "⚠️ 签到接口异常，无法确认结果，请手动检查";
-    }
-  }
-
-  const flowText = flow
-    ? "\n\n" + buildFlowText(flow)
-    : "\n\n（未拉到积分日志，使用缓存或暂无数据）";
-
-  $.msg("HDHive", "📌 签到结果", `${displayResult}${flowText}`);
-}
-
-// ─────────────────────────────────────────────
-// 签到请求：POST /manager/points-logs，body=[false]
-// ─────────────────────────────────────────────
-async function doCheckin(headers) {
-  const url = `https://${DOMAIN}/manager/points-logs`;
-
-  // Loon / Surge 的 $httpClient 可能会过滤 next-action 等非标准头
-  // 解决方案：在 Loon [Rewrite] 段加 header-add 规则（见配套配置文件）
-  // 当前兜底：即使头被过滤，也会从积分日志确认结果，功能完整
-
-  console.log(`[HDHive] 发送签到请求，next-action=${headers["next-action"] || "未设置"}`);
-
-  const req = {
-    url,
-    method: "POST",
-    headers,
-    body: "[false]",
-    "body-encoding": "utf8",
-  };
-
-  const r = await httpPostRaw(req);
-  if (!r) return "网络错误，请求未发出";
-
-  console.log(`[HDHive] 签到响应 HTTP ${r.status}，body 前80字节：${r.data.slice(0, 80)}`);
-
-  if (r.status === 401 || r.status === 403) {
-    $.msg("HDHive", "❌ Cookie 已过期", `HTTP ${r.status}，请重新打开 App 触发抓取`);
-    return null;
-  }
-
-  return parseCheckinRscResponse(r.data);
-}
-
-function parseCheckinRscResponse(raw) {
-  if (!raw) return "响应为空";
-
-  // 未登录检测
-  if (raw.includes("请先登录") || raw.includes("Unauthorized")) {
-    $.msg("HDHive", "❌ Cookie 已过期", "服务端返回未授权，请重新打开 App 触发抓取");
-    return null;
-  }
-
-  // Server Action 未触发检测：
-  // 正常签到响应只有 2 行；出现页面框架标志说明 next-action 未生效
-  // 此时服务端把 POST 当普通页面渲染了，返回了完整 RSC 页面
-  // ── 注意：RSC 格式是  1:"$Sreact.fragment"  外面有行号前缀，不是纯 JSON ──
-  if (raw.includes("$Sreact.fragment") || raw.includes("OutletBoundary") || raw.includes("MetadataBoundary")) {
-    console.log("⚠️ next-action 未生效，服务端返回了页面 RSC（next-action ID 可能已过期）");
-    // 不作为错误弹出，调用方会用积分日志判断是否已签到
-    return "__PAGE_RSC__";
-  }
-
-  // 逐行解析 Server Action RSC 流
-  // 正常格式：
-  //   0:{"a":"$@1","f":"","b":"xxx","q":"","i":false}
-  //   1:{"error":{"success":false,"message":"签到失败","description":"你已经签到过了，明天再来吧","code":"400"}}
-  // 或成功：
-  //   1:{"result":{"success":true,"description":"获得 5 积分"}}
-  const lines = raw.split("\n");
-  for (const line of lines) {
-    const colonIdx = line.indexOf(":");
-    if (colonIdx < 0) continue;
-    const jsonStr = line.slice(colonIdx + 1).trim();
-    let obj = null;
-    try { obj = JSON.parse(jsonStr); } catch { continue; }
-
-    if (obj?.error) {
-      const e = obj.error;
-      return e.description || e.message || JSON.stringify(e);
-    }
-    if (obj?.result) {
-      const r = obj.result;
-      return r.description || r.message || JSON.stringify(r);
-    }
-    if (obj?.success === true) {
-      return obj.description || obj.message || "签到成功";
-    }
-  }
-
-  return `RSC 响应解析失败，片段：${raw.slice(0, 150)}`;
-}
-
-// ─────────────────────────────────────────────
-// 积分日志：GET /manager/points-logs?_rsc=xxx
-// RSC 响应中含 "initialData":[{...}]
-// ─────────────────────────────────────────────
-async function fetchPointsFlow(headers) {
-  // _rsc 参数值随机即可，服务端只用来区分完整页面请求和 RSC 请求
-  const rscKey = Math.random().toString(36).slice(2, 7);
-  const url = `https://${DOMAIN}/manager/points-logs?_rsc=${rscKey}`;
+async function activeFetchPointsFlow(headers) {
+  const url = `https://${DOMAIN}/manager/points-logs?page=1&page_size=10&_rsc=1`;
 
   try {
     const raw = await httpGetText(url, headers);
     if (!raw || raw.length < 200) {
-      console.log("⚠️ 积分日志响应过短，可能未登录或页面结构变动");
+      console.log("⚠️ 积分日志页面返回内容过短，可能未登录或页面结构变动");
       return null;
     }
 
-    // 从 RSC 流中提取 initialData 数组
     const list = extractInitialDataArray(raw);
+
+    // 修复：RSC 解析失败时给出明确提示，便于排查
     if (!Array.isArray(list) || !list.length) {
-      console.log("⚠️ 未找到 initialData 数组，RSC 结构可能已变动");
+      console.log("⚠️ 未找到 initialData 数组，页面结构可能已变动，RSC 解析失败");
       return null;
     }
 
@@ -255,9 +89,9 @@ async function fetchPointsFlow(headers) {
       latest_checkin: {
         time: latest.created_at,
         points: latest.points,
-        remark: latest.remark || latest.change_type,
+        remark: latest.remark || latest.change_type
       },
-      recent_checkins: recent,
+      recent_checkins: recent
     };
 
     $.setdata(JSON.stringify(flow), KEY_FLOW);
@@ -272,7 +106,7 @@ function buildFlowText(flow) {
   if (!flow) return "";
   const l = [];
   if (flow.user_id) l.push(`用户ID：${flow.user_id}`);
-  if (flow.latest_checkin?.time)   l.push(`最新变动：${formatTime(flow.latest_checkin.time)}`);
+  if (flow.latest_checkin?.time) l.push(`最新变动：${formatTime(flow.latest_checkin.time)}`);
   if (flow.latest_checkin?.points !== undefined)
     l.push(`变动数值：${flow.latest_checkin.points > 0 ? "+" : ""}${flow.latest_checkin.points} 积分`);
   if (flow.latest_checkin?.remark) l.push(`内容描述：${flow.latest_checkin.remark}`);
@@ -284,58 +118,118 @@ function buildFlowText(flow) {
   return l.join("\n");
 }
 
-// ─────────────────────────────────────────────
-// RSC 流中提取 initialData 数组
-// ─────────────────────────────────────────────
-function extractInitialDataArray(raw) {
-  const key = '"initialData":';
-  const idx = raw.indexOf(key);
-  if (idx < 0) return null;
+async function checkIn() {
+  const rawCookie = $.getdata(KEY_COOKIE);
+  if (!rawCookie) {
+    $.msg("HDHive", "❌ 无法签到", "未获取 Cookie，请打开 App 触发一次请求");
+    return;
+  }
 
-  let i = raw.indexOf("[", idx + key.length);
-  if (i < 0) return null;
+  const ckObj = parseCookie(rawCookie);
+  const token = ckObj.token || "";
+  const ua =
+    $.getdata(KEY_UA) ||
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1";
 
-  let depth = 0, inStr = false, esc = false;
+  const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/manager/points-logs`;
+  const csrf = $.getdata(KEY_CSRF) || ckObj.csrf_access_token || "";
 
-  for (let j = i; j < raw.length; j++) {
-    const ch = raw[j];
-    if (inStr) {
-      if (esc)         { esc = false; continue; }
-      if (ch === "\\") { esc = true;  continue; }
-      if (ch === '"')    inStr = false;
+  const headers = {
+    "User-Agent": ua,
+    "Origin": `https://${DOMAIN}`,
+    "Referer": referer,
+    "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+    "Cookie": normalizeCookie(rawCookie),
+    "rsc": "1",
+    "next-url": "/manager/points-logs",
+    "Accept": "text/x-component,*/*",
+  };
+
+  if (looksLikeJwt(token)) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  if (csrf) {
+    headers["X-CSRF-Token"] = csrf;
+    headers["X-Csrf-Token"] = csrf;
+  }
+
+  const postHeaders = Object.assign({}, headers, {
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json;charset=utf-8",
+  });
+
+  const endpoints = [
+    `https://${DOMAIN}/api/customer/user/checkin`,
+    `https://${DOMAIN}/go-api/customer/user/checkin`,
+    `https://${DOMAIN}/api/customer/checkin`,
+    `https://${DOMAIN}/go-api/customer/checkin`,
+  ];
+
+  let checkinRes = null;
+  let lastStatus = 0;
+  // 修复：收集所有端点的失败信息，便于调试
+  const failLogs = [];
+
+  for (const url of endpoints) {
+    const req = { url, method: "POST", headers: postHeaders, body: "{}" };
+    const r = await httpPostRaw(req);
+    if (!r) {
+      failLogs.push(`${url} → 网络错误`);
       continue;
     }
-    if (ch === '"') { inStr = true; continue; }
-    if (ch === "[") depth++;
-    if (ch === "]") {
-      depth--;
-      if (depth === 0) {
-        try { return JSON.parse(raw.slice(i, j + 1)); } catch { return null; }
-      }
+
+    lastStatus = r.status;
+    const raw = r.data || "";
+
+    // 修复：检测 Cookie 过期 / 未登录状态
+    if (lastStatus === 401 || lastStatus === 403) {
+      $.msg("HDHive", "❌ Cookie 已过期", `HTTP ${lastStatus}，请重新打开 App 触发抓取`);
+      return;
     }
+    if (raw.toLowerCase().includes('"code":401') || raw.includes("请先登录") || raw.includes("Unauthorized")) {
+      $.msg("HDHive", "❌ Cookie 已过期", "服务端返回未授权，请重新打开 App 触发抓取");
+      return;
+    }
+
+    let json = null;
+    try {
+      json = JSON.parse(raw);
+    } catch {
+      failLogs.push(`${url} → HTTP ${lastStatus}，非 JSON 响应：${raw.slice(0, 80)}`);
+      continue;
+    }
+
+    checkinRes = json;
+    console.log(`✅ 签到端点命中：${url}`);
+    break;
   }
-  return null;
+
+  let title = "📌 签到结果";
+  let showText;
+
+  if (checkinRes) {
+    const msg = checkinRes.message || checkinRes.msg || "";
+    const desc = checkinRes.description || checkinRes.desc || "";
+    showText = desc || msg || "（无提示文本）";
+  } else {
+    // 修复：展示所有端点的失败日志
+    showText = `所有端点均失败：\n${failLogs.join("\n")}`;
+    console.log(showText);
+  }
+
+  let flow = await activeFetchPointsFlow(headers);
+  if (!flow) {
+    try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
+  }
+
+  const flowText = flow
+    ? "\n\n" + buildFlowText(flow)
+    : "\n\n（未拉到积分日志：可能是 MITM 未解密 / 返回非 RSC / Cookie 无权限）";
+
+  $.msg("HDHive", title, `${showText}${flowText}`);
 }
 
-// ─────────────────────────────────────────────
-// JWT 校验（格式 + 过期时间）
-// ─────────────────────────────────────────────
-function looksLikeValidJwt(t) {
-  if (typeof t !== "string") return false;
-  if (!/^[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+$/.test(t)) return false;
-  try {
-    const payload = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-      console.log("⚠️ JWT token 已过期，跳过 Authorization 头");
-      return false;
-    }
-  } catch { /* payload 解析失败时仍允许使用 */ }
-  return true;
-}
-
-// ─────────────────────────────────────────────
-// HTTP 工具
-// ─────────────────────────────────────────────
 function httpGetText(url, headers) {
   return new Promise((resolve, reject) => {
     $.get({ url, headers }, (err, resp, data) => {
@@ -350,14 +244,46 @@ function httpPostRaw(req) {
     $.post(req, (err, resp, data) => {
       if (err) return resolve(null);
       const status = resp?.status || resp?.statusCode || 0;
-      resolve({ status, data: typeof data === "string" ? data : "" });
+      resolve({ status, data: (typeof data === "string" ? data : "") });
     });
   });
 }
 
-// ─────────────────────────────────────────────
-// Cookie / Header 工具
-// ─────────────────────────────────────────────
+function extractInitialDataArray(raw) {
+  const key = '"initialData":';
+  const idx = raw.indexOf(key);
+  if (idx < 0) return null;
+
+  let i = raw.indexOf("[", idx + key.length);
+  if (i < 0) return null;
+
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+
+  for (let j = i; j < raw.length; j++) {
+    const ch = raw[j];
+
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === "\\") { esc = true; continue; }
+      if (ch === '"') inStr = false;
+      continue;
+    } else {
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === "[") depth++;
+      if (ch === "]") {
+        depth--;
+        if (depth === 0) {
+          const jsonText = raw.slice(i, j + 1);
+          try { return JSON.parse(jsonText); } catch { return null; }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function getCookieFromHeaders(h) {
   let v = null;
   for (const k in h) {
@@ -400,38 +326,23 @@ function formatTime(t) {
     .replace(/\+\d\d:\d\d$/, "");
 }
 
-// ─────────────────────────────────────────────
-// Env 封装（$persistentStore 异常保护）
-// ─────────────────────────────────────────────
+// 修复：Env 的 getdata / setdata 加异常捕获，防止 $persistentStore 未定义时崩溃
 function Env(name) {
-  // 兼容 Loon 和 Surge
-  // Loon:  $persistentStore / $httpClient / $notification / $done
-  // Surge: 同上，接口一致
-  const isLoon = typeof $loon !== "undefined";
-
-  function persistRead(k) {
-    try { return $persistentStore?.read(k) ?? null; } catch { return null; }
-  }
-  function persistWrite(v, k) {
-    try { return $persistentStore?.write(v, k) ?? false; } catch { return false; }
-  }
-  function httpPost(o, c) {
-    // Loon $httpClient.post 支持非标准头，无需额外处理
-    return $httpClient?.post(o, c);
-  }
-  function httpGet(o, c) {
-    return $httpClient?.get(o, c);
-  }
-
   return {
     name,
-    isLoon,
-    getdata: k     => persistRead(k),
-    setdata: (v,k) => persistWrite(v, k),
-    post: httpPost,
-    get:  httpGet,
-    msg:  (t,s,b)  => { $notification?.post(t,s,b); console.log(`===${t}===\n${s}\n${b}`); },
-    logErr: e      => console.log(`❗️${name}: ${e}`),
-    done:   ()     => $done?.({})
+    getdata: k => {
+      try { return $persistentStore?.read(k) ?? null; } catch { return null; }
+    },
+    setdata: (v, k) => {
+      try { return $persistentStore?.write(v, k) ?? false; } catch { return false; }
+    },
+    post: (o, c) => $httpClient?.post(o, c),
+    get: (o, c) => $httpClient?.get(o, c),
+    msg: (t, s, b) => {
+      $notification?.post(t, s, b);
+      console.log(`===${t}===\n${s}\n${b}`);
+    },
+    logErr: e => console.log(`❗️${name}: ${e}`),
+    done: () => $done?.({})
   };
 }
