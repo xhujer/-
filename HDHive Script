@@ -162,6 +162,15 @@ function parseCheckinRscResponse(raw) {
     return null;
   }
 
+  // Server Action 失效检测：
+  // 正常签到响应只有 2 行（0:{...} 和 1:{error/result:{...}}）
+  // 如果响应包含页面框架标志，说明 next-action 头未生效，
+  // 服务端把请求当成普通页面渲染了（next-action ID 过期需重新抓包）
+  if (raw.includes('"$Sreact.fragment"') || raw.includes('"OutletBoundary"') || raw.includes('"initialData"')) {
+    console.log("⚠️ Server Action 未触发，服务端返回了页面 RSC，next-action ID 可能已过期");
+    return "❌ 签到接口失效，next-action ID 已过期，请重新抓包更新脚本中的 NEXT_ACTION_ID";
+  }
+
   // 逐行解析 RSC 流
   const lines = raw.split("\n");
   for (const line of lines) {
