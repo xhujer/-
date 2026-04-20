@@ -65,21 +65,22 @@ async function captureCookie() {
   const norm = normalizeCookie(cookie);
 
   const old = $.getdata(KEY_COOKIE);
+
   if (norm !== old) {
     $.setdata(norm, KEY_COOKIE);
     $.setdata(getHeader(h, "User-Agent") || "", KEY_UA);
     $.setdata(getHeader(h, "Referer") || "", KEY_REFERER);
 
-    const ckObj = parseCookie(norm);
-    if (ckObj.csrf_access_token) {
-      $.setdata(ckObj.csrf_access_token, KEY_CSRF);
+    const ck = parseCookie(norm);
+    if (ck.csrf_access_token) {
+      $.setdata(ck.csrf_access_token, KEY_CSRF);
     }
 
-    $.msg("HDHive", "🎉 Cookie 已更新", "已同步最新数据");
+    $.msg("HDHive", "🎉 Cookie 已更新", "已同步最新登录状态");
   }
 }
 
-/* ================= 积分日志（唯一真实来源） ================= */
+/* ================= 积分日志 ================= */
 
 async function fetchFlow(headers) {
   const url = `https://${DOMAIN}/manager/points-logs?page=1&page_size=10&_rsc=1`;
@@ -163,31 +164,31 @@ async function checkIn() {
     } catch {}
   }
 
-  /* ================= 关键：只用一个状态源 ================= */
+  /* ================= 状态（只取一个源） ================= */
 
-  const flow = await fetchFlow(headers);
+  let statusText = "签到完成";
 
-  let statusText = "";
-
-  if (flow?.latest?.points !== undefined) {
-    statusText = `签到成功，获得 ${flow.latest.points} 积分`;
-  } else if (result) {
+  if (result) {
     const text = JSON.stringify(result);
 
     if (/已签到|already/i.test(text)) {
       statusText = "今日已签到";
-    } else {
-      statusText = "签到完成";
     }
-  } else {
-    statusText = "状态未知";
   }
 
-  /* ================= 输出（彻底去重版本） ================= */
+  /* ================= 积分 ================= */
+
+  const flow = await fetchFlow(headers);
+
+  if (flow?.latest?.points !== undefined) {
+    statusText = `签到成功，获得 ${flow.latest.points} 积分`;
+  }
+
+  /* ================= 输出（彻底无重复版本） ================= */
 
   let output = "";
 
-  output += `签到结果\n`;
+  output += `HDHive\n\n`;
   output += `✅ ${statusText}\n\n`;
 
   if (flow?.latest) {
@@ -206,10 +207,10 @@ async function checkIn() {
     output += `（未获取到积分日志）`;
   }
 
-  $.msg("HDHive", "签到结果", output);
+  $.msg("HDHive", "", output);
 }
 
-/* ================= HTTP（Loon专用） ================= */
+/* ================= HTTP ================= */
 
 function httpGetText(url, headers) {
   return new Promise(res => {
