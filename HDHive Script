@@ -76,7 +76,7 @@ async function captureCookie() {
       $.setdata(ck.csrf_access_token, KEY_CSRF);
     }
 
-    $.msg("HDHive", "🎉 Cookie 已更新", "已同步最新登录状态");
+    $.msg("HDHive", " 🍪Cookie 已更新", "已同步最新登录状态");
   }
 }
 
