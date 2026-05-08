@@ -1,36 +1,27 @@
-# 无忧行去广告
-#!name=无忧行去广告
-#!desc=移除首页广告、推荐流、活动推广、埋点上传
+# 无忧行 - 目的地页面清空
+#!name=无忧行首页清空
+#!desc=清空首页目的地页面所有内容
 #!author=ChatGPT
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
-#!openUrl=https://apps.apple.com/app/id1037589370
-#!date=2026-05-08
 
 [Rewrite]
 
-# 首页 Banner
-^https?://app.jegotrip.com.cn/api/destination/v1/banner/getDestBanners url reject-dict
-
-# 首页推荐流
-^https?://app.jegotrip.com.cn/api/destination/v1/rec/queryRecommendData url reject-dict
+# 首页主数据
+^https?://app.jegotrip.com.cn/api/destination/v1/.* url reject-dict
+^https?://app3.jegotrip.com.cn/api/destination/v1/.* url reject-dict
 
 # 首页内容流
+^https?://app.jegotrip.com.cn/api/content/v1/home/list url reject-dict
 ^https?://app3.jegotrip.com.cn/api/content/v1/home/list url reject-dict
 
-# 首页活动楼层
+# 活动楼层
 ^https?://app.jegotrip.com.cn/api/assembly/v1/queryFloorData url reject-dict
 
 # 猜你喜欢
-^https?://app3.jegotrip.com.cn/api/layout/v1/guessLike/guessLikeMoreHeadlines url reject-dict
+^https?://app3.jegotrip.com.cn/api/layout/v1/guessLike/.* url reject-dict
 
-# AI 推荐消息
+# AI推荐
 ^https?://app.jegotrip.com.cn/api/assistant/message/recommend url reject-dict
 
-# 推送 Badge
-^https?://push.it.10086.cn/mc/receipt/iosBadge url reject
-
-# 埋点/统计
-^https?://app.jegotrip.com.cn/eventtracking/api/business/event/api/log/upload url reject
-
 [MITM]
-hostname = app.jegotrip.com.cn, app3.jegotrip.com.cn, push.it.10086.cn
+hostname = app.jegotrip.com.cn, app3.jegotrip.com.cn
