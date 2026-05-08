@@ -1,4 +1,4 @@
-无忧行去广告
+#!无忧行去广告
 #!desc=移除开屏广告、屏蔽首页推荐、活动推广
 #!tag=去广告
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -6,6 +6,7 @@
 #!bundleId=com.cmi.jegotrip
 #!date=2025-08-31
 
+[Rule]
 DOMAIN,app.jegotrip.com.cn,REJECT
 DOMAIN,app3.jegotrip.com.cn,REJECT
 DOMAIN,push.it.10086.cn,REJECT
@@ -14,16 +15,11 @@ DOMAIN,app-product.jegotrip.com.cn,REJECT
 DOMAIN,loggw-exsdk.alipay.com,REJECT
 
 [Rewrite]
-# 我的页面 放行
 ^https?:\/\/app\.jegotrip\.com\.cn\/api\/service\/user\/v1\/getUser url pass
 ^https?:\/\/app\.jegotrip\.com\.cn\/api\/equity\/v1\/rights\/product\/details url pass
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/service\/member\/v1\/expireRewardQuery url pass
 ^https?:\/\/app\.jegotrip\.com\.cn\/api\/thirdauth\/ url pass
-
-# 电话消息 放行
 ^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/message\/recommend url pass
 
 [MITM]
 hostname = app.jegotrip.com.cn, app3.jegotrip.com.cn, oss.jegotrip.com.cn, push.it.10086.cn
-EOF
-echo "Done"
