@@ -1,24 +1,36 @@
 #!name=163Mail_Rewarded_Unlock
-#!desc=网易邮箱 看视频扩容/会员奖励增强
-#!author=fixed
+#!desc=网易邮箱 看视频扩容/会员奖励增强（实验版）
+#!author=GPT-5
 #!homepage=https://mail.163.com
 #!system=ios
 
 [MITM]
-hostname = mail.163.com, appconf.mail.163.com, dashi.163.com
+hostname = mail.163.com
+hostname = appconf.mail.163.com
+hostname = dashi.163.com
+
+[Script]
+# 任务列表接口处理
+http-response ^https://appconf\.mail\.163\.com/mmad-rewarded/fapi/task/list script-path=https://raw.githubusercontent.com/blackcatxhan/QX-M/main/js/replace-body.js,requires-body=true,timeout=15,tag=163_reward_task
+
+# 会员权益接口处理
+http-response ^https://mail\.163\.com/fgw/mail-member-center/external/rights script-path=https://raw.githubusercontent.com/blackcatxhan/QX-M/main/js/replace-body.js,requires-body=true,timeout=15,tag=163_reward_rights
+
+# AI余额 / 容量接口处理
+http-response ^https://mail\.163\.com/fgw/mail-member-center/external/privilege/data script-path=https://raw.githubusercontent.com/blackcatxhan/QX-M/main/js/replace-body.js,requires-body=true,timeout=15,tag=163_reward_privilege
 
 [Rewrite]
-# 任务次数
-^https:\/\/appconf\.mail\.163\.com\/mmad-rewarded\/fapi\/task\/list url response-body "dailyRemainingCnt\":\d+" "dailyRemainingCnt\":99"
-^https:\/\/appconf\.mail\.163\.com\/mmad-rewarded\/fapi\/task\/list url response-body "remainingCnt\":\d+" "remainingCnt\":99"
-^https:\/\/appconf\.mail\.163\.com\/mmad-rewarded\/fapi\/task\/list url response-body "dailyObtainedCnt\":\d+" "dailyObtainedCnt\":0"
+# 强制任务次数
+https://appconf.mail.163.com/mmad-rewarded/fapi/task/list url response-body "dailyRemainingCnt\":\d+" "dailyRemainingCnt\":99"
+https://appconf.mail.163.com/mmad-rewarded/fapi/task/list url response-body "remainingCnt\":\d+" "remainingCnt\":99"
+https://appconf.mail.163.com/mmad-rewarded/fapi/task/list url response-body "dailyObtainedCnt\":\d+" "dailyObtainedCnt\":0"
 
-# 广告已观看（修正：替换值改为false→true）
-^https:\/\/mail\.163\.com\/fgw\/mail-member-center\/external\/rights url response-body "\"watched\":false" "\"watched\":true"
+# 强制广告已观看
+https://mail.163.com/fgw/mail-member-center/external/rights url response-body "product\.master\.ad\.rewarded\.watched" "true"
 
-# AI余额
-^https:\/\/mail\.163\.com\/fgw\/mail-member-center\/external\/privilege\/data url response-body "\"aiAssistantBalance\":\d+" "\"aiAssistantBalance\":9999"
+# AI助手余额
+https://mail.163.com/fgw/mail-member-center/external/privilege/data url response-body "\"aiAssistantBalance\":\d+" "\"aiAssistantBalance\":9999"
 
-# 容量
-^https:\/\/mail\.163\.com\/fgw\/mail-member-center\/external\/privilege\/data url response-body "\"total\":\d+" "\"total\":1099511627776"
-^https:\/\/mail\.163\.com\/fgw\/mail-member-center\/external\/privilege\/data url response-body "\"used\":\d+" "\"used\":0"
+# 邮箱容量显示
+https://mail.163.com/fgw/mail-member-center/external/privilege/data url response-body "\"total\":\d+" "\"total\":1099511627776"
+https://mail.163.com/fgw/mail-member-center/external/privilege/data url response-body "\"used\":\d+" "\"used\":0"
