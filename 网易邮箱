@@ -4,9 +4,9 @@
 #!version=1.0.0
 
 [Script]
-http-request ^https?:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do script-path=https://raw.githubusercontent.com/yourname/scripts/main/mailmaster_vip.js, requires-body=true, timeout=10, tag=邮箱大师会员解锁-请求
-http-response ^https?:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do script-path=https://raw.githubusercontent.com/yourname/scripts/main/mailmaster_vip.js, requires-body=true, timeout=10, tag=邮箱大师会员解锁-响应
-http-request ^https?:\/\/mail\.163\.com\/fgw\/mail-member-center\/external\/member\/entry script-path=https://raw.githubusercontent.com/yourname/scripts/main/mailmaster_vip.js, requires-body=true, timeout=10, tag=邮箱大师会员状态-请求
+http-request ^https?:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/wy%20jb, requires-body=true, timeout=10, tag=邮箱大师会员解锁-请求
+http-response ^https?:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/wy%20jb, requires-body=true, timeout=10, tag=邮箱大师会员解锁-响应
+http-request ^https?:\/\/mail\.163\.com\/fgw\/mail-member-center\/external\/member\/entry script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/wy%20jb, requires-body=true, timeout=10, tag=邮箱大师会员状态-请求
 
 [MITM]
 hostname = appconf.mail.163.com, mail.163.com
