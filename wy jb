@@ -1,0 +1,179 @@
+/**
+ * 网易邮箱大师 - 解锁会员功能脚本
+ * 
+ * 功能：
+ *   1. 改写 page/v2/conf.do 请求体：注入会员状态（hasPlus/plusInfo/vipInfo）
+ *   2. 改写 page/v2/conf.do 响应体：
+ *      - 清空非会员广告运营位 (cardNotMemberList)
+ *      - 注入会员卡数据 (cardMemberList)
+ *      - 清除广告激励红点 (masterOperatorList)
+ *   3. 改写 member/entry 请求体：mbrType 0→1（会员）
+ */
+
+const url = $request.url;
+
+if (url.includes('/mailmaster/api/page/v2/conf.do')) {
+  if (typeof $response !== 'undefined') {
+    handlePageConfResponse();
+  } else {
+    handlePageConfRequest();
+  }
+} else if (url.includes('/fgw/mail-member-center/external/member/entry')) {
+  handleMemberEntryRequest();
+} else {
+  if (typeof $response !== 'undefined') {
+    $done({ body: $response.body });
+  } else {
+    $done({ body: $request.body });
+  }
+}
+
+function handlePageConfRequest() {
+  try {
+    const body = JSON.parse($request.body);
+    const expireTime = Date.now() + 365 * 24 * 3600 * 1000;
+
+    body.hasPlus = true;
+
+    if (!body.plusInfo || body.plusInfo.length === 0) {
+      const uids = body.uids || [];
+      body.plusInfo = uids.map(uid => ({
+        uid: uid,
+        mbrType: 2,
+        expireTime: expireTime
+      }));
+    } else {
+      body.plusInfo = body.plusInfo.map(item => ({
+        ...item,
+        mbrType: 2,
+        expireTime: expireTime
+      }));
+    }
+
+    if (!body.vipInfo || body.vipInfo.length === 0) {
+      const uids = body.uids || [];
+      body.vipInfo = uids.map(uid => ({
+        uid: uid,
+        mbrType: 2,
+        expireTime: expireTime
+      }));
+    }
+
+    $done({ body: JSON.stringify(body) });
+  } catch (e) {
+    console.log('[邮箱大师] page/v2/conf.do 请求改写失败: ' + e.message);
+    $done({ body: $request.body });
+  }
+}
+
+function handlePageConfResponse() {
+  try {
+    const body = JSON.parse($response.body);
+
+    if (body.code !== 200 || !body.data) {
+      $done({ body: $response.body });
+      return;
+    }
+
+    const data = body.data;
+
+    if (data.memberOperator) {
+      data.memberOperator.cardNotMemberList = [];
+      data.memberOperator.cardActivityInfoList = [];
+
+      if (!data.memberOperator.cardMemberList || data.memberOperator.cardMemberList.length === 0) {
+        data.memberOperator.cardMemberList = [buildMemberCard()];
+      }
+    }
+
+    if (Array.isArray(data.masterOperatorList)) {
+      data.masterOperatorList = data.masterOperatorList.filter(item => {
+        return item.adUserType === undefined || item.adUserType === 0;
+      });
+    }
+
+    if (Array.isArray(data.bottomOperatorInfoList)) {
+      data.bottomOperatorInfoList = [];
+    }
+
+    if (Array.isArray(data.infoList)) {
+      data.infoList = [];
+    }
+
+    if (Array.isArray(data.mainTabOperatorInfoList)) {
+      data.mainTabOperatorInfoList = [];
+    }
+
+    body.data = data;
+    $done({ body: JSON.stringify(body) });
+  } catch (e) {
+    console.log('[邮箱大师] page/v2/conf.do 响应改写失败: ' + e.message);
+    $done({ body: $response.body });
+  }
+}
+
+function handleMemberEntryRequest() {
+  try {
+    const body = JSON.parse($request.body);
+    const expireTime = Date.now() + 365 * 24 * 3600 * 1000;
+
+    if (Array.isArray(body.emails)) {
+      body.emails = body.emails.map(item => ({
+        ...item,
+        mbrType: 2,
+        expireTime: expireTime
+      }));
+    }
+
+    $done({ body: JSON.stringify(body) });
+  } catch (e) {
+    console.log('[邮箱大师] member/entry 请求改写失败: ' + e.message);
+    $done({ body: $request.body });
+  }
+}
+
+function buildMemberCard() {
+  const expireTime = Date.now() + 365 * 24 * 3600 * 1000;
+  const expireDate = new Date(expireTime);
+  const expireDateStr = `${expireDate.getFullYear()}-${String(expireDate.getMonth()+1).padStart(2,'0')}-${String(expireDate.getDate()).padStart(2,'0')}`;
+
+  return {
+    "strategyName": "会员运营位-年会员",
+    "strategyId": 7001,
+    "priority": 7001,
+    "mbrType": 2,
+    "expireTime": expireTime,
+    "expireDesc": {
+      "cn": `会员有效期至 ${expireDateStr}`,
+      "en": `VIP valid until ${expireDateStr}`
+    },
+    "picture": {
+      "cn": "https://mail-activity.nosdn.127.net/6f7a6b2c1d3e4f5a6b7c8d9e0f1a2b3c.png",
+      "en": "https://mail-activity.nosdn.127.net/6f7a6b2c1d3e4f5a6b7c8d9e0f1a2b3c.png"
+    },
+    "url": {
+      "address": "https://vm.mail.163.com/pay?utm_source=mob_ds_mine_banner_member&beSource=mix_iap&accountType=master",
+      "type": "web-inner-app",
+      "login": true
+    },
+    "memberRightsInfo": {
+      "rightsList": [
+        {
+          "key": "appIcon",
+          "name": { "cn": "会员图标", "en": "App Icon" },
+          "enable": true
+        },
+        {
+          "key": "storage",
+          "name": { "cn": "超大云空间", "en": "Large Storage" },
+          "enable": true
+        },
+        {
+          "key": "skin",
+          "name": { "cn": "皮肤设置", "en": "Skin" },
+          "enable": true
+        }
+      ]
+    }
+  };
+}
