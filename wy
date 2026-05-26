@@ -1,0 +1,34 @@
+#!name=网易邮箱大师去广告 + 尊享图标解锁
+#!desc=移除网易邮箱大师开屏广告、签到任务提醒，精简侧拉抽屉和我的页面，并解锁尊享图标权益。
+#!author=可莉🅥 & You
+#!icon=icon not found
+#!category=Jacob
+#!openUrl=https://apps.apple.com/app/id897003024
+#!category=去广告
+#!loon_version=3.2.4(787)
+#!homepage=https://hub.kelee.one
+#!date=2026-05-26
+
+[Body Rewrite]
+
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","functionOperatorInfoList"]])'
+
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","memberOperator"]])'
+
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","activityTabInfoList"]])'
+
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
+
+http-response-jq ^https:\/\/vm\.mail\.163\.com\/api\/privilege\/feature\/info3$ '.data[] |= if .type == 210 then .opened = true | .enable = true | .available = true | .vip = true else . end'
+
+[Map Local]
+
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+[MITM]
+
+hostname = %APPEND% appconf.mail.163.com,dashi.163.com,vm.mail.163.com
