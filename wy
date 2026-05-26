@@ -11,22 +11,30 @@
 
 [Body Rewrite]
 
+# 精简首页运营位
 http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","functionOperatorInfoList"]])'
 
+# 移除会员推广入口
 http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","memberOperator"]])'
 
+# 移除活动 Tab
 http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","activityTabInfoList"]])'
 
+# 精简工具栏 + 删除广告功能项
 http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
 
-http-response-jq ^https:\/\/vm\.mail\.163\.com\/api\/privilege\/feature\/info3$ '.data[] |= if .type == 210 then .opened = true | .enable = true | .available = true | .vip = true else . end'
+# 解锁尊享图标（type 210）
+http-response-jq ^https:\/\/vm\.mail\.163\.com\/api\/privilege\/feature\/info3$ '.data.list[] |= if .type == 210 then .opened = true | .enable = true | .available = true | .vip = true else . end'
 
 [Map Local]
 
+# 禁止动态 URL 配置
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
+# 屏蔽签到任务
 ^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
+# 屏蔽运营推送
 ^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
 [MITM]
