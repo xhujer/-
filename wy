@@ -1,5 +1,5 @@
 #!name=网易邮箱大师去广告
-#!desc=移除网易邮箱大师开屏广告、签到任务提醒，精简侧拉抽屉和我的页面。
+#!desc=移除开屏广告、签到任务、侧拉抽屉、我的页面广告及会员推广，精简AI工具箱等
 #App链接=https://apps.apple.com/app/id897003024
 #!author=可莉🅥[https://github.com/Moli-X/Tool/blob/X/Loon/Readme.md]
 #!tag=去广告
@@ -8,21 +8,41 @@
 #!loon_version=3.2.4(787)
 #!homepage=https://github.com/Moli-X/Tool/raw/X/Loon/Plugin/Kelee/MailMaster_remove_ads.plugin
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/MailMaster.png
-#!date=2025-05-13 15:17:08
+#!date=2026-05-27 21:45:00
 
 [Rewrite]
+
+# ================== 开屏 & 核心配置 ==================
 ^https://appconf.mail.163.com/mailmaster/api/http/urlConfig.do$ reject-dict
+^https://appconf.mail.163.com/mailmaster/api/mmad/get.do$ reject-dict
 
-^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-del data.functionOperatorInfoList data.memberOperator data.activityTabInfoList
+# ================== conf.do 页面配置深度清理 ==================
+^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-del data.memberOperator data.functionOperatorInfoList data.activityTabInfoList data.masterOperatorList data.extList.mineSideBanner
 
-^https://appconf.mail.163.com/mailmaster/api/config/function.do$ response-body-json-jq '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
+# 删除邮积分/成长值/积分入口
+^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-del data.scoreCardInfo data.userScoreInfo data.integralInfo data.taskCenterInfo data.extList.scoreCardInfo
 
-^https://dashi.163.com/task-center-api/fapi/task/list$ reject-dict
+# 删除AI工具箱入口（strategyId=10011）
+^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-jq 'del(.data.newCommonFuncList[] | select(.strategyId == 10011))'
 
+# ================== function.do 功能列表清理 ==================
+^https://appconf.mail.163.com/mailmaster/api/config/function.do$ response-body-json-jq '
+  .data.config[] |= if .result.tools then 
+    .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱" or .name == "AI写作")) 
+  else . end 
+  | del(.data.config[] | select(.functionName | test("Function-AD|Function-Score-CardConfig|Function-Task-Center|Function-NPS-Config|Function-Drawer-Tools"; "i")))
+'
+
+# ================== 任务 & 运营接口 ==================
+^https://dashi.163.com/task-center-api/fapi/task/(list|overview)$ reject-dict
 ^https://appconf.mail.163.com/mailoperating/mailmaster/api/operator/get$ reject-dict
 
-# 删除会员横幅 + 邮积分 + 会员状态
-^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-jq 'del(.data.memberEntrance,.data.integralEntrance,.data.memberInfo)'
+# 邮件追踪页相关弹窗和付费引导
+^https://vm.mail.163.com/api/mkt/dialogInfo$ reject-dict
+^https://vm.mail.163.com/api/pay/.*$ reject-dict
+
+# 兜底广告拦截
+^https://appconf.mail.163.com/mailmaster/api/(ad|popup) reject-dict
 
 [MitM]
-hostname=appconf.mail.163.com, dashi.163.com
+hostname=appconf.mail.163.com, dashi.163.com, vm.mail.163.com
