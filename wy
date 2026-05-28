@@ -12,17 +12,20 @@
 
 [Rewrite]
 
+# ======== 强制明文：去掉 Accept-Encoding，让服务器返回未压缩 JSON ========
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ request-header {\r\nAccept-Encoding: gzip, deflate, br\r\n} {\r\nAccept-Encoding: identity\r\n}
+
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ request-header {\r\nAccept-Encoding: gzip, deflate, br\r\n} {\r\nAccept-Encoding: identity\r\n}
+
 # ======== 开屏配置 ========
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ reject-dict
 
 # ======== conf.do 页面配置清理 ========
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-del data.memberOperator data.functionOperatorInfoList data.activityTabInfoList data.masterOperatorList data.extList.mineSideBanner
 
-# 删除 newCommonFuncList 中：AI工具箱(10011)、添加邮箱(10005)、注册邮箱(10006)、替身邮箱(10007)、邮件追踪(10010)
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-jq 'del(.data.newCommonFuncList[] | select(.strategyId == 10005 or .strategyId == 10006 or .strategyId == 10007 or .strategyId == 10010 or .strategyId == 10011))'
 
 # ======== function.do 功能列表清理 ========
-# 删除：Function-AD、Score-CardConfig、Task-Center、NPS-Config、Drawer-Tools、Hotfix-IntegralHub
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ response-body-json-jq 'del(.data.config[] | select(.functionName | test("^Function-(AD|Score-CardConfig|Task-Center|NPS-Config|Drawer-Tools)$") or . == "Hotfix-IntegralHub"))'
 
 # ======== 邮积分数据接口 ========
