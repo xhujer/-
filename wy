@@ -16,15 +16,14 @@
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ reject-dict
 
 # ======== conf.do 页面配置清理 ========
-# 去除：会员引导、功能运营浮层、活动Tab、主账号运营、侧边付费横幅、
-#       邮积分/commonFuncList、AI工具箱(strategyId=10011)
-^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-del data.memberOperator data.functionOperatorInfoList data.activityTabInfoList data.masterOperatorList data.extList.mineSideBanner data.commonFuncList
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-del data.memberOperator data.functionOperatorInfoList data.activityTabInfoList data.masterOperatorList data.extList.mineSideBanner
 
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-jq 'del(.data.newCommonFuncList[] | select(.strategyId == 10011))'
 
+# ======== 邮积分卡片（getRelatedInfo 返回 score 触发渲染）========
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/master\/getRelatedInfo\.do$ reject-dict
+
 # ======== function.do 功能列表清理 ========
-# 侧滑工具栏只保留：邮件追踪、替身邮箱
-# 删除：Function-AD、Function-Score-CardConfig、Function-Task-Center、Function-NPS-Config
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ response-body-json-jq '(.data.config[] | select(.functionName == "Function-Drawer-Tools").result.tools) |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) | del(.data.config[] | select(.functionName | test("^Function-(AD|Score-CardConfig|Task-Center|NPS-Config)$")))'
 
 # ======== 任务中心 ========
