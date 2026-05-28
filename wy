@@ -1,10 +1,10 @@
 #!name=网易邮箱大师去广告
-#!desc=移除开屏、签到、侧拉抽屉、我的页面广告及多余入口（重要邮件提醒、标签管理、邮件查看、自定义启动页、小组件等）
+#!desc=移除开屏、签到、侧拉抽屉、我的页面多余入口（重要邮件提醒、标签管理、邮件查看、自定义启动页、小组件等）
 #App链接=https://apps.apple.com/app/id897003024
 #!author=可莉🅥
 #!tag=去广告
 #!loon_version=3.2.4(787)
-#!date=2026-05-27 22:10:00
+#!date=2026-05-27 22:30:00
 
 [Rewrite]
 
@@ -12,16 +12,16 @@
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ reject-dict
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/mmad\/get\.do$ reject-dict
 
-# ================== conf.do 页面配置深度清理 ==================
+# ================== conf.do 深度清理 ==================
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-del data.memberOperator data.functionOperatorInfoList data.activityTabInfoList data.masterOperatorList data.extList.mineSideBanner
 
-# 我的页面精简（新增）
+# 我的页面大幅精简（重点加强）
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-jq '
-  del(.data.newCommonFuncList[] | select(.strategyId == 10011)) 
-  | del(.data.newCommonFuncList[] | select(.name | test("重要邮件|标签管理|邮件查看|自定义启动页|小组件|Widget"; "i")))
+  del(.data.newCommonFuncList[] | select(.name | test("重要邮件提醒|标签管理|邮件查看|自定义启动页|小组件|Widget|待办设置|皮肤外观|更多设置|通知管理"; "i")))
+  | del(.data.newCommonFuncList[] | select(.strategyId == 10011))
 '
 
-# ================== function.do 功能列表清理 ==================
+# ================== function.do ==================
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ response-body-json-jq '
   .data.config[] |= if .result.tools then 
     .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱" or .name == "AI写作")) 
@@ -33,7 +33,7 @@
 ^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/(list|overview)$ reject-dict
 ^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ reject-dict
 
-# 邮件追踪页弹窗和付费
+# 邮件追踪页
 ^https:\/\/vm\.mail\.163\.com\/api\/mkt\/dialogInfo$ reject-dict
 ^https:\/\/vm\.mail\.163\.com\/api\/pay\/.*$ reject-dict
 
