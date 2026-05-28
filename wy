@@ -22,6 +22,26 @@
 # 删除邮积分/成长值/积分入口
 ^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-del data.scoreCardInfo data.userScoreInfo data.integralInfo data.taskCenterInfo data.extList.scoreCardInfo
 
+# 精准删除 masterOperatorList 内的邮积分
+^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-jq '
+.data.masterOperatorList |= map(
+  select(
+    .title != "邮积分"
+    and .name != "邮积分"
+  )
+)
+'
+
+# 精准删除 functionOperatorInfoList 内的邮积分
+^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-jq '
+.data.functionOperatorInfoList |= map(
+  select(
+    .title != "邮积分"
+    and .name != "邮积分"
+  )
+)
+'
+
 # 删除AI工具箱入口（strategyId=10011）
 ^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-jq 'del(.data.newCommonFuncList[] | select(.strategyId == 10011))'
 
