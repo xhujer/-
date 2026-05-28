@@ -17,11 +17,11 @@
 # 广告落地页
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ reject-dict
 
-# 我的页面配置精简：完全保留你的单行格式，纯空格追加新抓出的广告激励卡片和侧边会员横幅
-^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-del data.functionOperatorInfoList data.memberOperator data.activityTabInfoList data.masterOperatorList data.extList.mineSideBanner
+# 我的页面配置精简：100%保留你原有的三个基本字段删除
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-del data.functionOperatorInfoList data.memberOperator data.activityTabInfoList
 
-# 我的页面：针对 AI 工具箱单独用 jq 过滤逻辑追加在下方
-^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-jq 'if .data.newCommonFuncList then .data.newCommonFuncList |= map(select(.strategyId != 10011)) else . end'
+# 我的页面配置精简（新增功能追加）：用安全的 JQ 链式结构一次性切掉激励广告、侧边栏横幅，并过滤 AI工具箱
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-jq 'del(.data.masterOperatorList, .data.extList.mineSideBanner) | if .data.newCommonFuncList then .data.newCommonFuncList |= map(select(.strategyId != 10011)) else . end'
 
 # 功能配置精简：100% 保留你原版的长公式结构，仅在 select 内部通过 or 顺延追加新功能模块
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ response-body-json-jq '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD" or .functionName == "Function-Score-CardConfig" or .functionName == "Function-Task-Center" or .functionName == "Function-NPS-Config"))'
