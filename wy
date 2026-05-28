@@ -1,44 +1,49 @@
-#!name=网易邮箱大师去广告
-#!desc=移除网易邮箱大师开屏广告、会员推广、签到任务提醒，精简侧拉抽屉和我的页面。
-#App链接=https://apps.apple.com/app/id897003024
-#!author=可莉🅥 + ChatGPT
-#!tag=去广告
-#!loon_version=3.2.4(787)
+#!name=网易邮箱大师去广告#!desc=移除网易邮箱大师开屏广告、会员推广、签到任务提醒，精简侧拉抽屉和我的页面。#App链接=https://apps.apple.com/app/id897003024#!author=可莉🅥 + ChatGPT#!tag=去广告#!loon_version=3.2.4(787)#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/MailMaster.png
 
 [Rewrite]
 
-# URL配置
+URL动态配置
+
 ^https://appconf.mail.163.com/mailmaster/api/http/urlConfig.do$ reject-dict
 
-# 页面配置
+页面配置（稳定版）
+
 ^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-del data.functionOperatorInfoList data.memberOperator data.activityTabInfoList data.vipInfo data.memberInfo data.payGuide data.banner data.popup data.activityList data.operationList data.floatLayer data.redPoint data.vipBanner data.memberBanner
 
-# 功能入口
-^https://appconf.mail.163.com/mailmaster/api/config/function.do$ response-body-json-jq '.data.config[] |= if .result.tools then .result.tools |= map(select(.name != "AI工具箱" and .name != "邮件追踪" and .name != "替身邮箱" and .name != "皮肤外观" and .name != "外观偏好" and .name != "小组件" and .name != "自定义启动页" and .name != "大师会员")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
+功能入口（仅保留核心）
 
-# 用户会员信息
+^https://appconf.mail.163.com/mailmaster/api/config/function.do$ response-body-json-jq '.data.config[] |= if .result.tools then .result.tools |= map(select(.name != "AI工具箱" and .name != "邮件追踪" and .name != "替身邮箱" and .name != "皮肤外观" and .name != "外观偏好" and .name != "小组件" and .name != "自定义启动页" and .name != "大师会员" and .name != "会员中心")) else . end'
+
+用户会员信息（核心）
+
 ^https://vm.mail.163.com/api/user/info/detail3$ response-body-json-jq '.data.mbrType=0 | .data.memberBanner=null | .data.vipInfo=null | .data.memberInfo=null | .data.payInfo=null | .data.activityInfo=null'
 
-# 支付入口
+支付入口
+
 ^https://vm.mail.163.com/api/pay/initPreview$ reject-dict
 
-# 会员中心
+会员中心
+
 ^https://mail.163.com/fgw/mail-member-center/external/member/v2/entry$ reject-dict
 
-# 会员权益
+会员权益
+
 ^https://dashi.163.com/fgw/master-privilege-view/client/privilege/detail$ reject-dict
 
-# 任务中心
+任务中心
+
 ^https://dashi.163.com/task-center-api/fapi/task/list$ reject-dict
 
-# 任务总览
+任务总览
+
 ^https://dashi.163.com/task-center-api/fapi/task/overview$ reject-dict
 
-# 活动运营位
+活动运营位
+
 ^https://appconf.mail.163.com/mailoperating/mailmaster/api/operator/get$ reject-dict
 
-# 广告系统
-^https://appconf.mail.163.com/mmad/ url reject-dict
+网易广告系统
 
-[MitM]
-hostname=appconf.mail.163.com,dashi.163.com,vm.mail.163.com,mail.163.com
+^https://appconf.mail.163.com/mmad/.*$ reject-dict
+
+[MitM]hostname=appconf.mail.163.com,dashi.163.com,vm.mail.163.com,mail.163.com
