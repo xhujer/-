@@ -17,8 +17,9 @@
 邮积分/commonFuncList、添加邮箱(10005)、注册邮箱(10006)、通讯录(10008)、AI工具箱(10011)
 ^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-jq 'del(.data.memberOperator, .data.functionOperatorInfoList, .data.activityTabInfoList, .data.masterOperatorList, .data.extList.mineSideBanner, .data.commonFuncList, (.data.newCommonFuncList[]? | select(.strategyId | IN(10005, 10006, 10008, 10011))))'
 ======== function.do 功能列表清理 ========
-删除：Function-AD、Function-Score-CardConfig、Function-Task-Center、Function-NPS-Config、Function-Drawer-Tools
-^https://appconf.mail.163.com/mailmaster/api/config/function.do$ response-body-json-jq 'del(.data.config[] | select(.functionName | test("^Function-(AD|Score-CardConfig|Task-Center|NPS-Config|Drawer-Tools)$")))'
+侧滑工具栏只保留：邮件追踪、替身邮箱
+删除：Function-AD、Function-Score-CardConfig、Function-Task-Center、Function-NPS-Config
+^https://appconf.mail.163.com/mailmaster/api/config/function.do$ response-body-json-jq '(.data.config[] | select(.functionName == "Function-Drawer-Tools").result.tools) |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) | del(.data.config[] | select(.functionName | test("^Function-(AD|Score-CardConfig|Task-Center|NPS-Config)$")))'
 ======== 任务中心 ========
 ^https://dashi.163.com/task-center-api/fapi/task/(list|overview)$ reject-dict
 ======== 运营浮层 ========
