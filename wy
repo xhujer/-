@@ -1,36 +1,25 @@
 #!name=网易邮箱大师去广告
 #!desc=移除网易邮箱大师开屏广告、签到任务提醒，精简侧拉抽屉和我的页面。
-#!openUrl=https://apps.apple.com/app/id897003024
+#App链接=https://apps.apple.com/app/id897003024
 #!author=可莉🅥[https://github.com/Moli-X/Tool/blob/X/Loon/Readme.md]
 #!tag=去广告
+#!system=
+#!system_version=
 #!loon_version=3.2.4(787)
 #!homepage=https://github.com/Moli-X/Tool/raw/X/Loon/Plugin/Kelee/MailMaster_remove_ads.plugin
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/MailMaster.png
-#!date=2025-05-28
+#!date=2026-05-28 00:05:00
 
-[Body Rewrite]
-# conf.do — 我的页面（全部经抓包验证）
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","memberOperator"]])'
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","functionOperatorInfoList"]])'
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","activityTabInfoList"]])'
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","masterOperatorList"]])'
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","extList","mineSideBanner"]])'
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'del(.data.newCommonFuncList[] | select(.strategyId == 10011))'
+[Rewrite]
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ reject-dict
 
-# function.do — 功能开关（全部经抓包验证）
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ 'del(.data.config[] | select(.functionName == "Function-AD"))'
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ 'del(.data.config[] | select(.functionName == "Function-Score-CardConfig"))'
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ 'del(.data.config[] | select(.functionName == "Function-Task-Center"))'
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ 'del(.data.config[] | select(.functionName == "Function-NPS-Config"))'
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ '(.data.config[] | select(.functionName == "Function-Drawer-Tools") | .result.tools) |= map(select(.key != "good_luck"))'
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-del data.functionOperatorInfoList data.memberOperator data.activityTabInfoList data.masterOperatorList data.memberCard data.vipInfo data.vipCard data.promotionInfo data.topBanner
 
-[Map Local]
-^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
-^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
-^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/overview$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
-^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
-^https:\/\/vm\.mail\.163\.com\/api\/mkt\/dialogInfo$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
-^https:\/\/vm\.mail\.163\.com\/api\/pay\/ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ response-body-json-jq '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
 
-[MITM]
-hostname = %APPEND% appconf.mail.163.com, dashi.163.com, vm.mail.163.com
+^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ reject-dict
+
+^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ reject-dict
+
+[MitM]
+hostname=appconf.mail.163.com, dashi.163.com
