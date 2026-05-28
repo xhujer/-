@@ -1,5 +1,5 @@
 #!name=网易邮箱大师去广告
-#!desc=移除网易邮箱大师开屏广告、签到任务提醒，精简侧拉抽屉和我的页面，清理邮件追踪页付费引导。
+#!desc=移除网易邮箱大师开屏广告、签到任务提醒，精简侧拉抽屉和我的页面。
 #!author=可莉🅥[https://github.com/luestr/ProxyResource/blob/main/README.md]
 #!icon=icon not found
 #!category=Jacob
@@ -7,42 +7,41 @@
 #!category=去广告
 #!loon_version=3.2.4(787)
 #!homepage=https://hub.kelee.one
-#!date=2026-05-27 20:36:00
+#!date=2026-05-27 20:39:00
 
 [Reject]
-# 预防性拦截开屏广告位 (adLocations=4)
+# 开屏广告位
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/mmad\/get\.do
 
 [Body Rewrite]
-# 1. 精简我的页面配置 (conf.do)
-# 合并删除：满意度调研、会员卡片、活动Tab、广告激励卡片、侧边会员横幅
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","functionOperatorInfoList"], ["data","memberOperator"], ["data","activityTabInfoList"], ["data","masterOperatorList"], ["data","extList","mineSideBanner"]])'
-# 精准过滤 strategyId=10011 的 AI工具箱入口
+# conf.do 完全保留原版三行，并在下方平铺追加新字段
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","functionOperatorInfoList"]])'
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","memberOperator"]])'
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","activityTabInfoList"]])'
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","masterOperatorList"]])'
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'delpaths([["data","extList","mineSideBanner"]])'
 http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ 'if .data.newCommonFuncList then .data.newCommonFuncList |= map(select(.strategyId != 10011)) else . end'
 
-# 2. 精简功能配置 (function.do)
-# 移除：摇一摇广告、积分系统、任务中心、NPS评分弹窗
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ 'del(.data.config[] | select(.functionName == "Function-AD" or .functionName == "Function-Score-CardConfig" or .functionName == "Function-Task-Center" or .functionName == "Function-NPS-Config"))'
-# 侧拉抽屉工具箱：维持原逻辑，仅保留"邮件追踪"和"替身邮箱"
-http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end'
+# function.do 完全保留原版一行的链式拼接结构，仅在 select 内部通过 or 追加需要删除的模块
+http-response-jq ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD" or .functionName == "Function-Score-CardConfig" or .functionName == "Function-Task-Center" or .functionName == "Function-NPS-Config"))'
 
 [Map Local]
-# 广告落地页配置置空
+# 广告落地页
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
-# 轮播Banner + 激励广告弹窗置空
-^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
-
-# 任务列表置空
+# 任务列表
 ^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
-# 签到红点置空
+# 轮播Banner
+^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+# 签到红点
 ^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/overview$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
-# 邮件追踪页：会员弹窗置空
+# 邮件追踪页会员弹窗
 ^https:\/\/vm\.mail\.163\.com\/api\/mkt\/dialogInfo$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
-# 邮件追踪页：付费引导置空
+# 邮件追踪页付费引导
 ^https:\/\/vm\.mail\.163\.com\/api\/pay\/ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
 [MITM]
