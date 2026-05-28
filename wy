@@ -13,7 +13,7 @@
 [Rewrite]
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ reject-dict
 
-^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-jq 'del(.data.memberOperator, .data.functionOperatorInfoList, .data.activityTabInfoList, .data.masterOperatorList, .data.extList.mineSideBanner) | .data.newCommonFuncList |= map(select(.strategyName | IN("邮箱管理", "替身邮箱", "安全中心", "邮件追踪")))'
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-jq 'del(.data.memberOperator, .data.functionOperatorInfoList, .data.masterOperatorList, .data.extList.mineSideBanner) | .data.activityTabInfoList |= map(select(.strategyName == "激励广告-邮箱")) | .data.newCommonFuncList |= map(select(.strategyName | IN("邮箱管理", "替身邮箱", "安全中心", "邮件追踪")))'
 
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ response-body-json-jq '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
 
