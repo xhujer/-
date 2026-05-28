@@ -10,12 +10,11 @@
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/MailMaster.png
 #!date=2025-05-13 15:17:08
 
+[Header Rewrite]
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ request-replace Accept-Encoding identity
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ request-replace Accept-Encoding identity
+
 [Rewrite]
-
-# ======== 强制明文：去掉 Accept-Encoding，让服务器返回未压缩 JSON ========
-^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ request-header {\r\nAccept-Encoding: gzip, deflate, br\r\n} {\r\nAccept-Encoding: identity\r\n}
-
-^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ request-header {\r\nAccept-Encoding: gzip, deflate, br\r\n} {\r\nAccept-Encoding: identity\r\n}
 
 # ======== 开屏配置 ========
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ reject-dict
