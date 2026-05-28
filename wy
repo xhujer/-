@@ -1,103 +1,31 @@
 #!name=网易邮箱大师去广告
-#!desc=移除网易邮箱大师开屏广告、会员推广、签到任务、活动运营位，精简侧拉抽屉和我的页面。
+#!desc=移除网易邮箱大师开屏广告、会员推广、签到任务提醒，精简侧拉抽屉和我的页面。
 #App链接=https://apps.apple.com/app/id897003024
 #!author=可莉🅥 + ChatGPT
 #!tag=去广告
-#!system=
-#!system_version=
 #!loon_version=3.2.4(787)
-#!homepage=https://github.com/Moli-X/Tool/raw/X/Loon/Plugin/Kelee/MailMaster_remove_ads.plugin
-#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/MailMaster.png
-#!date=2026-05-28
 
 [Rewrite]
 
-# URL动态配置
+# URL配置
 ^https://appconf.mail.163.com/mailmaster/api/http/urlConfig.do$ reject-dict
 
-# 页面布局/活动/会员入口
-^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-jq '
-walk(
-if type == "object" then
-del(
-.functionOperatorInfoList,
-.memberOperator,
-.activityTabInfoList,
-.vipInfo,
-.memberInfo,
-.payGuide,
-.banner,
-.popup,
-.activityList,
-.operationList,
-.floatLayer,
-.redPoint,
-.vipBanner,
-.memberBanner
-)
-else .
-end
-)
-'
+# 页面配置
+^https://appconf.mail.163.com/mailmaster/api/page/v2/conf.do$ response-body-json-del data.functionOperatorInfoList data.memberOperator data.activityTabInfoList data.vipInfo data.memberInfo data.payGuide data.banner data.popup data.activityList data.operationList data.floatLayer data.redPoint data.vipBanner data.memberBanner
 
-# 功能入口精简
-^https://appconf.mail.163.com/mailmaster/api/config/function.do$ response-body-json-jq '
-walk(
-if type == "array" then
-map(
-select(
-(
-.name // .title // .functionName // ""
-) as $n
-|
-(
-$n != "AI工具箱"
-and $n != "邮件追踪"
-and $n != "替身邮箱"
-and $n != "皮肤外观"
-and $n != "外观偏好"
-and $n != "小组件"
-and $n != "自定义启动页"
-and $n != "大师会员"
-and $n != "会员中心"
-)
-)
-)
-else .
-end
-)
-'
+# 功能入口
+^https://appconf.mail.163.com/mailmaster/api/config/function.do$ response-body-json-jq '.data.config[] |= if .result.tools then .result.tools |= map(select(.name != "AI工具箱" and .name != "邮件追踪" and .name != "替身邮箱" and .name != "皮肤外观" and .name != "外观偏好" and .name != "小组件" and .name != "自定义启动页" and .name != "大师会员")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
 
 # 用户会员信息
-^https://vm.mail.163.com/api/user/info/detail3$ response-body-json-jq '
-walk(
-if type == "object" then
-del(
-.vipInfo,
-.memberInfo,
-.memberBanner,
-.payInfo,
-.activityInfo,
-.memberDesc,
-.vipDesc,
-.subTitle,
-.desc,
-.memberText,
-.vipText
-)
-else .
-end
-)
-| .data.mbrType = 0
-'
+^https://vm.mail.163.com/api/user/info/detail3$ response-body-json-jq '.data.mbrType=0 | .data.memberBanner=null | .data.vipInfo=null | .data.memberInfo=null | .data.payInfo=null | .data.activityInfo=null'
 
-# 支付预览/会员购买
+# 支付入口
 ^https://vm.mail.163.com/api/pay/initPreview$ reject-dict
 
-# 会员中心入口
+# 会员中心
 ^https://mail.163.com/fgw/mail-member-center/external/member/v2/entry$ reject-dict
 
-# 会员权益详情
+# 会员权益
 ^https://dashi.163.com/fgw/master-privilege-view/client/privilege/detail$ reject-dict
 
 # 任务中心
@@ -106,10 +34,10 @@ end
 # 任务总览
 ^https://dashi.163.com/task-center-api/fapi/task/overview$ reject-dict
 
-# 运营活动位
+# 活动运营位
 ^https://appconf.mail.163.com/mailoperating/mailmaster/api/operator/get$ reject-dict
 
-# 网易广告系统
+# 广告系统
 ^https://appconf.mail.163.com/mmad/ url reject-dict
 
 [MitM]
