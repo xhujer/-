@@ -1,6 +1,6 @@
 #!name=网易邮箱大师去广告
 #!desc=移除网易邮箱大师开屏广告、签到任务提醒，精简侧拉抽屉和我的页面。
-#!author=可莉🅥🅥[https://github.com/luestr/ProxyResource/blob/main/README.md]
+#!author=可莉🅥🅥🅥[https://github.com/luestr/ProxyResource/blob/main/README.md]
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/MailMaster.png
 #!category=iKeLee
 #!openUrl=https://apps.apple.com/app/id897003024
@@ -26,9 +26,5 @@
 
 ^https:\/\/dashi\.163\.com\/fgw\/mail-member-center\/external\/member\/v2\/entry$ reject-dict
 
-^https:\/\/vm\.mail\.163\.com\/api\/mkt\/dialogInfo$ reject-dict
-
-^https:\/\/vm\.mail\.163\.com\/api\/user\/info\/detail3$ response-body-json-jq '.result.mbrType = 108 | .result.isMember = true | .result.hasMasterPrvlg = true | .result.endTime = 9999999999999 | .result.startTime = 1000000000000 | .result.nearExpired = false | .result.masterAdPrivilege = true'
-
 [MitM]
-hostname=appconf.mail.163.com, dashi.163.com, vm.mail.163.com
+hostname=appconf.mail.163.com, dashi.163.com
