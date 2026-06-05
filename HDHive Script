@@ -1,12 +1,19 @@
-const $ = new Env("HDHive");
+const $ = new Env("HDHive_v2");
 
 const DOMAIN = "hdhive.com";
 
+// 缓存键名
 const KEY_COOKIE = "hdhive_cookie_v15";
 const KEY_REFERER = "hdhive_referer_v15";
 const KEY_UA = "hdhive_ua_v15";
 const KEY_CSRF = "hdhive_csrf_v15";
 const KEY_FLOW = "hdhive_points_flow_v4";
+// 新增：自动捕获并提取的用户 UID 和 ActionID
+const KEY_UID = "hdhive_uid_v2";
+const KEY_ACTION_ID = "hdhive_action_id_v2";
+
+// 兜底的 Action ID（防止动态提取失败时使用）
+const DEFAULT_ACTION_ID = "6024d7d3f5291d36f7c194353f6161ce0e8cd89b74";
 
 (async () => {
   if (typeof $request !== "undefined") {
@@ -16,22 +23,29 @@ const KEY_FLOW = "hdhive_points_flow_v4";
   }
 })().catch(e => $.logErr(e)).finally(() => $.done());
 
-function looksLikeJwt(t) {
-  return typeof t === "string" && /^[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+$/.test(t);
-}
-
+/**
+ * 1. 凭据捕获逻辑 (MITM)
+ */
 async function captureCookie() {
   const url = $request.url || "";
   if (!url.includes(DOMAIN)) return;
-
-  if (/\/(go-api|api)\/customer\/(user\/)?checkin/i.test(url)) return;
-
-  if (!/\/manager\/|\/api\/|\/go-api\/|https:\/\/hdhive\.com\/?$/.test(url)) return;
 
   const h = $request.headers || {};
   const cookie = getCookieFromHeaders(h);
   const ua = getHeader(h, "User-Agent");
   const referer = getHeader(h, "Referer");
+
+  // 尝试从请求 URL 中动态提取用户 UID (例如 /user/55906)
+  const uidMatch = url.match(/\/user\/(\d+)/);
+  if (uidMatch && uidMatch[1]) {
+    $.setdata(uidMatch[1], KEY_UID);
+  }
+
+  // 尝试从拦截到的请求头中捕获 next-action
+  const nextAction = getHeader(h, "next-action");
+  if (nextAction && nextAction.length > 20) {
+    $.setdata(nextAction, KEY_ACTION_ID);
+  }
 
   if (!cookie || cookie.length < 20) return;
 
@@ -45,12 +59,146 @@ async function captureCookie() {
     if (referer) $.setdata(referer, KEY_REFERER);
     if (ckObj.csrf_access_token) $.setdata(ckObj.csrf_access_token, KEY_CSRF);
 
-    $.msg("HDHive", "🍪 Cookie 已更新", "可以关闭自动获取开关");
+    $.msg("HDHive", "🍪 凭据及 Action 配置已更新", "可以关闭自动获取开关");
   }
 }
 
-async function activeFetchPointsFlow(headers) {
+/**
+ * 2. 核心签到逻辑 (Server Action 模式)
+ */
+async function checkIn() {
+  const rawCookie = $.getdata(KEY_COOKIE);
+  if (!rawCookie) {
+    $.msg("HDHive", "❌ 无法签到", "未获取 Cookie，请先登录网站首页或用户页");
+    return;
+  }
+
+  // 获取并拼装基础参数
+  const uid = $.getdata(KEY_UID) || "55906"; // 找不到则默认用你的 UID 兜底
+  let actionId = $.getdata(KEY_ACTION_ID) || DEFAULT_ACTION_ID;
+  
+  const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1";
+  const csrf = $.getdata(KEY_CSRF) || parseCookie(rawCookie).csrf_access_token || "";
+  const userUrl = `https://${DOMAIN}/user/${uid}`;
+
+  // 先尝试通过 GET 页面动态刷新/获取最新的 next-action ID
+  const fetchedActionId = await tryFetchActionId(userUrl, ua, rawCookie);
+  if (fetchedActionId) {
+    actionId = fetchedActionId;
+    $.setdata(actionId, KEY_ACTION_ID); // 覆盖本地持久化
+  }
+
+  // 构造 Server Action 必备请求头
+  const headers = {
+    "User-Agent": ua,
+    "Cookie": normalizeCookie(rawCookie),
+    "Origin": `https://${DOMAIN}`,
+    "Referer": userUrl,
+    "Accept": "text/x-component",
+    "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+    "Content-Type": "text/plain;charset=UTF-8",
+    "next-action": actionId,
+    "rsc": "1"
+  };
+
+  if (csrf) {
+    headers["X-CSRF-Token"] = csrf;
+  }
+
+  // Server Action 标准 Payload
+  const body = '[false,"$undefined"]';
+
+  let showText = "未获取到有效签到响应";
+  try {
+    const res = await httpPostRaw({ url: userUrl, headers, body });
+    if (res && res.data) {
+      // 尝试解析 Next.js 返回的混合体数据（或者是标准错误 JSON）
+      showText = parseServerActionResponse(res.data);
+    } else {
+      showText = `服务器无响应或 HTTP 状态码异常 (Status: ${res?.status || "Unknown"})`;
+    }
+  } catch (err) {
+    showText = `请求异常: ${err.message || err}`;
+  }
+
+  // 5. 保持原有的积分日志拉取明细
+  let flow = await activeFetchPointsFlow(headers);
+  if (!flow) {
+    try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
+  }
+
+  const flowText = flow
+    ? "\n\n" + buildFlowText(flow)
+    : "\n\n（未拉到积分日志：可能是 Cookie 无权限或返回非 RSC 格式）";
+
+  $.msg("HDHive", "📌 Server Action 签到结果", `${showText}${flowText}`);
+}
+
+/**
+ * 3. 辅助：动态从用户页源码中提取 Action ID
+ */
+async function tryFetchActionId(url, ua, cookie) {
+  try {
+    const rawHtml = await httpGetText(url, {
+      "User-Agent": ua,
+      "Cookie": normalizeCookie(cookie),
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    });
+    // 匹配类似 "action":"6024d7d3f5291d36f7c194353f6161ce0e8cd89b74" 或类似的十六进制 Hash
+    const match = rawHtml.match(/"action"\s*:\s*"([a-f0-9]{40})"/i);
+    if (match && match[1]) {
+      return match[1];
+    }
+  } catch (e) {
+    console.log(`⚠️ 动态提取 Action ID 失败，将使用缓存或硬编码兜底: ${e}`);
+  }
+  return null;
+}
+
+/**
+ * 4. 辅助：智能解析 Server Action 的返回文本
+ */
+function parseServerActionResponse(rawData) {
+  if (!rawData) return "返回内容为空";
+  
+  // 情况 A：如果是直接返回了标准的 JSON 报错对象
+  if (rawData.trim().startsWith("{")) {
+    try {
+      const obj = JSON.parse(rawData);
+      const err = obj.error || obj;
+      return `${err.message || "签到完毕"}：${err.description || "未返回具体描述"}`;
+    } catch {}
+  }
+
+  // 情况 B：Next.js RSC 格式的流数据，包含 "success":false 等字样
+  // 我们用正则模糊捕获提示词
+  const msgMatch = rawData.match(/"message"\s*:\s*"([^"]+)"/);
+  const descMatch = rawData.match(/"description"\s*:\s*"([^"]+)"/);
+  
+  if (msgMatch || descMatch) {
+    const msg = msgMatch ? msgMatch[1] : "签到动作";
+    const desc = descMatch ? descMatch[1] : "";
+    return `${msg} -> ${desc}`;
+  }
+
+  // 情况 C：成功时可能返回一堆 Next.js 刷新页面的组件树，直接提示成功
+  if (rawData.includes("points") || rawData.includes("success")) {
+    return "🎉 签到成功或状态已刷新！";
+  }
+
+  return `响应片段: ${rawData.slice(0, 150)}`;
+}
+
+/**
+ * 5. 积分日志拉取
+ */
+async function activeFetchPointsFlow(baseHeaders) {
   const url = `https://${DOMAIN}/manager/points-logs?page=1&page_size=10&_rsc=1`;
+  const headers = Object.assign({}, baseHeaders, {
+    "Accept": "*/*",
+    "Content-Type": undefined // GET 请求不需要 Content-Type
+  });
+  delete headers["next-action"]; // 移除 action 头防止干扰普通 GET
 
   try {
     const raw = await httpGetText(url, headers);
@@ -97,97 +245,7 @@ function buildFlowText(flow) {
   return l.join("\n");
 }
 
-async function checkIn() {
-  const rawCookie = $.getdata(KEY_COOKIE);
-  if (!rawCookie) {
-    $.msg("HDHive", "❌ 无法签到", "未获取 Cookie");
-    return;
-  }
-
-  const ckObj = parseCookie(rawCookie);
-  const token = ckObj.token || "";
-  const ua =
-    $.getdata(KEY_UA) ||
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1";
-
-  const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/manager/points-logs`;
-  const csrf = $.getdata(KEY_CSRF) || ckObj.csrf_access_token || "";
-
-  const headers = {
-    "User-Agent": ua,
-    "Origin": `https://${DOMAIN}`,
-    "Referer": referer,
-    "Accept-Language": "zh-CN,zh-Hans;q=0.9",
-    "Cookie": normalizeCookie(rawCookie),
-    "rsc": "1",
-    "next-url": "/manager/points-logs",
-  };
-
-  headers["Accept"] = "text/x-component,*/*";
-
-  if (looksLikeJwt(token)) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  if (csrf) {
-    headers["X-CSRF-Token"] = csrf;
-    headers["X-Csrf-Token"] = csrf;
-  }
-
-  const postHeaders = Object.assign({}, headers, {
-    "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json;charset=utf-8",
-  });
-
-  const endpoints = [
-    `https://${DOMAIN}/api/customer/user/checkin`,
-    `https://${DOMAIN}/go-api/customer/user/checkin`,
-    `https://${DOMAIN}/api/customer/checkin`,
-    `https://${DOMAIN}/go-api/customer/checkin`,
-  ];
-
-  let checkinRes = null;
-  let status = 0;
-  let raw = "";
-
-  for (const url of endpoints) {
-    const req = { url, method: "POST", headers: postHeaders, body: "{}" };
-    const r = await httpPostRaw(req);
-    if (!r) continue;
-
-    status = r.status;
-    raw = r.data || "";
-
-    let json = null;
-    try { json = JSON.parse(raw); } catch {}
-    if (!json) continue;
-    checkinRes = json;
-    break;
-  }
-
-  let title = "📌 签到结果";
-  let showText = "未获取到有效签到响应";
-
-  if (checkinRes) {
-    const msg = checkinRes.message || checkinRes.msg || "";
-    const desc = checkinRes.description || checkinRes.desc || "";
-    showText = (desc || msg || "（无提示文本）");
-  } else {
-    showText = `HTTP ${status}\n返回片段：${String(raw).slice(0, 200)}`;
-  }
-
-  let flow = await activeFetchPointsFlow(headers);
-  if (!flow) {
-    try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
-  }
-
-  const flowText = flow
-    ? "\n\n" + buildFlowText(flow)
-    : "\n\n（未拉到积分日志：可能是 MITM 未解密 / 返回非 RSC / Cookie 无权限）";
-
-  $.msg("HDHive", title, `${showText}${flowText}`);
-}
-
+// ======================== 基础工具函数 ========================
 function httpGetText(url, headers) {
   return new Promise((resolve, reject) => {
     $.get({ url, headers }, (err, resp, data) => {
@@ -200,7 +258,7 @@ function httpGetText(url, headers) {
 function httpPostRaw(req) {
   return new Promise((resolve) => {
     $.post(req, (err, resp, data) => {
-      if (err) return resolve(null);
+      if (err) return resolve({ status: resp?.status || resp?.statusCode || 0, data: "" });
       const status = resp?.status || resp?.statusCode || 0;
       resolve({ status, data: (typeof data === "string" ? data : "") });
     });
@@ -221,7 +279,6 @@ function extractInitialDataArray(raw) {
 
   for (let j = i; j < raw.length; j++) {
     const ch = raw[j];
-
     if (inStr) {
       if (esc) { esc = false; continue; }
       if (ch === "\\") { esc = true; continue; }
@@ -278,10 +335,7 @@ function getHeader(h, k) {
 }
 
 function formatTime(t) {
-  return (t || "")
-    .replace("T", " ")
-    .replace(/\..*$/, "")
-    .replace(/\+\d\d:\d\d$/, "");
+  return (t || "").replace("T", " ").replace(/\..*$/, "").replace(/\+\d\d:\d\d$/, "");
 }
 
 function Env(name) {
