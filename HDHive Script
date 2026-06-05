@@ -8,11 +8,11 @@ const KEY_REFERER = "hdhive_referer_v15";
 const KEY_UA = "hdhive_ua_v15";
 const KEY_CSRF = "hdhive_csrf_v15";
 const KEY_FLOW = "hdhive_points_flow_v4";
-// 新增：自动捕获并提取的用户 UID 和 ActionID
+// 自动捕获与提取的用户 UID 和 ActionID
 const KEY_UID = "hdhive_uid_v2";
 const KEY_ACTION_ID = "hdhive_action_id_v2";
 
-// 兜底的 Action ID（防止动态提取失败时使用）
+// 静态兜底 Action ID（防止动态提取失败时使用）
 const DEFAULT_ACTION_ID = "6024d7d3f5291d36f7c194353f6161ce0e8cd89b74";
 
 (async () => {
@@ -24,7 +24,7 @@ const DEFAULT_ACTION_ID = "6024d7d3f5291d36f7c194353f6161ce0e8cd89b74";
 })().catch(e => $.logErr(e)).finally(() => $.done());
 
 /**
- * 1. 凭据捕获逻辑 (MITM)
+ * 1. 凭据捕获逻辑 (MITM 模式)
  */
 async function captureCookie() {
   const url = $request.url || "";
@@ -74,18 +74,20 @@ async function checkIn() {
   }
 
   // 获取并拼装基础参数
-  const uid = $.getdata(KEY_UID) || "55906"; // 找不到则默认用你的 UID 兜底
+  const uid = $.getdata(KEY_UID) || "55906"; 
   let actionId = $.getdata(KEY_ACTION_ID) || DEFAULT_ACTION_ID;
   
   const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1";
   const csrf = $.getdata(KEY_CSRF) || parseCookie(rawCookie).csrf_access_token || "";
   const userUrl = `https://${DOMAIN}/user/${uid}`;
 
-  // 先尝试通过 GET 页面动态刷新/获取最新的 next-action ID
+  // 尝试通过 GET 页面源码动态刷新获取最新的 next-action ID
   const fetchedActionId = await tryFetchActionId(userUrl, ua, rawCookie);
   if (fetchedActionId) {
     actionId = fetchedActionId;
-    $.setdata(actionId, KEY_ACTION_ID); // 覆盖本地持久化
+    $.setdata(actionId, KEY_ACTION_ID); 
+  } else {
+    console.log(`⚠️ 动态提取未成功，本次签到将使用历史缓存或默认 ID: ${actionId}`);
   }
 
   // 构造 Server Action 必备请求头
@@ -112,10 +114,9 @@ async function checkIn() {
   try {
     const res = await httpPostRaw({ url: userUrl, headers, body });
     if (res && res.data) {
-      // 尝试解析 Next.js 返回的混合体数据（或者是标准错误 JSON）
       showText = parseServerActionResponse(res.data);
     } else {
-      showText = `服务器无响应或 HTTP 状态码异常 (Status: ${res?.status || "Unknown"})`;
+      showText = `服务器无响应或 HTTP 状态异常 (Status: ${res?.status || "Unknown"})`;
     }
   } catch (err) {
     showText = `请求异常: ${err.message || err}`;
@@ -135,22 +136,43 @@ async function checkIn() {
 }
 
 /**
- * 3. 辅助：动态从用户页源码中提取 Action ID
+ * 3. 辅助：多策略动态从用户页源码中提取 Action ID
  */
 async function tryFetchActionId(url, ua, cookie) {
   try {
     const rawHtml = await httpGetText(url, {
       "User-Agent": ua,
       "Cookie": normalizeCookie(cookie),
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
     });
-    // 匹配类似 "action":"6024d7d3f5291d36f7c194353f6161ce0e8cd89b74" 或类似的十六进制 Hash
-    const match = rawHtml.match(/"action"\s*:\s*"([a-f0-9]{40})"/i);
-    if (match && match[1]) {
-      return match[1];
+    
+    if (!rawHtml || rawHtml.length < 500) {
+      console.log("⚠️ 读取页面源码为空或长度异常");
+      return null;
     }
+
+    // 多重正则匹配策略
+    const patterns = [
+      /"action"\s*:\s*["']([^"']{40})["']/i,         // JSON 树结构
+      /formAction\s*=\s*["']([^"']{40})["']/i,     // HTML 表单树结构
+      /action-id\s*=\s*["']([^"']{40})["']/i,      // 节点属性
+      /([a-f0-9]{40})/i                            // 暴力硬搜 40 位十六进制 Hash
+    ];
+
+    for (let index = 0; index < patterns.length; index++) {
+      const match = rawHtml.match(patterns[index]);
+      if (match && match[1]) {
+        const foundId = match[1];
+        // 排除掉全 0 的干扰项
+        if (foundId !== "0000000000000000000000000000000000000000") {
+          console.log(`🎯 策略 [${index + 1}] 成功捕获 Action ID: ${foundId}`);
+          return foundId;
+        }
+      }
+    }
+    console.log("⚠️ 页面源码中未检索到符合指纹特征的 40 位 Action Hash");
   } catch (e) {
-    console.log(`⚠️ 动态提取 Action ID 失败，将使用缓存或硬编码兜底: ${e}`);
+    console.log(`⚠️ 动态提取 Action ID 异常: ${e.message || e}`);
   }
   return null;
 }
@@ -161,44 +183,48 @@ async function tryFetchActionId(url, ua, cookie) {
 function parseServerActionResponse(rawData) {
   if (!rawData) return "返回内容为空";
   
-  // 情况 A：如果是直接返回了标准的 JSON 报错对象
-  if (rawData.trim().startsWith("{")) {
+  const cleanData = rawData.trim();
+  
+  // 情况 A：如果是直接返回了标准的明文 JSON 报错对象
+  if (cleanData.startsWith("{")) {
     try {
-      const obj = JSON.parse(rawData);
+      const obj = JSON.parse(cleanData);
       const err = obj.error || obj;
-      return `${err.message || "签到完毕"}：${err.description || "未返回具体描述"}`;
+      if (err.description || err.message) {
+        return `${err.message || "提示"}：${err.description || "无具体描述"}`;
+      }
     } catch {}
   }
 
-  // 情况 B：Next.js RSC 格式的流数据，包含 "success":false 等字样
-  // 我们用正则模糊捕获提示词
-  const msgMatch = rawData.match(/"message"\s*:\s*"([^"]+)"/);
-  const descMatch = rawData.match(/"description"\s*:\s*"([^"]+)"/);
+  // 情况 B：针对 Next.js RSC 混合流文本做全文正则模糊匹配
+  const msgMatch = rawData.match(/"message"\s*:\s*["']([^"']+)["']/);
+  const descMatch = rawData.match(/"description"\s*:\s*["']([^"']+)["']/);
   
   if (msgMatch || descMatch) {
-    const msg = msgMatch ? msgMatch[1] : "签到动作";
+    const msg = msgMatch ? msgMatch[1] : "签到结果";
     const desc = descMatch ? descMatch[1] : "";
     return `${msg} -> ${desc}`;
   }
 
-  // 情况 C：成功时可能返回一堆 Next.js 刷新页面的组件树，直接提示成功
-  if (rawData.includes("points") || rawData.includes("success")) {
-    return "🎉 签到成功或状态已刷新！";
+  // 情况 C：成功时通常会回传一长串带有页面刷新结构的文本节点组件
+  if (rawData.includes("points") || rawData.includes("success") || rawData.includes("points-logs")) {
+    return "🎉 签到请求已成功递交 (请参考下方流水校验状态)";
   }
 
-  return `响应片段: ${rawData.slice(0, 150)}`;
+  // 情况 D：兜底截断展示
+  return `响应片段: ${cleanData.slice(0, 100).replace(/\r?\n/g, " ")}`;
 }
 
 /**
- * 5. 积分日志拉取
+ * 5. 积分日志拉取明细
  */
 async function activeFetchPointsFlow(baseHeaders) {
   const url = `https://${DOMAIN}/manager/points-logs?page=1&page_size=10&_rsc=1`;
   const headers = Object.assign({}, baseHeaders, {
     "Accept": "*/*",
-    "Content-Type": undefined // GET 请求不需要 Content-Type
+    "Content-Type": undefined 
   });
-  delete headers["next-action"]; // 移除 action 头防止干扰普通 GET
+  delete headers["next-action"]; // 普通查询不需要此 Header
 
   try {
     const raw = await httpGetText(url, headers);
@@ -245,7 +271,7 @@ function buildFlowText(flow) {
   return l.join("\n");
 }
 
-// ======================== 基础工具函数 ========================
+// ======================== 基础底层工具函数 ========================
 function httpGetText(url, headers) {
   return new Promise((resolve, reject) => {
     $.get({ url, headers }, (err, resp, data) => {
