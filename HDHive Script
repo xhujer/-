@@ -1,4 +1,4 @@
-Const $ = new Env("HDHive");
+const $ = new Env("HDHive");
 
 const DOMAIN = "hdhive.com";
 
@@ -6,6 +6,7 @@ const KEY_COOKIE = "hdhive_cookie_v15";
 const KEY_REFERER = "hdhive_referer_v15";
 const KEY_UA = "hdhive_ua_v15";
 const KEY_CSRF = "hdhive_csrf_v15";
+const KEY_ACTION = "hdhive_action_v1";
 const KEY_FLOW = "hdhive_points_flow_v4";
 
 (async () => {
@@ -26,17 +27,20 @@ async function captureCookie() {
 
   if (/\/(go-api|api)\/customer\/(user\/)?checkin/i.test(url)) return;
 
-  if (!/\/manager\/|\/api\/|\/go-api\/|https:\/\/hdhive\.com\/?$/.test(url)) return;
+  if (!/\/manager\/|\/api\/|\/go-api\/|https:\/\/hdhive\.com\/?$|\/user\/\d+/.test(url)) return;
 
   const h = $request.headers || {};
   const cookie = getCookieFromHeaders(h);
   const ua = getHeader(h, "User-Agent");
   const referer = getHeader(h, "Referer");
+  const action = getHeader(h, "next-action");
 
   if (!cookie || cookie.length < 20) return;
 
   const normCookie = normalizeCookie(cookie);
   const ckObj = parseCookie(normCookie);
+
+  let updated = false;
 
   const old = $.getdata(KEY_COOKIE);
   if (normCookie !== old) {
@@ -44,7 +48,18 @@ async function captureCookie() {
     if (ua) $.setdata(ua, KEY_UA);
     if (referer) $.setdata(referer, KEY_REFERER);
     if (ckObj.csrf_access_token) $.setdata(ckObj.csrf_access_token, KEY_CSRF);
+    updated = true;
+  }
 
+  if (action && action.length > 10) {
+    const oldAction = $.getdata(KEY_ACTION);
+    if (action !== oldAction) {
+      $.setdata(action, KEY_ACTION);
+      updated = true;
+    }
+  }
+
+  if (updated) {
     $.msg("HDHive", "🍪 Cookie 已更新", "可以关闭自动获取开关");
   }
 }
@@ -97,6 +112,17 @@ function buildFlowText(flow) {
   return l.join("\n");
 }
 
+function buildRouterStateTree(uid) {
+  const tree = [
+    "",
+    { children: ["(app)", { children: ["user", { children: [["id", String(uid), "d"], { children: ["__PAGE__", {}, null, null] }, null, null] }, null, null] }, null, null] },
+    null,
+    null,
+    true
+  ];
+  return encodeURIComponent(JSON.stringify(tree));
+}
+
 async function checkIn() {
   const rawCookie = $.getdata(KEY_COOKIE);
   if (!rawCookie) {
@@ -106,24 +132,41 @@ async function checkIn() {
 
   const ckObj = parseCookie(rawCookie);
   const token = ckObj.token || "";
+  const uid = ckObj.hdh_uid || "";
   const ua =
     $.getdata(KEY_UA) ||
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1";
 
-  const referer = $.getdata(KEY_REFERER) || `https://${DOMAIN}/manager/points-logs`;
   const csrf = $.getdata(KEY_CSRF) || ckObj.csrf_access_token || "";
+  const actionId = $.getdata(KEY_ACTION) || "";
+
+  if (!uid) {
+    $.msg("HDHive", "❌ 无法签到", "Cookie 中未找到 hdh_uid，请重新抓包");
+    return;
+  }
+
+  if (!actionId) {
+    $.msg("HDHive", "❌ 无法签到", "未捕获到 next-action ID\n请在 HDHive 个人页手动触发一次签到，脚本会自动记录");
+    return;
+  }
+
+  const referer = `https://${DOMAIN}/user/${uid}`;
+  const routerTree = buildRouterStateTree(uid);
 
   const headers = {
     "User-Agent": ua,
     "Origin": `https://${DOMAIN}`,
     "Referer": referer,
+    "Accept": "text/x-component",
     "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+    "Content-Type": "text/plain;charset=UTF-8",
     "Cookie": normalizeCookie(rawCookie),
-    "rsc": "1",
-    "next-url": "/manager/points-logs",
+    "next-action": actionId,
+    "next-router-state-tree": routerTree,
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
   };
-
-  headers["Accept"] = "text/x-component,*/*";
 
   if (looksLikeJwt(token)) {
     headers["Authorization"] = `Bearer ${token}`;
@@ -134,49 +177,44 @@ async function checkIn() {
     headers["X-Csrf-Token"] = csrf;
   }
 
-  const postHeaders = Object.assign({}, headers, {
-    "Accept": "application/json, text/plain, */*",
+  const rscHeaders = Object.assign({}, headers, {
+    "Accept": "*/*",
     "Content-Type": "application/json;charset=utf-8",
+    "rsc": "1",
+    "next-url": `/user/${uid}`,
   });
+  delete rscHeaders["next-action"];
+  delete rscHeaders["next-router-state-tree"];
 
-  const endpoints = [
-    `https://${DOMAIN}/api/customer/user/checkin`,
-    `https://${DOMAIN}/go-api/customer/user/checkin`,
-    `https://${DOMAIN}/api/customer/checkin`,
-    `https://${DOMAIN}/go-api/customer/checkin`,
-  ];
+  const url = `https://${DOMAIN}/user/${uid}`;
+  const req = {
+    url,
+    method: "POST",
+    headers,
+    body: JSON.stringify([false, "$undefined"]),
+  };
 
-  let checkinRes = null;
-  let status = 0;
-  let raw = "";
-
-  for (const url of endpoints) {
-    const req = { url, method: "POST", headers: postHeaders, body: "{}" };
-    const r = await httpPostRaw(req);
-    if (!r) continue;
-
-    status = r.status;
-    raw = r.data || "";
-
-    let json = null;
-    try { json = JSON.parse(raw); } catch {}
-    if (!json) continue;
-    checkinRes = json;
-    break;
-  }
+  const r = await httpPostRaw(req);
+  const status = r?.status || 0;
+  const raw = r?.data || "";
 
   let title = "📌 签到结果";
   let showText = "未获取到有效签到响应";
 
-  if (checkinRes) {
-    const msg = checkinRes.message || checkinRes.msg || "";
-    const desc = checkinRes.description || checkinRes.desc || "";
-    showText = (desc || msg || "（无提示文本）");
+  if (raw) {
+    const actionResult = extractActionResponse(raw);
+    if (actionResult) {
+      const msg = actionResult.message || actionResult.msg || "";
+      const desc = actionResult.description || actionResult.desc || "";
+      showText = desc || msg || "（无提示文本）";
+    } else {
+      showText = `HTTP ${status}\n返回片段：${raw.slice(0, 200)}`;
+    }
   } else {
-    showText = `HTTP ${status}\n返回片段：${String(raw).slice(0, 200)}`;
+    showText = `HTTP ${status}（无响应体）`;
   }
 
-  let flow = await activeFetchPointsFlow(headers);
+  let flow = await activeFetchPointsFlow(rscHeaders);
   if (!flow) {
     try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
   }
@@ -186,6 +224,20 @@ async function checkIn() {
     : "\n\n（未拉到积分日志：可能是 MITM 未解密 / 返回非 RSC / Cookie 无权限）";
 
   $.msg("HDHive", title, `${showText}${flowText}`);
+}
+
+function extractActionResponse(raw) {
+  const lines = raw.split("\n");
+  for (const line of lines) {
+    const m = line.match(/^1:(.+)$/);
+    if (!m) continue;
+    try {
+      const obj = JSON.parse(m[1]);
+      if (obj?.response) return obj.response;
+      if (obj?.success !== undefined) return obj;
+    } catch {}
+  }
+  return null;
 }
 
 function httpGetText(url, headers) {
