@@ -3,9 +3,9 @@ const $ = new Env("HDHive");
 const DOMAIN = "hdhive.com";
 
 const KEY_COOKIE = "hdhive_cookie_v15";
-const KEY_REFERER = "hdhive_referer_v15";
 const KEY_UA = "hdhive_ua_v15";
 const KEY_CSRF = "hdhive_csrf_v15";
+const KEY_SA_TOKEN = "hdhive_sa_token_v1";
 const KEY_ACTION = "hdhive_action_v1";
 const KEY_FLOW = "hdhive_points_flow_v4";
 
@@ -32,7 +32,6 @@ async function captureCookie() {
   const h = $request.headers || {};
   const cookie = getCookieFromHeaders(h);
   const ua = getHeader(h, "User-Agent");
-  const referer = getHeader(h, "Referer");
   const action = getHeader(h, "next-action");
 
   if (!cookie || cookie.length < 20) return;
@@ -46,9 +45,15 @@ async function captureCookie() {
   if (normCookie !== old) {
     $.setdata(normCookie, KEY_COOKIE);
     if (ua) $.setdata(ua, KEY_UA);
-    if (referer) $.setdata(referer, KEY_REFERER);
     if (ckObj.csrf_access_token) $.setdata(ckObj.csrf_access_token, KEY_CSRF);
+    if (ckObj.hdh_sa_token) $.setdata(ckObj.hdh_sa_token, KEY_SA_TOKEN);
     updated = true;
+  } else if (ckObj.hdh_sa_token) {
+    const oldSa = $.getdata(KEY_SA_TOKEN);
+    if (ckObj.hdh_sa_token !== oldSa) {
+      $.setdata(ckObj.hdh_sa_token, KEY_SA_TOKEN);
+      updated = true;
+    }
   }
 
   if (action && action.length > 10) {
@@ -123,6 +128,54 @@ function buildRouterStateTree(uid) {
   return encodeURIComponent(JSON.stringify(tree));
 }
 
+function buildCookieWithFreshSaToken(rawCookie, freshSaToken) {
+  const ckObj = parseCookie(rawCookie);
+  ckObj["hdh_sa_token"] = freshSaToken;
+  return Object.entries(ckObj).map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+async function refreshSaToken(uid, ua, rawCookie) {
+  const url = `https://${DOMAIN}/user/${uid}?_rsc=refresh`;
+  const headers = {
+    "User-Agent": ua,
+    "Accept": "text/x-component",
+    "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+    "Referer": `https://${DOMAIN}/user/${uid}`,
+    "Cookie": normalizeCookie(rawCookie),
+    "rsc": "1",
+    "next-url": `/user/${uid}`,
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
+  };
+
+  return new Promise((resolve) => {
+    $.get({ url, headers }, (err, resp, data) => {
+      if (err) return resolve(null);
+      const respHeaders = resp?.headers || resp?.header || {};
+      const setCookie = getSetCookieValue(respHeaders, "hdh_sa_token");
+      resolve(setCookie);
+    });
+  });
+}
+
+function getSetCookieValue(headers, name) {
+  for (const k in headers) {
+    if (k.toLowerCase() !== "set-cookie") continue;
+    const val = headers[k];
+    const entries = Array.isArray(val) ? val : [val];
+    for (const entry of entries) {
+      const parts = String(entry).split(";");
+      const pair = parts[0].trim();
+      const eq = pair.indexOf("=");
+      if (eq < 0) continue;
+      const cname = pair.slice(0, eq).trim();
+      if (cname === name) return pair.slice(eq + 1).trim();
+    }
+  }
+  return null;
+}
+
 async function checkIn() {
   const rawCookie = $.getdata(KEY_COOKIE);
   if (!rawCookie) {
@@ -150,17 +203,28 @@ async function checkIn() {
     return;
   }
 
-  const referer = `https://${DOMAIN}/user/${uid}`;
+  // 先刷新 hdh_sa_token（它 2 小时过期，签到前必须拿最新值）
+  let saToken = await refreshSaToken(uid, ua, rawCookie);
+  if (saToken) {
+    $.setdata(saToken, KEY_SA_TOKEN);
+  } else {
+    saToken = $.getdata(KEY_SA_TOKEN) || ckObj.hdh_sa_token || "";
+  }
+
+  const freshCookie = saToken
+    ? buildCookieWithFreshSaToken(rawCookie, saToken)
+    : normalizeCookie(rawCookie);
+
   const routerTree = buildRouterStateTree(uid);
 
   const headers = {
     "User-Agent": ua,
     "Origin": `https://${DOMAIN}`,
-    "Referer": referer,
+    "Referer": `https://${DOMAIN}/user/${uid}`,
     "Accept": "text/x-component",
     "Accept-Language": "zh-CN,zh-Hans;q=0.9",
     "Content-Type": "text/plain;charset=UTF-8",
-    "Cookie": normalizeCookie(rawCookie),
+    "Cookie": freshCookie,
     "next-action": actionId,
     "next-router-state-tree": routerTree,
     "Sec-Fetch-Site": "same-origin",
@@ -168,37 +232,34 @@ async function checkIn() {
     "Sec-Fetch-Dest": "empty",
   };
 
-  if (looksLikeJwt(token)) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  if (csrf) {
-    headers["X-CSRF-Token"] = csrf;
-    headers["X-Csrf-Token"] = csrf;
-  }
-
-  const rscHeaders = Object.assign({}, headers, {
+  const rscHeaders = {
+    "User-Agent": ua,
     "Accept": "*/*",
-    "Content-Type": "application/json;charset=utf-8",
+    "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+    "Cookie": freshCookie,
     "rsc": "1",
     "next-url": `/user/${uid}`,
-  });
-  delete rscHeaders["next-action"];
-  delete rscHeaders["next-router-state-tree"];
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
+  };
 
-  const url = `https://${DOMAIN}/user/${uid}`;
   const req = {
-    url,
+    url: `https://${DOMAIN}/user/${uid}`,
     method: "POST",
     headers,
-    body: JSON.stringify([false, "$undefined"]),
+    body: '[false,"$undefined"]',
   };
 
   const r = await httpPostRaw(req);
   const status = r?.status || 0;
   const raw = r?.data || "";
 
-  let title = "📌 签到结果";
+  // 签到后更新 sa_token
+  if (r?.saToken) {
+    $.setdata(r.saToken, KEY_SA_TOKEN);
+  }
+
   let showText = "未获取到有效签到响应";
 
   if (raw) {
@@ -223,7 +284,7 @@ async function checkIn() {
     ? "\n\n" + buildFlowText(flow)
     : "\n\n（未拉到积分日志：可能是 MITM 未解密 / 返回非 RSC / Cookie 无权限）";
 
-  $.msg("HDHive", title, `${showText}${flowText}`);
+  $.msg("HDHive", "📌 签到结果", `${showText}${flowText}`);
 }
 
 function extractActionResponse(raw) {
@@ -254,7 +315,9 @@ function httpPostRaw(req) {
     $.post(req, (err, resp, data) => {
       if (err) return resolve(null);
       const status = resp?.status || resp?.statusCode || 0;
-      resolve({ status, data: (typeof data === "string" ? data : "") });
+      const respHeaders = resp?.headers || resp?.header || {};
+      const saToken = getSetCookieValue(respHeaders, "hdh_sa_token");
+      resolve({ status, data: (typeof data === "string" ? data : ""), saToken });
     });
   });
 }
