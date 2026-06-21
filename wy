@@ -1,30 +1,55 @@
-#!name=网易邮箱大师去广告
-#!desc=移除网易邮箱大师开屏广告、签到任务提醒，精简侧拉抽屉和我的页面。
-#!author=可莉🅥🅥🅥[https://github.com/luestr/ProxyResource/blob/main/README.md]
-#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/MailMaster.png
-#!category=iKeLee
-#!openUrl=https://apps.apple.com/app/id897003024
-#!tag=去广告
-#!loon_version=3.2.4(787)
-#!homepage=https://hub.kelee.one
-#!date=2025-05-29 00:00:00
+#!name=网易邮箱大师去广告（稳定完整版）
+#!desc=去广告+去任务+去运营位，修复侧边栏闪屏问题（不破坏UI结构）
+#!author=Stable Fix
+#!tag=MailMaster|AdBlock|Stable
 
 [Rewrite]
+
+# =========================
+# 1. 首页/侧边栏配置（核心修复：禁止del结构）
+# =========================
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-jq '
+.data.memberOperator = {}
+| .data.activityTabInfoList = []
+| .data.masterOperatorList = []
+| .data.extList.mineSideBanner = {}
+'
+
+# =========================
+# 2. 功能入口（只去广告工具，不动结构）
+# =========================
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ response-body-json-jq '
+if .data.config then
+  .data.config |= map(
+    if .result.tools then
+      .result.tools |= map(select(.name != "Function-AD"))
+    end
+  )
+end
+'
+
+# =========================
+# 3. 任务系统（返回空，避免UI重建）
+# =========================
+^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ response-body={}
+^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/overview$ response-body={}
+
+# =========================
+# 4. 会员/运营入口（全部空返回，避免闪屏）
+# =========================
+^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ response-body={}
+^https:\/\/appconf\.mail\.163\.com\/mmad\/master\/get\.do$ response-body={}
+^https:\/\/dashi\.163\.com\/fgw\/mail-member-center\/external\/member\/v2\/entry$ response-body={}
+
+# =========================
+# 5. 广告配置兜底（只屏蔽，不影响UI）
+# =========================
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ reject-dict
 
-^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-jq 'del(.data.memberOperator, .data.functionOperatorInfoList, .data.activityTabInfoList, .data.masterOperatorList, .data.extList.mineSideBanner) | .data.newCommonFuncList |= map(select(.strategyName | IN("邮箱管理", "替身邮箱", "安全中心", "邮件追踪")))'
-
-^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ response-body-json-jq '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
-
-^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ reject-dict
-
-^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/overview$ reject-dict
-
-^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ reject-dict
-
-^https:\/\/appconf\.mail\.163\.com\/mmad\/master\/get\.do$ reject-dict
-
-^https:\/\/dashi\.163\.com\/fgw\/mail-member-center\/external\/member\/v2\/entry$ reject-dict
+# =========================
+# 6. 防止运营弹窗
+# =========================
+^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/activity\/.*$ response-body={}
 
 [MitM]
-hostname=appconf.mail.163.com, dashi.163.com
+hostname = appconf.mail.163.com, dashi.163.com
