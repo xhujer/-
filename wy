@@ -16,10 +16,6 @@
 
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ response-body-json-jq '.data.config[] |= if .result.tools then .result.tools |= map(select(.name == "邮件追踪" or .name == "替身邮箱")) else . end | del(.data.config[] | select(.functionName == "Function-AD"))'
 
-^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ reject-dict
-
-^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/overview$ reject-dict
-
 ^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ reject-dict
 
 ^https:\/\/appconf\.mail\.163\.com\/mmad\/master\/get\.do reject-dict
