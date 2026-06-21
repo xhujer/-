@@ -1,13 +1,19 @@
-#!name=网易邮箱大师去广告（稳定完整版）
-#!desc=去广告+去任务+去运营位，修复侧边栏闪屏问题（不破坏UI结构）
-#!author=Stable Fix
-#!tag=MailMaster|AdBlock|Stable
+#!name=网易邮箱大师去广告
+#!desc=移除网易邮箱大师开屏广告、签到任务提醒，精简侧拉抽屉和我的页面（稳定不闪屏修复版）
+#!author=可莉🅥🅥🅥[https://github.com/luestr/ProxyResource/blob/main/README.md]
+#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/MailMaster.png
+#!category=iKeLee
+#!openUrl=https://apps.apple.com/app/id897003024
+#!tag=去广告
+#!loon_version=3.2.4(787)
+#!homepage=https://hub.kelee.one
+#!date=2025-05-29 00:00:00
 
 [Rewrite]
 
-# =========================
-# 1. 首页/侧边栏配置（核心修复：禁止del结构）
-# =========================
+# ==============================
+# 1. 首页/侧边栏配置（修复闪屏：不使用del，只清空）
+# ==============================
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/page\/v2\/conf\.do$ response-body-json-jq '
 .data.memberOperator = {}
 | .data.activityTabInfoList = []
@@ -15,9 +21,9 @@
 | .data.extList.mineSideBanner = {}
 '
 
-# =========================
-# 2. 功能入口（只去广告工具，不动结构）
-# =========================
+# ==============================
+# 2. 功能入口配置（只去广告工具，不动结构）
+# ==============================
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/config\/function\.do$ response-body-json-jq '
 if .data.config then
   .data.config |= map(
@@ -28,28 +34,23 @@ if .data.config then
 end
 '
 
-# =========================
-# 3. 任务系统（返回空，避免UI重建）
-# =========================
+# ==============================
+# 3. 任务中心（避免 reject，防UI闪烁）
+# ==============================
 ^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/list$ response-body={}
 ^https:\/\/dashi\.163\.com\/task-center-api\/fapi\/task\/overview$ response-body={}
 
-# =========================
-# 4. 会员/运营入口（全部空返回，避免闪屏）
-# =========================
+# ==============================
+# 4. 运营/会员中心（返回空，避免UI重建）
+# ==============================
 ^https:\/\/appconf\.mail\.163\.com\/mailoperating\/mailmaster\/api\/operator\/get$ response-body={}
 ^https:\/\/appconf\.mail\.163\.com\/mmad\/master\/get\.do$ response-body={}
 ^https:\/\/dashi\.163\.com\/fgw\/mail-member-center\/external\/member\/v2\/entry$ response-body={}
 
-# =========================
-# 5. 广告配置兜底（只屏蔽，不影响UI）
-# =========================
+# ==============================
+# 5. 广告配置接口（只拦截，不影响UI结构）
+# ==============================
 ^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ reject-dict
 
-# =========================
-# 6. 防止运营弹窗
-# =========================
-^https:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/activity\/.*$ response-body={}
-
 [MitM]
-hostname = appconf.mail.163.com, dashi.163.com
+hostname=appconf.mail.163.com, dashi.163.com
