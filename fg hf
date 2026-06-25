@@ -1,0 +1,389 @@
+// ==UserScript==
+// @name         富贵论坛快捷回复工具 (V5.6 纯净空格补全版)
+// @namespace    diwangge_ios_space_pad
+// @version      5.6
+// @description  纯净凑字数：使用隐形空格补全字数，不加废话；130px巨型悬浮球 + 480px超大面板；iOS毛玻璃风格
+// @icon         https://www.fglt.net/favicon.ico
+// @author       diwangge & Gemini
+// @match        https://www.fglt.net/*
+// @grant        GM_addStyle
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @run-at       document-end
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // ================= 💾 二合一终极词库 (100+句) =================
+    const replyLib = [
+        // =========== 🔥 第一部分：定制短语 (简单粗暴) ===========
+        "顶起！", "支持。", "不错不错。", "路过帮顶。",
+        "学习了。", "果断收藏。", "感谢分享。", "好贴留名。",
+        "给力嗷。", "必须支持。", "先Mark。", "前排围观。",
+        "已阅，顶。", "牛逼plus。", "楼主辛苦。", "持续关注。",
+        "帮你顶上去，不用谢。", "路过帮顶，帖子别沉。",
+        "万丈高楼平地起，顶！", "每日一顶，身体健康。",
+        "虽然不懂，但还是顶一下。", "人工置顶，支持楼主。",
+        "看帖回帖，中华美德。", "走过路过，进来顶顶。",
+        "为了积分，我顶！", "不为别的，就为帮顶。",
+        "楼主辛苦了，谢谢分享。", "内容很详细，受教了。",
+        "这个确实不错，支持。", "一直在关注，感谢更新。",
+        "排版不错，看着舒服。", "感谢分享，很有帮助。",
+        "不多说了，必须支持。", "写得不错，支持一下。",
+        "难得的好帖，顶一下。", "希望能多发点这种贴。",
+        "不管怎么样，必须顶。", "支持原创，楼主加油。",
+
+        // =========== 🏛️ 第二部分：经典原版 (万能通用) ===========
+        "来看看，支持一下！", "顶一顶，感谢分享！", "看一下，受教了！",
+        "不错不错，收藏了～", "感谢大佬，已支持！", "路过点赞，继续加油！",
+        "有意思，关注一下！", "支持支持，期待！", "谢谢分享，顶上去！",
+        "看完了，确实不错！", "帮顶一波，辛苦了！", "支持一下，祝你发财！",
+        "这个可以，支持！", "不错的内容，支持！", "前排支持，哈哈！",
+        "顶顶顶，感谢楼主！", "内容不错，感谢分享！", "内容挺实在，顶。",
+        "好贴，顶起来！", "好东西，支持一下。", "路过不留名，顺手顶～",
+        "支持楼主，继续更新！", "来围观，支持一手！", "看完了，走之前回下。",
+        "支持下，不然沉了。", "刚看到，帮你顶一顶。", "看完不白看",
+        "刚刷到这贴，回一下。", "看了下，确实还行。", "内容有点用，谢了。",
+        "先顶着，慢慢看。", "留个脚印，回头再翻。", "看完再说一句：支持。",
+        "支持！", "我看不错", "学习了，感谢分享！",
+        "这分享可以，顶一下。", "路过顺手回个帖。", "说实话，不错。",
+        "有收获，支持一手。", "顶一下，别沉太快。", "好内容，必须顶。",
+        "刚好感兴趣 看看", "简单回下，表示看过。", "支持楼主，辛苦整理了。",
+        "可以的，继续发。", "不错，先收藏了。", "看帖回帖，基本礼貌。",
+        "就一句：顶。", "看完觉得还行，支持下。", "大概扫了一遍，还行。",
+        "看完顺手支持下。", "过来转转，留个痕迹。", "回帖不沉。",
+        "内容不错，表示支持。", "有点意思，支持一下。", "已阅，支持楼主！"
+    ];
+
+    // ================= 🎨 CSS (V5.0 ULTRA 巨无霸样式) =================
+    GM_addStyle(`
+        :root {
+            --ios-blur: blur(30px) saturate(180%);
+            --ios-bg-light: rgba(255, 255, 255, 0.85);
+            --ios-border: 1px solid rgba(255, 255, 255, 0.5);
+            --ios-shadow-ball: 0 15px 40px rgba(0, 0, 0, 0.25), 0 5px 10px rgba(0,0,0,0.05);
+            --ios-shadow-panel: 0 30px 60px rgba(0, 0, 0, 0.3);
+            --ios-blue: #007AFF;
+        }
+
+        #fg-widget-root {
+            position: fixed;
+            z-index: 999999;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+            user-select: none;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* === ULTRA悬浮球 (130px) === */
+        .fg-float-ball {
+            width: 130px;
+            height: 130px;
+            border-radius: 36px;
+            background: var(--ios-bg-light);
+            backdrop-filter: var(--ios-blur);
+            -webkit-backdrop-filter: var(--ios-blur);
+            border: var(--ios-border);
+            box-shadow: var(--ios-shadow-ball);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .fg-float-ball svg { 
+            width: 64px; height: 64px; 
+            fill: var(--ios-blue); 
+            filter: drop-shadow(0 4px 8px rgba(0, 122, 255, 0.3));
+            transition: transform 0.3s;
+        }
+        .fg-float-ball:active { transform: scale(0.94); background: rgba(255, 255, 255, 0.98); }
+
+        /* === ULTRA面板 (宽480px) === */
+        .fg-panel {
+            position: absolute;
+            bottom: 150px;
+            right: 0;
+            width: 480px;
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: var(--ios-blur);
+            -webkit-backdrop-filter: var(--ios-blur);
+            border: var(--ios-border);
+            border-radius: 40px;
+            box-shadow: var(--ios-shadow-panel);
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            
+            opacity: 0;
+            transform: scale(0.9) translateY(30px);
+            pointer-events: none;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            transform-origin: bottom right;
+        }
+
+        .fg-panel.active {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+            pointer-events: auto;
+        }
+
+        .fg-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0 8px; margin-bottom: 4px;
+        }
+        .fg-title { 
+            font-weight: 800; font-size: 32px; 
+            color: #000; display:flex; align-items:center; gap:12px; 
+        }
+        .fg-refresh-btn { 
+            cursor: pointer; width: 48px; height: 48px; 
+            background: rgba(0,0,0,0.06); border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.2s;
+        }
+        .fg-refresh-btn:hover { background: rgba(0,0,0,0.12); }
+        .fg-refresh-btn svg { width: 24px; height: 24px; fill: #555; }
+
+        /* === 标签列表 (特大字体) === */
+        .fg-tags-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            max-height: 400px;
+            overflow-y: auto;
+            padding-bottom: 16px; 
+            padding-left: 4px;
+        }
+        .fg-tags-container::-webkit-scrollbar { width: 6px; }
+        .fg-tags-container::-webkit-scrollbar-track { background: transparent; }
+        .fg-tags-container::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 10px; }
+
+        .fg-tag {
+            background: rgba(255,255,255,0.6);
+            color: #1d1d1f;
+            padding: 16px 24px;
+            border-radius: 20px;
+            font-size: 24px; /* 字体保持巨大 */
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid rgba(0,0,0,0.04);
+            white-space: nowrap; 
+        }
+        .fg-tag:hover {
+            background: #fff; color: var(--ios-blue);
+            transform: translateY(-3px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+        }
+        .fg-tag:active { transform: scale(0.96); background: #f2f2f7; }
+
+        /* === 巨型按钮 === */
+        .fg-action-btn {
+            background: var(--ios-blue); color: white; border: none;
+            padding: 24px;
+            border-radius: 24px;
+            font-weight: 700; font-size: 28px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            gap: 16px; box-shadow: 0 8px 20px rgba(0, 122, 255, 0.4);
+            transition: all 0.2s;
+            margin-top: 8px;
+        }
+        .fg-action-btn:hover { background: #0066d6; }
+        .fg-action-btn:active { transform: scale(0.98); }
+        .fg-action-btn svg { width: 36px; height: 36px; fill: white; }
+
+        /* Toast 提示 (巨型) */
+        #fg-toast {
+            position: fixed; top: 50px; left: 50%;
+            transform: translateX(-50%) scale(0.9);
+            background: rgba(0,0,0,0.9); color: white;
+            padding: 20px 48px; border-radius: 60px;
+            font-size: 24px; font-weight: 600; z-index: 1000000;
+            opacity: 0; pointer-events: none;
+            display: flex; align-items: center; gap: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+        #fg-toast.show { opacity: 1; transform: translateX(-50%) scale(1); }
+        
+        @media screen and (max-width: 768px) {
+            .fg-panel { width: 92vw; max-width: 92vw; right: 0; bottom: 140px; padding: 20px; }
+            .fg-float-ball { width: 100px; height: 100px; }
+            .fg-tag { font-size: 20px; padding: 12px 18px; }
+            .fg-title { font-size: 26px; }
+            .fg-action-btn { font-size: 24px; padding: 20px; }
+        }
+    `);
+
+    // ================= 逻辑处理 =================
+    const Utils = {
+        getBatch: (count = 5) => replyLib.sort(() => 0.5 - Math.random()).slice(0, count),
+        
+        // 计算字节长度
+        getByteLength: (str) => {
+            let len = 0;
+            for (let i = 0; i < str.length; i++) {
+                len += (str.charCodeAt(i) > 255) ? 3 : 1;
+            }
+            return len;
+        },
+
+        toast: (msg, type = 'info') => {
+            let el = document.getElementById('fg-toast');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'fg-toast';
+                document.body.appendChild(el);
+            }
+            let icon = type === 'success' ? 
+                '<svg viewBox="0 0 24 24" style="width:32px;height:32px;fill:#2ecc71"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>' : 
+                '<svg viewBox="0 0 24 24" style="width:32px;height:32px;fill:#3498db"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>';
+            if (type === 'error') icon = '<svg viewBox="0 0 24 24" style="width:32px;height:32px;fill:#e74c3c"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>';
+            el.innerHTML = `${icon}<span>${msg}</span>`;
+            requestAnimationFrame(() => el.classList.add('show'));
+            if (window.toastTimer) clearTimeout(window.toastTimer);
+            window.toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+        },
+        getPostElements: () => ({
+            box: document.getElementById('fastpostmessage'),
+            btn: document.getElementById('fastpostsubmit')
+        })
+    };
+
+    function submitReply(text) {
+        const { box, btn } = Utils.getPostElements();
+        if (!box || !btn) { Utils.toast('未找到回复框 (请先登录)', 'error'); return; }
+
+        // ================= 🔥 核心：空格自动填充 =================
+        let finalText = text;
+        const TARGET_BYTES = 20; // 目标20字节，稳过
+        // 使用不换行空格 (\u00A0)，防止被系统Trim掉
+        const NBSP = "\u00A0"; 
+        
+        while (Utils.getByteLength(finalText) < TARGET_BYTES) {
+            finalText += NBSP;
+        }
+        // ========================================================
+
+        box.value = finalText;
+        
+        box.style.transition = "background 0.3s";
+        box.style.backgroundColor = "rgba(0, 122, 255, 0.1)";
+        setTimeout(() => box.style.backgroundColor = "", 300);
+        
+        Utils.toast('正在发送...');
+        
+        setTimeout(() => {
+            btn.click();
+            document.querySelector('.fg-panel').classList.remove('active');
+            Utils.toast('发送成功', 'success');
+        }, 500);
+    }
+
+    function initUI() {
+        if (!Utils.getPostElements().box) return;
+        const root = document.createElement('div');
+        root.id = 'fg-widget-root';
+        const savedPos = JSON.parse(GM_getValue('fg_pos', '{"right": "50px", "bottom": "200px"}')); 
+        Object.assign(root.style, savedPos);
+        document.body.appendChild(root);
+
+        const ICONS = {
+            chat: '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>',
+            refresh: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
+            lightning: '<svg viewBox="0 0 24 24"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg>',
+            edit: '<svg viewBox="0 0 24 24" style="width:32px;height:32px;fill:#000"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>'
+        };
+
+        root.innerHTML = `
+            <div class="fg-panel">
+                <div class="fg-header">
+                    <div class="fg-title">${ICONS.edit} 挑选回复</div>
+                    <div class="fg-refresh-btn" title="换一批">${ICONS.refresh}</div>
+                </div>
+                <div class="fg-tags-container" id="fg-tags-list"></div>
+                <button class="fg-action-btn" id="fg-random-send">${ICONS.lightning} 一键随机发送</button>
+            </div>
+            <div class="fg-float-ball" title="拖动 / 点击">${ICONS.chat}</div>
+        `;
+
+        const ball = root.querySelector('.fg-float-ball');
+        const panel = root.querySelector('.fg-panel');
+        const tagsList = root.querySelector('#fg-tags-list');
+        const refreshBtn = root.querySelector('.fg-refresh-btn');
+        const randomBtn = root.querySelector('#fg-random-send');
+
+        const renderTags = () => {
+            tagsList.innerHTML = '';
+            Utils.getBatch(6).forEach(text => { 
+                const tag = document.createElement('div');
+                tag.className = 'fg-tag';
+                tag.innerText = text;
+                tag.onclick = () => submitReply(text);
+                tagsList.appendChild(tag);
+            });
+        };
+        renderTags();
+
+        refreshBtn.onclick = (e) => { e.stopPropagation(); renderTags(); };
+        randomBtn.onclick = () => { submitReply(Utils.getBatch(1)[0]); };
+
+        let isDragging = false;
+        ball.onclick = () => {
+            if (isDragging) return;
+            panel.classList.toggle('active');
+            if(panel.classList.contains('active')) {
+                ball.style.transform = 'scale(1.02)';
+                ball.style.boxShadow = '0 0 0 8px rgba(0, 122, 255, 0.3)';
+            } else {
+                ball.style.transform = '';
+                ball.style.boxShadow = '';
+            }
+        };
+
+        const handleDrag = (el) => {
+            let startX, startY, initialRight, initialBottom;
+            const onStart = (cx, cy) => {
+                isDragging = false;
+                const style = window.getComputedStyle(el);
+                startX = cx; startY = cy;
+                initialRight = parseInt(style.right);
+                initialBottom = parseInt(style.bottom);
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onEnd);
+                document.addEventListener('touchmove', onTouchMove, {passive: false});
+                document.addEventListener('touchend', onEnd);
+            };
+            const onMove = (e) => moveLogic(e.clientX, e.clientY);
+            const onTouchMove = (e) => { e.preventDefault(); moveLogic(e.touches[0].clientX, e.touches[0].clientY); };
+            const moveLogic = (cx, cy) => {
+                const dx = startX - cx;
+                const dy = startY - cy;
+                if (Math.abs(dx) > 3 || Math.abs(dy) > 3) isDragging = true;
+                el.style.right = `${initialRight + dx}px`;
+                el.style.bottom = `${initialBottom + dy}px`;
+            };
+            const onEnd = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onEnd);
+                document.removeEventListener('touchmove', onTouchMove);
+                document.removeEventListener('touchend', onEnd);
+                GM_setValue('fg_pos', JSON.stringify({ right: el.style.right, bottom: el.style.bottom }));
+            };
+            el.addEventListener('mousedown', e => onStart(e.clientX, e.clientY));
+            el.addEventListener('touchstart', e => onStart(e.touches[0].clientX, e.touches[0].clientY), {passive: false});
+        };
+
+        handleDrag(root);
+        document.addEventListener('click', (e) => {
+            if (!root.contains(e.target)) {
+                panel.classList.remove('active');
+                ball.style.transform = '';
+                ball.style.boxShadow = '';
+            }
+        });
+    }
+    initUI();
+})();
