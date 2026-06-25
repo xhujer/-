@@ -1,0 +1,162 @@
+// ==UserScript==
+// @name         富贵论坛工具箱（签到 + Toast稳定版）
+// @namespace    https://www.fglt.net/
+// @version      2.8.1-fixed
+// @description  删除快捷回复 + 保留签到 + 修复残影兜底
+// @match        https://www.fglt.net/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_registerMenuCommand
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @run-at       document-end
+// ==/UserScript==
+
+(() => {
+  "use strict";
+
+  // ===================== 签到配置 =====================
+  const rules = {
+    url1: "https://www.fglt.net/",
+    regFormhash: /<input type="hidden" name="formhash" value="(.+?)" \/>/i,
+    verifyText: "使用QQ帐号登录",
+    signUrlTpl:
+      "https://www.fglt.net/plugin.php?id=dsu_amupper&ppersubmit=true&formhash=@formhash&infloat=yes&handlekey=dsu_amupper&inajax=1&ajaxtarget=fwin_content_dsu_amupper",
+    regDup: /已签到完毕/i,
+    regOk: /特奖励|签到成功|恭喜/i,
+  };
+
+  const KEY_LAST_RUN_DATE = "fglt_last_run_date";
+  const todayStr = () => new Date().toDateString();
+
+  // ===================== 🚀 Toast（2.8.1稳定版） =====================
+  let wrap = null;
+  let inner = null;
+  let state = { hiding: false };
+
+  function notify(text) {
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 9999999;
+        pointer-events: none;
+      `;
+
+      inner = document.createElement("div");
+      inner.style.cssText = `
+        width: 100%;
+        padding: 10px 0;
+        text-align: center;
+        font-size: 14px;
+        font-weight: 500;
+        color: rgba(255,255,255,0.95);
+        background: #4D82D6;
+        transform: translateY(-100%);
+        opacity: 0;
+        transition: transform 220ms ease, opacity 220ms ease;
+        will-change: transform, opacity;
+      `;
+
+      wrap.appendChild(inner);
+      document.body.appendChild(wrap);
+    }
+
+    let bg = "#4D82D6";
+    if (/成功/.test(text)) bg = "#57BF57";
+    else if (/失败|异常/.test(text)) bg = "#E1715B";
+    else if (/未登录/.test(text)) bg = "#D6A14D";
+
+    inner.textContent = `签到 · ${text}`;
+    inner.style.background = bg;
+
+    state.hiding = false;
+
+    // reset动画
+    inner.style.transition = "none";
+    inner.style.transform = "translateY(-100%)";
+    inner.style.opacity = "0";
+    void inner.offsetHeight;
+
+    requestAnimationFrame(() => {
+      inner.style.transition = "transform 220ms ease, opacity 220ms ease";
+      inner.style.transform = "translateY(0)";
+      inner.style.opacity = "1";
+    });
+
+    const start = performance.now();
+
+    const loop = () => {
+      if (performance.now() - start > 1400) {
+        inner.style.transform = "translateY(-100%)";
+        inner.style.opacity = "0";
+      } else {
+        requestAnimationFrame(loop);
+      }
+    };
+
+    requestAnimationFrame(loop);
+
+    // ⭐兜底：防 transitionend 丢失导致残留
+    setTimeout(() => {
+      if (inner) {
+        inner.remove();
+        inner = null;
+      }
+    }, 2500);
+  }
+
+  // ===================== 网络请求 =====================
+  function httpRequest(method, url, referer) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method,
+        url,
+        withCredentials: true,
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          ...(referer ? { Referer: referer } : {}),
+        },
+        onload: res => resolve(res.responseText || ""),
+        onerror: reject,
+        ontimeout: () => reject(new Error("timeout")),
+        timeout: 30000,
+      });
+    });
+  }
+
+  async function getFormhash() {
+    const html = await httpRequest("POST", rules.url1);
+    const m = html.match(rules.regFormhash);
+    return m?.[1];
+  }
+
+  async function doSignOnce() {
+    try {
+      const formhash = await getFormhash();
+      const url = rules.signUrlTpl.replace("@formhash", formhash);
+      const ret = await httpRequest("POST", url, rules.url1);
+
+      let msg = "异常";
+      if (rules.regDup.test(ret)) msg = "已签到";
+      else if (rules.regOk.test(ret)) msg = "签到成功";
+
+      notify(msg);
+    } catch {
+      notify("签到失败");
+    }
+  }
+
+  GM_registerMenuCommand("立即签到", doSignOnce);
+
+  function runOncePerDay() {
+    if (GM_getValue(KEY_LAST_RUN_DATE, "") === todayStr()) return;
+    GM_setValue(KEY_LAST_RUN_DATE, todayStr());
+    doSignOnce();
+  }
+
+  setTimeout(runOncePerDay, 1000);
+
+})();
