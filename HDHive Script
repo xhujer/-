@@ -15,200 +15,155 @@ const KEY_FLOW = "hdhive_points_flow_v4";
   } else {
     await checkIn();
   }
-})().catch(e => $.logErr(e)).finally(() => $.done());
-
-function looksLikeJwt(t) {
-  return typeof t === "string" && /^[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+$/.test(t);
-}
+})()
+  .catch(error => $.logErr(error))
+  .finally(() => $.done());
 
 async function captureCookie() {
   const url = $request.url || "";
-  if (!url.includes(DOMAIN)) return;
 
-  if (/\/(go-api|api)\/customer\/(user\/)?checkin/i.test(url)) return;
+  if (!url.includes(DOMAIN)) {
+    return;
+  }
 
-  if (!/\/manager\/|\/api\/|\/go-api\/|https:\/\/hdhive\.com\/?$|\/user\/\d+/.test(url)) return;
+  if (/\/(go-api|api)\/customer\/(user\/)?checkin/i.test(url)) {
+    return;
+  }
 
-  const h = $request.headers || {};
-  const cookie = getCookieFromHeaders(h);
-  const ua = getHeader(h, "User-Agent");
-  const action = getHeader(h, "next-action");
+  if (
+    !/\/manager\/|\/api\/|\/go-api\/|https:\/\/hdhive\.com\/?$|\/user\/\d+/i.test(
+      url
+    )
+  ) {
+    return;
+  }
 
-  if (!cookie || cookie.length < 20) return;
-
-  const normCookie = normalizeCookie(cookie);
-  const ckObj = parseCookie(normCookie);
+  const headers = $request.headers || {};
+  const cookie = getCookieFromHeaders(headers);
+  const ua = getHeader(headers, "User-Agent");
+  const action = getHeader(headers, "next-action");
 
   let updated = false;
+  const updatedItems = [];
 
-  const old = $.getdata(KEY_COOKIE);
-  if (normCookie !== old) {
-    $.setdata(normCookie, KEY_COOKIE);
-    if (ua) $.setdata(ua, KEY_UA);
-    if (ckObj.csrf_access_token) $.setdata(ckObj.csrf_access_token, KEY_CSRF);
-    if (ckObj.hdh_sa_token) $.setdata(ckObj.hdh_sa_token, KEY_SA_TOKEN);
-    updated = true;
-  } else if (ckObj.hdh_sa_token) {
-    const oldSa = $.getdata(KEY_SA_TOKEN);
-    if (ckObj.hdh_sa_token !== oldSa) {
-      $.setdata(ckObj.hdh_sa_token, KEY_SA_TOKEN);
+  if (cookie && cookie.length >= 20) {
+    const normalizedCookie = normalizeCookie(cookie);
+    const cookieObject = parseCookie(normalizedCookie);
+
+    const oldCookie = $.getdata(KEY_COOKIE);
+
+    if (normalizedCookie !== oldCookie) {
+      $.setdata(normalizedCookie, KEY_COOKIE);
       updated = true;
+      updatedItems.push("Cookie");
+    }
+
+    if (ua && ua !== $.getdata(KEY_UA)) {
+      $.setdata(ua, KEY_UA);
+      updated = true;
+      updatedItems.push("UA");
+    }
+
+    if (
+      cookieObject.csrf_access_token &&
+      cookieObject.csrf_access_token !== $.getdata(KEY_CSRF)
+    ) {
+      $.setdata(cookieObject.csrf_access_token, KEY_CSRF);
+      updated = true;
+      updatedItems.push("CSRF");
+    }
+
+    if (
+      cookieObject.hdh_sa_token &&
+      cookieObject.hdh_sa_token !== $.getdata(KEY_SA_TOKEN)
+    ) {
+      $.setdata(cookieObject.hdh_sa_token, KEY_SA_TOKEN);
+      updated = true;
+      updatedItems.push("SA Token");
     }
   }
 
   if (action && action.length > 10) {
     const oldAction = $.getdata(KEY_ACTION);
+
     if (action !== oldAction) {
       $.setdata(action, KEY_ACTION);
       updated = true;
+      updatedItems.push("签到动作");
     }
   }
 
   if (updated) {
-    $.msg("HDHive", "🍪 Cookie 已更新", "可以关闭自动获取开关");
-  }
-}
+    const details = [...new Set(updatedItems)].join("、");
 
-async function activeFetchPointsFlow(headers) {
-  const url = `https://${DOMAIN}/manager/points-logs?page=1&page_size=10&_rsc=1`;
-
-  try {
-    const raw = await httpGetText(url, headers);
-    if (!raw || raw.length < 200) return null;
-
-    const list = extractInitialDataArray(raw);
-    if (!Array.isArray(list) || !list.length) return null;
-
-    const latest = list[0];
-    const recent = list.slice(0, 3).map(x =>
-      `- ${formatTime(x.created_at)}：${x.points > 0 ? "+" : ""}${x.points}（${x.remark || x.change_type || ""}）`
+    $.msg(
+      "HDHive",
+      "🍪 登录信息已更新",
+      details
+        ? `已更新：${details}\n可以关闭自动获取开关`
+        : "可以关闭自动获取开关"
     );
-
-    const flow = {
-      user_id: latest.user_id,
-      latest_checkin: {
-        time: latest.created_at,
-        points: latest.points,
-        remark: latest.remark || latest.change_type
-      },
-      recent_checkins: recent
-    };
-
-    $.setdata(JSON.stringify(flow), KEY_FLOW);
-    return flow;
-  } catch {
-    return null;
   }
-}
-
-function buildFlowText(flow) {
-  if (!flow) return "";
-  const l = [];
-  if (flow.user_id) l.push(`用户ID：${flow.user_id}`);
-  if (flow.latest_checkin?.time) l.push(`最新变动：${formatTime(flow.latest_checkin.time)}`);
-  if (flow.latest_checkin?.points !== undefined)
-    l.push(`变动数值：${flow.latest_checkin.points > 0 ? "+" : ""}${flow.latest_checkin.points} 积分`);
-  if (flow.latest_checkin?.remark) l.push(`内容描述：${flow.latest_checkin.remark}`);
-  if (flow.recent_checkins?.length) {
-    l.push("");
-    l.push("📝 积分日志：");
-    l.push(flow.recent_checkins.join("\n"));
-  }
-  return l.join("\n");
-}
-
-function buildRouterStateTree(uid) {
-  const tree = [
-    "",
-    { children: ["(app)", { children: ["user", { children: [["id", String(uid), "d"], { children: ["__PAGE__", {}, null, null] }, null, null] }, null, null] }, null, null] },
-    null,
-    null,
-    true
-  ];
-  return encodeURIComponent(JSON.stringify(tree));
-}
-
-function buildCookieWithFreshSaToken(rawCookie, freshSaToken) {
-  const ckObj = parseCookie(rawCookie);
-  ckObj["hdh_sa_token"] = freshSaToken;
-  return Object.entries(ckObj).map(([k, v]) => `${k}=${v}`).join("; ");
-}
-
-async function refreshSaToken(uid, ua, rawCookie) {
-  const url = `https://${DOMAIN}/user/${uid}?_rsc=refresh`;
-  const headers = {
-    "User-Agent": ua,
-    "Accept": "text/x-component",
-    "Accept-Language": "zh-CN,zh-Hans;q=0.9",
-    "Referer": `https://${DOMAIN}/user/${uid}`,
-    "Cookie": normalizeCookie(rawCookie),
-    "rsc": "1",
-    "next-url": `/user/${uid}`,
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Dest": "empty",
-  };
-
-  return new Promise((resolve) => {
-    $.get({ url, headers }, (err, resp, data) => {
-      if (err) return resolve(null);
-      const respHeaders = resp?.headers || resp?.header || {};
-      const setCookie = getSetCookieValue(respHeaders, "hdh_sa_token");
-      resolve(setCookie);
-    });
-  });
-}
-
-function getSetCookieValue(headers, name) {
-  for (const k in headers) {
-    if (k.toLowerCase() !== "set-cookie") continue;
-    const val = headers[k];
-    const entries = Array.isArray(val) ? val : [val];
-    for (const entry of entries) {
-      const parts = String(entry).split(";");
-      const pair = parts[0].trim();
-      const eq = pair.indexOf("=");
-      if (eq < 0) continue;
-      const cname = pair.slice(0, eq).trim();
-      if (cname === name) return pair.slice(eq + 1).trim();
-    }
-  }
-  return null;
 }
 
 async function checkIn() {
   const rawCookie = $.getdata(KEY_COOKIE);
+
   if (!rawCookie) {
-    $.msg("HDHive", "❌ 无法签到", "未获取 Cookie");
+    $.msg(
+      "HDHive",
+      "❌ 无法签到",
+      "未获取 Cookie\n请开启重写后重新登录影巢"
+    );
     return;
   }
 
-  const ckObj = parseCookie(rawCookie);
-  const token = ckObj.token || "";
-  const uid = ckObj.hdh_uid || "";
+  const cookieObject = parseCookie(rawCookie);
+  const uid = cookieObject.hdh_uid || "";
+
   const ua =
     $.getdata(KEY_UA) ||
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1";
 
-  const csrf = $.getdata(KEY_CSRF) || ckObj.csrf_access_token || "";
   const actionId = $.getdata(KEY_ACTION) || "";
 
   if (!uid) {
-    $.msg("HDHive", "❌ 无法签到", "Cookie 中未找到 hdh_uid，请重新抓包");
+    $.msg(
+      "HDHive",
+      "❌ 无法签到",
+      "Cookie 中未找到 hdh_uid\n请重新登录影巢并抓取 Cookie"
+    );
     return;
   }
 
   if (!actionId) {
-    $.msg("HDHive", "❌ 无法签到", "未捕获到 next-action ID\n请在 HDHive 个人页手动触发一次签到，脚本会自动记录");
+    $.msg(
+      "HDHive",
+      "❌ 缺少签到动作",
+      "未捕获到 next-action ID\n\n请开启脚本重写，进入影巢个人页面并手动点击一次签到"
+    );
     return;
   }
 
-  // 先刷新 hdh_sa_token（它 2 小时过期，签到前必须拿最新值）
+  $.log(`用户 ID：${uid}`);
+  $.log(`开始刷新 hdh_sa_token`);
+
   let saToken = await refreshSaToken(uid, ua, rawCookie);
+
   if (saToken) {
     $.setdata(saToken, KEY_SA_TOKEN);
+    $.log("hdh_sa_token 刷新成功");
   } else {
-    saToken = $.getdata(KEY_SA_TOKEN) || ckObj.hdh_sa_token || "";
+    saToken =
+      $.getdata(KEY_SA_TOKEN) ||
+      cookieObject.hdh_sa_token ||
+      "";
+
+    $.log(
+      saToken
+        ? "未获取新 hdh_sa_token，使用已保存的 Token"
+        : "未获取到 hdh_sa_token"
+    );
   }
 
   const freshCookie = saToken
@@ -219,198 +174,899 @@ async function checkIn() {
 
   const headers = {
     "User-Agent": ua,
-    "Origin": `https://${DOMAIN}`,
-    "Referer": `https://${DOMAIN}/user/${uid}`,
-    "Accept": "text/x-component",
+    Origin: `https://${DOMAIN}`,
+    Referer: `https://${DOMAIN}/user/${uid}`,
+    Accept: "text/x-component",
     "Accept-Language": "zh-CN,zh-Hans;q=0.9",
     "Content-Type": "text/plain;charset=UTF-8",
-    "Cookie": freshCookie,
+    Cookie: freshCookie,
     "next-action": actionId,
     "next-router-state-tree": routerTree,
     "Sec-Fetch-Site": "same-origin",
     "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Dest": "empty"
   };
 
-  const rscHeaders = {
+  const pointsHeaders = {
     "User-Agent": ua,
-    "Accept": "*/*",
+    Accept: "*/*",
     "Accept-Language": "zh-CN,zh-Hans;q=0.9",
-    "Cookie": freshCookie,
-    "rsc": "1",
+    Cookie: freshCookie,
+    rsc: "1",
     "next-url": `/user/${uid}`,
     "Sec-Fetch-Site": "same-origin",
     "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Dest": "empty"
   };
 
-  const req = {
+  const request = {
     url: `https://${DOMAIN}/user/${uid}`,
     method: "POST",
     headers,
-    body: '[false,"$undefined"]',
+    body: '[false,"$undefined"]'
   };
 
-  const r = await httpPostRaw(req);
-  const status = r?.status || 0;
-  const raw = r?.data || "";
+  $.log("正在发送网页签到请求");
 
-  // 签到后更新 sa_token
-  if (r?.saToken) {
-    $.setdata(r.saToken, KEY_SA_TOKEN);
+  const response = await httpPostRaw(request);
+
+  if (!response) {
+    $.msg(
+      "HDHive",
+      "❌ 签到请求失败",
+      "网络请求没有返回结果\n请检查网络、MITM 和 Cookie"
+    );
+    return;
   }
 
-  let showText = "未获取到有效签到响应";
+  const status = response.status || 0;
+  const raw = response.data || "";
 
-  if (raw) {
-    const actionResult = extractActionResponse(raw);
-    if (actionResult) {
-      const msg = actionResult.message || actionResult.msg || "";
-      const desc = actionResult.description || actionResult.desc || "";
-      showText = desc || msg || "（无提示文本）";
-    } else {
-      showText = `HTTP ${status}\n返回片段：${raw.slice(0, 200)}`;
+  if (response.saToken) {
+    $.setdata(response.saToken, KEY_SA_TOKEN);
+  }
+
+  $.log(`签到 HTTP 状态码：${status}`);
+  $.log(`签到返回：${raw.slice(0, 500)}`);
+
+  if (
+    status === 404 &&
+    /server action not found/i.test(raw)
+  ) {
+    $.setdata("", KEY_ACTION);
+
+    $.msg(
+      "HDHive",
+      "❌ 签到动作已失效",
+      [
+        "影巢网站的 next-action 已更新。",
+        "",
+        "请执行以下操作：",
+        "1. 开启 Loon 脚本重写",
+        "2. 进入影巢个人页面",
+        "3. 手动点击一次签到",
+        "4. 等待脚本重新记录签到动作",
+        "",
+        "旧动作 ID 已自动清除。"
+      ].join("\n")
+    );
+
+    return;
+  }
+
+  if (status < 200 || status >= 300) {
+    $.msg(
+      "HDHive",
+      "❌ 签到请求失败",
+      raw
+        ? `HTTP ${status}\n${cleanResponseText(raw).slice(0, 300)}`
+        : `HTTP ${status}（无响应体）`
+    );
+
+    return;
+  }
+
+  if (!raw) {
+    $.msg(
+      "HDHive",
+      "❌ 签到结果异常",
+      `HTTP ${status}\n服务器没有返回响应内容`
+    );
+    return;
+  }
+
+  const actionResult = extractActionResponse(raw);
+
+  if (!actionResult) {
+    $.msg(
+      "HDHive",
+      "❌ 无法解析签到结果",
+      [
+        `HTTP ${status}`,
+        "没有从服务器响应中解析到有效签到结果。",
+        "",
+        `返回片段：${cleanResponseText(raw).slice(0, 300)}`
+      ].join("\n")
+    );
+
+    return;
+  }
+
+  const result = evaluateActionResult(actionResult);
+
+  if (!result.success) {
+    $.msg(
+      "HDHive",
+      "❌ 影巢签到失败",
+      result.message || "签到接口返回失败"
+    );
+    return;
+  }
+
+  await sleep(1200);
+
+  const flow = await activeFetchPointsFlow(pointsHeaders);
+
+  const lines = [];
+
+  lines.push(result.message || "签到请求执行成功");
+
+  if (flow) {
+    const flowText = buildFlowText(flow);
+
+    if (flowText) {
+      lines.push("");
+      lines.push(flowText);
     }
   } else {
-    showText = `HTTP ${status}（无响应体）`;
+    lines.push("");
+    lines.push("未获取到最新积分日志");
   }
 
-  let flow = await activeFetchPointsFlow(rscHeaders);
+  $.msg(
+    "HDHive",
+    result.alreadyChecked
+      ? "📌 今日已经签到"
+      : "✅ 签到成功",
+    lines.join("\n")
+  );
+}
+
+function evaluateActionResult(actionResult) {
+  if (!actionResult) {
+    return {
+      success: false,
+      alreadyChecked: false,
+      message: "签到结果为空"
+    };
+  }
+
+  if (typeof actionResult === "string") {
+    const text = actionResult.trim();
+    const lowerText = text.toLowerCase();
+
+    return {
+      success: !containsFailureText(lowerText),
+      alreadyChecked: containsAlreadyCheckedText(lowerText),
+      message: text || "签到请求已完成"
+    };
+  }
+
+  const successValue = actionResult.success;
+
+  const message =
+    actionResult.description ||
+    actionResult.desc ||
+    actionResult.message ||
+    actionResult.msg ||
+    actionResult.error ||
+    actionResult.reason ||
+    "";
+
+  const normalizedMessage = String(message).trim();
+  const lowerMessage = normalizedMessage.toLowerCase();
+
+  const alreadyChecked =
+    actionResult.checked_in === false ||
+    actionResult.checkedIn === false ||
+    containsAlreadyCheckedText(lowerMessage);
+
+  if (successValue === false) {
+    if (alreadyChecked) {
+      return {
+        success: true,
+        alreadyChecked: true,
+        message:
+          normalizedMessage ||
+          "今天已经签到，无需重复签到"
+      };
+    }
+
+    return {
+      success: false,
+      alreadyChecked: false,
+      message:
+        normalizedMessage ||
+        "服务器返回签到失败"
+    };
+  }
+
+  if (
+    successValue !== true &&
+    containsFailureText(lowerMessage) &&
+    !alreadyChecked
+  ) {
+    return {
+      success: false,
+      alreadyChecked: false,
+      message:
+        normalizedMessage ||
+        "签到请求执行失败"
+    };
+  }
+
+  return {
+    success: true,
+    alreadyChecked,
+    message:
+      normalizedMessage ||
+      (alreadyChecked
+        ? "今天已经签到，无需重复签到"
+        : "签到请求执行成功")
+  };
+}
+
+function containsAlreadyCheckedText(text) {
+  return (
+    text.includes("已签到") ||
+    text.includes("已经签到") ||
+    text.includes("今日已签") ||
+    text.includes("重复签到") ||
+    text.includes("already checked") ||
+    text.includes("already checkin") ||
+    text.includes("already check-in")
+  );
+}
+
+function containsFailureText(text) {
+  return (
+    text.includes("签到失败") ||
+    text.includes("请求失败") ||
+    text.includes("未登录") ||
+    text.includes("登录失效") ||
+    text.includes("cookie 失效") ||
+    text.includes("cookie失效") ||
+    text.includes("token 失效") ||
+    text.includes("token失效") ||
+    text.includes("unauthorized") ||
+    text.includes("forbidden") ||
+    text.includes("invalid") ||
+    text.includes("error")
+  );
+}
+
+async function activeFetchPointsFlow(headers) {
+  const url =
+    `https://${DOMAIN}/manager/points-logs` +
+    "?page=1&page_size=10&_rsc=1";
+
+  try {
+    const raw = await httpGetText(url, headers);
+
+    if (!raw || raw.length < 100) {
+      return null;
+    }
+
+    const list = extractInitialDataArray(raw);
+
+    if (!Array.isArray(list) || !list.length) {
+      return null;
+    }
+
+    const latest = list[0];
+
+    const recent = list.slice(0, 3).map(item => {
+      const points = Number(item.points || 0);
+      const prefix = points > 0 ? "+" : "";
+
+      return (
+        `- ${formatTime(item.created_at)}：` +
+        `${prefix}${points}` +
+        `（${item.remark || item.change_type || ""}）`
+      );
+    });
+
+    const flow = {
+      user_id: latest.user_id,
+      latest_checkin: {
+        time: latest.created_at,
+        points: Number(latest.points || 0),
+        remark:
+          latest.remark ||
+          latest.change_type ||
+          ""
+      },
+      recent_checkins: recent,
+      fetched_at: new Date().toISOString()
+    };
+
+    $.setdata(JSON.stringify(flow), KEY_FLOW);
+
+    return flow;
+  } catch (error) {
+    $.log(`读取积分日志失败：${getErrorMessage(error)}`);
+    return null;
+  }
+}
+
+function buildFlowText(flow) {
   if (!flow) {
-    try { flow = JSON.parse($.getdata(KEY_FLOW) || "null"); } catch {}
+    return "";
   }
 
-  const flowText = flow
-    ? "\n\n" + buildFlowText(flow)
-    : "\n\n（未拉到积分日志：可能是 MITM 未解密 / 返回非 RSC / Cookie 无权限）";
+  const lines = [];
 
-  $.msg("HDHive", "📌 签到结果", `${showText}${flowText}`);
+  if (flow.user_id) {
+    lines.push(`用户ID：${flow.user_id}`);
+  }
+
+  if (flow.latest_checkin?.time) {
+    lines.push(
+      `最新变动：${formatTime(flow.latest_checkin.time)}`
+    );
+  }
+
+  if (
+    flow.latest_checkin?.points !== undefined &&
+    flow.latest_checkin?.points !== null
+  ) {
+    const points = Number(flow.latest_checkin.points || 0);
+
+    lines.push(
+      `变动数值：${points > 0 ? "+" : ""}${points} 积分`
+    );
+  }
+
+  if (flow.latest_checkin?.remark) {
+    lines.push(
+      `内容描述：${flow.latest_checkin.remark}`
+    );
+  }
+
+  if (flow.recent_checkins?.length) {
+    lines.push("");
+    lines.push("📝 积分日志：");
+    lines.push(flow.recent_checkins.join("\n"));
+  }
+
+  return lines.join("\n");
+}
+
+function buildRouterStateTree(uid) {
+  const tree = [
+    "",
+    {
+      children: [
+        "(app)",
+        {
+          children: [
+            "user",
+            {
+              children: [
+                ["id", String(uid), "d"],
+                {
+                  children: [
+                    "__PAGE__",
+                    {},
+                    null,
+                    null
+                  ]
+                },
+                null,
+                null
+              ]
+            },
+            null,
+            null
+          ]
+        },
+        null,
+        null
+      ]
+    },
+    null,
+    null,
+    true
+  ];
+
+  return encodeURIComponent(JSON.stringify(tree));
+}
+
+function buildCookieWithFreshSaToken(
+  rawCookie,
+  freshSaToken
+) {
+  const cookieObject = parseCookie(rawCookie);
+
+  cookieObject.hdh_sa_token = freshSaToken;
+
+  return Object.entries(cookieObject)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("; ");
+}
+
+async function refreshSaToken(
+  uid,
+  ua,
+  rawCookie
+) {
+  const url =
+    `https://${DOMAIN}/user/${uid}?_rsc=refresh`;
+
+  const headers = {
+    "User-Agent": ua,
+    Accept: "text/x-component",
+    "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+    Referer: `https://${DOMAIN}/user/${uid}`,
+    Cookie: normalizeCookie(rawCookie),
+    rsc: "1",
+    "next-url": `/user/${uid}`,
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty"
+  };
+
+  return new Promise(resolve => {
+    $.get({ url, headers }, (error, response) => {
+      if (error) {
+        $.log(
+          `刷新 hdh_sa_token 请求失败：${getErrorMessage(error)}`
+        );
+
+        resolve(null);
+        return;
+      }
+
+      const responseHeaders =
+        response?.headers ||
+        response?.header ||
+        {};
+
+      const token = getSetCookieValue(
+        responseHeaders,
+        "hdh_sa_token"
+      );
+
+      resolve(token);
+    });
+  });
+}
+
+function getSetCookieValue(headers, name) {
+  if (!headers || typeof headers !== "object") {
+    return null;
+  }
+
+  for (const key in headers) {
+    if (key.toLowerCase() !== "set-cookie") {
+      continue;
+    }
+
+    const value = headers[key];
+    const entries = Array.isArray(value)
+      ? value
+      : [value];
+
+    for (const entry of entries) {
+      const cookieText = String(entry || "");
+      const match = cookieText.match(
+        new RegExp(
+          `(?:^|[,;]\\s*)${escapeRegExp(name)}=([^;,\\s]+)`,
+          "i"
+        )
+      );
+
+      if (match) {
+        return match[1].trim();
+      }
+    }
+  }
+
+  return null;
 }
 
 function extractActionResponse(raw) {
-  const lines = raw.split("\n");
+  const lines = String(raw || "").split(/\r?\n/);
+
   for (const line of lines) {
-    const m = line.match(/^1:(.+)$/);
-    if (!m) continue;
+    const match = line.match(/^\d+:(.+)$/);
+
+    if (!match) {
+      continue;
+    }
+
     try {
-      const obj = JSON.parse(m[1]);
-      if (obj?.response) return obj.response;
-      if (obj?.success !== undefined) return obj;
+      const parsed = JSON.parse(match[1]);
+      const result = findActionResult(parsed);
+
+      if (result !== null) {
+        return result;
+      }
     } catch {}
   }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return findActionResult(parsed);
+  } catch {}
+
+  return null;
+}
+
+function findActionResult(value, depth = 0) {
+  if (depth > 6 || value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const text = value.trim();
+
+    if (!text) {
+      return null;
+    }
+
+    if (
+      containsAlreadyCheckedText(text.toLowerCase()) ||
+      text.includes("签到")
+    ) {
+      return text;
+    }
+
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const result = findActionResult(item, depth + 1);
+
+      if (result !== null) {
+        return result;
+      }
+    }
+
+    return null;
+  }
+
+  if (typeof value !== "object") {
+    return null;
+  }
+
+  if (value.response !== undefined) {
+    return value.response;
+  }
+
+  if (
+    value.success !== undefined ||
+    value.checked_in !== undefined ||
+    value.checkedIn !== undefined
+  ) {
+    return value;
+  }
+
+  for (const key of Object.keys(value)) {
+    const result = findActionResult(
+      value[key],
+      depth + 1
+    );
+
+    if (result !== null) {
+      return result;
+    }
+  }
+
   return null;
 }
 
 function httpGetText(url, headers) {
   return new Promise((resolve, reject) => {
-    $.get({ url, headers }, (err, resp, data) => {
-      if (err) return reject(err);
-      resolve(typeof data === "string" ? data : "");
+    $.get({ url, headers }, (error, response, data) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve(
+        typeof data === "string"
+          ? data
+          : data !== undefined && data !== null
+            ? JSON.stringify(data)
+            : ""
+      );
     });
   });
 }
 
-function httpPostRaw(req) {
-  return new Promise((resolve) => {
-    $.post(req, (err, resp, data) => {
-      if (err) return resolve(null);
-      const status = resp?.status || resp?.statusCode || 0;
-      const respHeaders = resp?.headers || resp?.header || {};
-      const saToken = getSetCookieValue(respHeaders, "hdh_sa_token");
-      resolve({ status, data: (typeof data === "string" ? data : ""), saToken });
+function httpPostRaw(request) {
+  return new Promise(resolve => {
+    $.post(request, (error, response, data) => {
+      if (error) {
+        $.log(
+          `签到 POST 请求失败：${getErrorMessage(error)}`
+        );
+
+        resolve(null);
+        return;
+      }
+
+      const status =
+        response?.status ||
+        response?.statusCode ||
+        0;
+
+      const responseHeaders =
+        response?.headers ||
+        response?.header ||
+        {};
+
+      const saToken = getSetCookieValue(
+        responseHeaders,
+        "hdh_sa_token"
+      );
+
+      resolve({
+        status,
+        data:
+          typeof data === "string"
+            ? data
+            : data !== undefined && data !== null
+              ? JSON.stringify(data)
+              : "",
+        saToken
+      });
     });
   });
 }
 
 function extractInitialDataArray(raw) {
   const key = '"initialData":';
-  const idx = raw.indexOf(key);
-  if (idx < 0) return null;
+  const index = raw.indexOf(key);
 
-  let i = raw.indexOf("[", idx + key.length);
-  if (i < 0) return null;
+  if (index < 0) {
+    return null;
+  }
+
+  const start = raw.indexOf(
+    "[",
+    index + key.length
+  );
+
+  if (start < 0) {
+    return null;
+  }
 
   let depth = 0;
-  let inStr = false;
-  let esc = false;
+  let inString = false;
+  let escaped = false;
 
-  for (let j = i; j < raw.length; j++) {
-    const ch = raw[j];
+  for (let position = start; position < raw.length; position++) {
+    const character = raw[position];
 
-    if (inStr) {
-      if (esc) { esc = false; continue; }
-      if (ch === "\\") { esc = true; continue; }
-      if (ch === '"') inStr = false;
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (character === '"') {
+        inString = false;
+      }
+
       continue;
-    } else {
-      if (ch === '"') { inStr = true; continue; }
-      if (ch === "[") depth++;
-      if (ch === "]") {
-        depth--;
-        if (depth === 0) {
-          const jsonText = raw.slice(i, j + 1);
-          try { return JSON.parse(jsonText); } catch { return null; }
+    }
+
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (character === "[") {
+      depth++;
+      continue;
+    }
+
+    if (character === "]") {
+      depth--;
+
+      if (depth === 0) {
+        const jsonText = raw.slice(
+          start,
+          position + 1
+        );
+
+        try {
+          return JSON.parse(jsonText);
+        } catch {
+          return null;
         }
       }
     }
   }
+
   return null;
 }
 
-function getCookieFromHeaders(h) {
-  let v = null;
-  for (const k in h) {
-    if (k.toLowerCase() === "cookie") { v = h[k]; break; }
+function getCookieFromHeaders(headers) {
+  let value = null;
+
+  for (const key in headers) {
+    if (key.toLowerCase() === "cookie") {
+      value = headers[key];
+      break;
+    }
   }
-  if (!v) return null;
-  if (Array.isArray(v)) return normalizeCookie(v.join("; "));
-  return normalizeCookie(String(v));
+
+  if (!value) {
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    return normalizeCookie(value.join("; "));
+  }
+
+  return normalizeCookie(String(value));
 }
 
-function normalizeCookie(str) {
-  return String(str)
+function normalizeCookie(value) {
+  return String(value || "")
     .replace(/\r?\n/g, "; ")
     .replace(/;+\s*/g, "; ")
     .replace(/\s*;\s*$/, "")
     .trim();
 }
 
-function parseCookie(str) {
-  const obj = {};
-  normalizeCookie(str).split(";").forEach(p => {
-    const i = p.indexOf("=");
-    if (i > 0) obj[p.slice(0, i).trim()] = p.slice(i + 1).trim();
-  });
-  return obj;
+function parseCookie(value) {
+  const result = {};
+
+  normalizeCookie(value)
+    .split(";")
+    .forEach(item => {
+      const index = item.indexOf("=");
+
+      if (index <= 0) {
+        return;
+      }
+
+      const key = item
+        .slice(0, index)
+        .trim();
+
+      const cookieValue = item
+        .slice(index + 1)
+        .trim();
+
+      if (key) {
+        result[key] = cookieValue;
+      }
+    });
+
+  return result;
 }
 
-function getHeader(h, k) {
-  const key = k.toLowerCase();
-  for (const i in h) {
-    if (i.toLowerCase() === key) return h[i];
+function getHeader(headers, expectedKey) {
+  const normalizedKey = expectedKey.toLowerCase();
+
+  for (const key in headers) {
+    if (key.toLowerCase() === normalizedKey) {
+      return headers[key];
+    }
   }
+
   return null;
 }
 
-function formatTime(t) {
-  return (t || "")
+function cleanResponseText(value) {
+  return String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formatTime(value) {
+  return String(value || "")
     .replace("T", " ")
-    .replace(/\..*$/, "")
-    .replace(/\+\d\d:\d\d$/, "");
+    .replace(/\.\d+.*$/, "")
+    .replace(/\+\d\d:\d\d$/, "")
+    .replace(/Z$/, "");
+}
+
+function sleep(milliseconds) {
+  return new Promise(resolve => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+}
+
+function getErrorMessage(error) {
+  if (!error) {
+    return "未知错误";
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return (
+    error.message ||
+    error.error ||
+    JSON.stringify(error)
+  );
 }
 
 function Env(name) {
   return {
     name,
-    getdata: k => $persistentStore?.read(k),
-    setdata: (v, k) => $persistentStore?.write(v, k),
-    post: (o, c) => $httpClient?.post(o, c),
-    get: (o, c) => $httpClient?.get(o, c),
-    msg: (t, s, b) => {
-      $notification?.post(t, s, b);
-      console.log(`===${t}===\n${s}\n${b}`);
+
+    getdata(key) {
+      return $persistentStore?.read(key);
     },
-    logErr: e => console.log(`❗️${name}: ${e}`),
-    done: () => $done?.({})
+
+    setdata(value, key) {
+      return $persistentStore?.write(
+        String(value ?? ""),
+        key
+      );
+    },
+
+    post(options, callback) {
+      return $httpClient?.post(
+        options,
+        callback
+      );
+    },
+
+    get(options, callback) {
+      return $httpClient?.get(
+        options,
+        callback
+      );
+    },
+
+    msg(title, subtitle, body) {
+      $notification?.post(
+        title,
+        subtitle,
+        body
+      );
+
+      console.log(
+        `===${title}===\n${subtitle}\n${body}`
+      );
+    },
+
+    log(message) {
+      console.log(`[${name}] ${message}`);
+    },
+
+    logErr(error) {
+      console.log(
+        `❗️${name}: ${getErrorMessage(error)}`
+      );
+    },
+
+    done() {
+      $done?.({});
+    }
   };
 }
