@@ -1,80 +1,46 @@
-/*
- * 奶昔论坛自动签到（Loon 合并版）
- *
- * 同一个脚本同时负责：
- *   1. http-request：自动获取并保存 Cookie
- *   2. cron：读取 Cookie、执行签到、读取真实积分记录并输出结果
- *
- * 积分记录页面：
- *   https://forum.naixi.net/home.php?mod=spacecp&ac=credit&op=log
- *
- * 持久化键：
- *   naixi_cookie
- *   naixi_auth_value
- *   naixi_cookie_time
- */
-
 (function () {
   "use strict";
 
-  const CONFIG = {
-    title: "奶昔论坛",
-    baseUrl: "https://forum.naixi.net",
+  const BASE_URL = "https://forum.naixi.net";
+  const SIGN_PAGE_URL = `${BASE_URL}/k_misign-sign.html`;
+  const CREDIT_LOG_URL =
+    `${BASE_URL}/home.php?mod=spacecp&ac=credit&op=log`;
 
-    cookieKey: "naixi_cookie",
-    authKey: "naixi_auth_value",
-    cookieTimeKey: "naixi_cookie_time",
-    nicknameKey: "naixi_forum_nickname",
-
-    timeout: 30000,
-    notifyAlreadySigned: true,
-
-    signPages: [
-      "https://forum.naixi.net/k_misign-sign.html",
-      "https://forum.naixi.net/plugin.php?id=k_misign:sign",
-    ],
-
-    creditLogUrl:
-      "https://forum.naixi.net/home.php?mod=spacecp&ac=credit&op=log",
-
-    userAgent:
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) " +
-      "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
-      "Version/18.0 Mobile/15E148 Safari/604.1",
+  const STORE = {
+    cookie: "naixi_cookie",
+    auth: "naixi_auth_value",
+    nickname: "naixi_forum_nickname",
+    nicknameUid: "naixi_forum_nickname_uid",
   };
 
-  let hasFinished = false;
+  const USER_AGENT =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) " +
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
+    "Version/18.0 Mobile/15E148 Safari/604.1";
 
-  // ============================================================
-  // 通用工具
-  // ============================================================
+  const TIMEOUT = 30000;
+  const NOTIFY_ALREADY_SIGNED = true;
 
-  function log(message) {
-    // 关闭过程日志，只保留最终签到结果。
-    void message;
+  let finished = false;
+
+  function done(value) {
+    if (finished) return;
+
+    finished = true;
+
+    typeof value === "undefined"
+      ? $done()
+      : $done(value);
   }
 
-  function notify(title, subtitle, content) {
+  function notify(title, subtitle, body) {
     try {
-      $notification.post(title, subtitle || "", content || "");
-    } catch (error) {
-      log(`发送通知失败：${error}`);
-    }
-  }
-
-  function finish(value) {
-    if (hasFinished) return;
-    hasFinished = true;
-
-    try {
-      if (typeof value === "undefined") {
-        $done();
-      } else {
-        $done(value);
-      }
-    } catch (error) {
-      log(`结束脚本失败：${error}`);
-    }
+      $notification.post(
+        title,
+        subtitle || "",
+        body || ""
+      );
+    } catch (_) {}
   }
 
   function isRequestMode() {
@@ -85,132 +51,124 @@
     );
   }
 
-  function getHeader(headers, targetName) {
-    if (!headers || typeof headers !== "object") return "";
+  function getHeader(headers, name) {
+    const target = String(name).toLowerCase();
+    const keys = Object.keys(headers || {});
 
-    const target = String(targetName || "").toLowerCase();
-    const keys = Object.keys(headers);
-
-    for (let index = 0; index < keys.length; index += 1) {
-      const key = keys[index];
-
-      if (String(key).toLowerCase() === target) {
-        return String(headers[key] || "");
+    for (let i = 0; i < keys.length; i += 1) {
+      if (keys[i].toLowerCase() === target) {
+        return String(
+          headers[keys[i]] || ""
+        );
       }
     }
 
     return "";
   }
 
-  function normalizeCookie(cookie) {
-    return String(cookie || "")
+  function normalizeCookie(value) {
+    return String(value || "")
       .trim()
       .split(/[\r\n]+/)
       .map(function (part) {
-        return part.trim().replace(/;+$/, "");
+        return part
+          .trim()
+          .replace(/;+$/, "");
       })
       .filter(Boolean)
       .join("; ");
   }
 
-  function parseCookies(cookieHeader) {
-    const result = {};
+  function findAuthCookie(cookie) {
+    const parts =
+      String(cookie || "").split(";");
 
-    String(cookieHeader || "")
-      .split(";")
-      .map(function (part) {
-        return part.trim();
-      })
-      .filter(Boolean)
-      .forEach(function (part) {
-        const separator = part.indexOf("=");
+    for (
+      let i = 0;
+      i < parts.length;
+      i += 1
+    ) {
+      const item = parts[i].trim();
+      const separator = item.indexOf("=");
 
-        if (separator <= 0) return;
+      if (separator <= 0) {
+        continue;
+      }
 
-        const name = part.slice(0, separator).trim();
-        const value = part.slice(separator + 1).trim();
+      const name = item
+        .slice(0, separator)
+        .trim();
 
-        if (name) result[name] = value;
-      });
+      const value = item
+        .slice(separator + 1)
+        .trim();
 
-    return result;
-  }
-
-  function findAuthCookie(cookieMap) {
-    const names = Object.keys(cookieMap || {});
-
-    for (let index = 0; index < names.length; index += 1) {
-      const name = names[index];
-
-      if (/^auth$/i.test(name) || /_auth$/i.test(name)) {
-        return {
-          name: name,
-          value: cookieMap[name],
-        };
+      if (
+        (
+          /^auth$/i.test(name) ||
+          /_auth$/i.test(name)
+        ) &&
+        value
+      ) {
+        return value;
       }
     }
 
-    return null;
-  }
-
-  function maskValue(value) {
-    const text = String(value || "");
-
-    if (text.length <= 12) return "******";
-
-    return `${text.slice(0, 5)}…${text.slice(-5)}`;
-  }
-
-  function pad(value) {
-    return String(value).padStart(2, "0");
-  }
-
-  function formatChinaTime() {
-    const date = new Date(
-      Date.now() + 8 * 60 * 60 * 1000
-    );
-
-    return (
-      `${date.getUTCFullYear()}-` +
-      `${pad(date.getUTCMonth() + 1)}-` +
-      `${pad(date.getUTCDate())} ` +
-      `${pad(date.getUTCHours())}:` +
-      `${pad(date.getUTCMinutes())}:` +
-      `${pad(date.getUTCSeconds())}`
-    );
+    return "";
   }
 
   function decodeHtml(value) {
     return String(value || "")
       .replace(/&amp;/gi, "&")
       .replace(/&quot;/gi, '"')
-      .replace(/&#39;/gi, "'")
-      .replace(/&apos;/gi, "'")
+      .replace(/&#39;|&apos;/gi, "'")
       .replace(/&lt;/gi, "<")
       .replace(/&gt;/gi, ">")
-      .replace(/&nbsp;/gi, " ")
-      .replace(/&#160;/gi, " ")
-      .replace(/&#x2f;/gi, "/")
-      .replace(/&#47;/gi, "/")
-      .replace(/&#(\d+);/g, function (_, code) {
-        return String.fromCharCode(Number(code));
-      })
-      .replace(/&#x([0-9a-f]+);/gi, function (_, code) {
-        return String.fromCharCode(parseInt(code, 16));
-      });
+      .replace(
+        /&nbsp;|&#160;/gi,
+        " "
+      )
+      .replace(
+        /&#x2f;|&#47;/gi,
+        "/"
+      )
+      .replace(
+        /&#(\d+);/g,
+        function (_, code) {
+          return String.fromCharCode(
+            Number(code)
+          );
+        }
+      )
+      .replace(
+        /&#x([0-9a-f]+);/gi,
+        function (_, code) {
+          return String.fromCharCode(
+            parseInt(code, 16)
+          );
+        }
+      );
   }
 
   function stripHtml(html) {
     return decodeHtml(
       String(html || "")
-        .replace(/<script[\s\S]*?<\/script>/gi, " ")
-        .replace(/<style[\s\S]*?<\/style>/gi, " ")
-        .replace(/<br\s*\/?>/gi, "\n")
         .replace(
-          /<\/(?:div|p|li|tr|td|h\d|span|a)>/gi,
+          /<script[\s\S]*?<\/script>/gi,
+          " "
+        )
+        .replace(
+          /<style[\s\S]*?<\/style>/gi,
+          " "
+        )
+        .replace(
+          /<br\s*\/?>/gi,
           "\n"
         )
-        .replace(/<[^>]+>/g, " ")
+        .replace(
+          /<[^>]+>/g,
+          " "
+        )
     )
       .replace(/\u00a0/g, " ")
       .replace(/[ \t]+/g, " ")
@@ -219,32 +177,33 @@
       .trim();
   }
 
-  function preview(value, length) {
+  function compact(value) {
     return String(value || "")
       .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, length || 300);
+      .trim();
   }
 
-  function getStatus(response) {
-    if (!response) return 0;
-
+  function statusOf(response) {
     return Number(
-      response.status ||
-        response.statusCode ||
-        0
+      response &&
+        (
+          response.status ||
+          response.statusCode ||
+          0
+        )
     );
   }
 
   function isHttpSuccess(status) {
-    return status >= 200 && status < 400;
+    return (
+      status >= 200 &&
+      status < 400
+    );
   }
 
-  function normalizeNumber(value) {
-    const number = Number.parseInt(
-      String(
-        value == null ? "" : value
-      ).trim(),
+  function toNumber(value) {
+    const number = parseInt(
+      String(value || "").trim(),
       10
     );
 
@@ -253,24 +212,28 @@
       : null;
   }
 
-  function firstMatchedNumber(text, patterns) {
-    const normalized = String(text || "").replace(
-      /\s+/g,
-      " "
-    );
+  function firstNumber(
+    text,
+    patterns
+  ) {
+    const source = compact(text);
 
     for (
-      let index = 0;
-      index < patterns.length;
-      index += 1
+      let i = 0;
+      i < patterns.length;
+      i += 1
     ) {
-      const match = normalized.match(patterns[index]);
+      const match =
+        source.match(patterns[i]);
 
-      if (!match || !match[1]) continue;
+      const number =
+        match && match[1]
+          ? toNumber(match[1])
+          : null;
 
-      const number = normalizeNumber(match[1]);
-
-      if (Number.isFinite(number)) {
+      if (
+        Number.isFinite(number)
+      ) {
         return number;
       }
     }
@@ -278,173 +241,153 @@
     return null;
   }
 
-  function extractClassContent(block, className) {
-    const escaped = String(className).replace(
-      /[.*+?^${}()|[\]\\]/g,
-      "\\$&"
-    );
+  function classText(
+    block,
+    className
+  ) {
+    const escaped =
+      String(className).replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
 
-    const pattern = new RegExp(
-      `<[^>]+class=["'][^"']*\\b${escaped}\\b[^"']*["'][^>]*>` +
-        `([\\s\\S]*?)<\\/[^>]+>`,
-      "i"
-    );
-
-    const match = String(block || "").match(pattern);
+    const match =
+      String(block || "").match(
+        new RegExp(
+          `<[^>]+class=["'][^"']*\\b${escaped}\\b[^"']*["'][^>]*>` +
+            `([\\s\\S]*?)<\\/[^>]+>`,
+          "i"
+        )
+      );
 
     return match
       ? stripHtml(match[1])
       : "";
   }
 
-  // ============================================================
-  // Cookie 获取模式
-  // ============================================================
-
   function captureCookie() {
     try {
-      const requestUrl = String(
-        $request.url || ""
-      );
+      const url =
+        String($request.url || "");
 
       if (
         !/^https:\/\/forum\.naixi\.net(?:\/|$)/i.test(
-          requestUrl
+          url
         )
       ) {
-        finish({});
+        done({});
         return;
       }
 
-      const requestCookie = normalizeCookie(
-        getHeader(
-          $request.headers,
-          "Cookie"
-        )
-      );
-
-      if (!requestCookie) {
-        log("当前请求没有携带 Cookie");
-        finish({});
-        return;
-      }
-
-      const cookieMap =
-        parseCookies(requestCookie);
-
-      const authCookie =
-        findAuthCookie(cookieMap);
-
-      if (
-        !authCookie ||
-        !authCookie.value
-      ) {
-        log(
-          `检测到 ${Object.keys(cookieMap).length} 个 Cookie，但没有登录认证 Cookie`
+      const cookie =
+        normalizeCookie(
+          getHeader(
+            $request.headers,
+            "Cookie"
+          )
         );
 
-        finish({});
+      const auth =
+        findAuthCookie(cookie);
+
+      /*
+       * 不保存游客 Cookie，
+       * 避免覆盖有效登录状态。
+       */
+      if (!cookie || !auth) {
+        done({});
         return;
       }
 
       const previousAuth =
         $persistentStore.read(
-          CONFIG.authKey
+          STORE.auth
         ) || "";
 
-      const cookieSaved =
+      const savedCookie =
         $persistentStore.write(
-          requestCookie,
-          CONFIG.cookieKey
+          cookie,
+          STORE.cookie
         );
 
-      const authSaved =
+      const savedAuth =
         $persistentStore.write(
-          authCookie.value,
-          CONFIG.authKey
-        );
-
-      const timeSaved =
-        $persistentStore.write(
-          formatChinaTime(),
-          CONFIG.cookieTimeKey
+          auth,
+          STORE.auth
         );
 
       if (
-        !cookieSaved ||
-        !authSaved ||
-        !timeSaved
+        !savedCookie ||
+        !savedAuth
       ) {
-        log(
-          "Cookie 写入持久化存储失败"
-        );
-
         notify(
           "❌ 奶昔论坛",
           "Cookie 保存失败",
           "无法写入 Loon 持久化数据"
         );
 
-        finish({});
+        done({});
         return;
       }
 
-      log(
-        `Cookie 保存成功，共 ${Object.keys(cookieMap).length} 项，认证字段：` +
-          `${authCookie.name}=${maskValue(
-            authCookie.value
-          )}`
-      );
-
       if (
-        previousAuth !==
-        authCookie.value
+        previousAuth !== auth
       ) {
+        /*
+         * 切换账号时清空旧昵称，
+         * 防止不同账号之间串号。
+         */
+        $persistentStore.write(
+          "",
+          STORE.nickname
+        );
+
+        $persistentStore.write(
+          "",
+          STORE.nicknameUid
+        );
+
         notify(
           "✅ 奶昔论坛",
           "Cookie 获取成功",
-          `认证字段：${authCookie.name}\n` +
-            "签到脚本将自动读取"
+          "签到脚本将自动读取"
         );
       }
 
-      finish({});
+      done({});
     } catch (error) {
-      log(
-        `Cookie 获取异常：${error}`
-      );
-
       notify(
         "❌ 奶昔论坛",
         "Cookie 获取异常",
-        String(error || "未知错误")
+        String(
+          error || "未知错误"
+        )
       );
 
-      finish({});
+      done({});
     }
   }
 
-  // ============================================================
-  // 定时签到模式
-  // ============================================================
-
   function runSign() {
-    const cookie = normalizeCookie(
-      $persistentStore.read(
-        CONFIG.cookieKey
-      ) || ""
-    );
+    const cookie =
+      normalizeCookie(
+        $persistentStore.read(
+          STORE.cookie
+        ) || ""
+      );
 
-    function buildHeaders(
+    function request(
+      url,
       referer,
-      ajax
+      ajax,
+      callback
     ) {
       const headers = {
         Cookie:
           cookie,
 
         "User-Agent":
-          CONFIG.userAgent,
+          USER_AGENT,
 
         Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -454,10 +397,7 @@
 
         Referer:
           referer ||
-          `${CONFIG.baseUrl}/`,
-
-        Connection:
-          "keep-alive",
+          `${BASE_URL}/`,
 
         "Cache-Control":
           "no-cache",
@@ -467,72 +407,37 @@
       };
 
       if (ajax) {
-        headers["X-Requested-With"] =
-          "XMLHttpRequest";
+        headers[
+          "X-Requested-With"
+        ] = "XMLHttpRequest";
       }
 
-      return headers;
-    }
-
-    function httpGet(
-      url,
-      referer,
-      callback,
-      ajax
-    ) {
-      const options = {
-        url:
-          url,
-
-        timeout:
-          CONFIG.timeout,
-
-        headers:
-          buildHeaders(
-            referer,
-            ajax
-          ),
-      };
-
-      log(`GET ${url}`);
-
       $httpClient.get(
-        options,
+        {
+          url:
+            url,
+
+          timeout:
+            TIMEOUT,
+
+          headers:
+            headers,
+        },
         function (
           error,
           response,
           body
         ) {
-          const status =
-            getStatus(response);
-
-          const data =
-            String(body || "");
-
-          if (error) {
-            log(
-              `请求错误：${error}`
-            );
-          } else {
-            log(
-              `HTTP ${status}，响应长度 ${data.length}`
-            );
-          }
-
           callback(
             error,
-            response,
-            data
+            statusOf(response),
+            String(body || "")
           );
         }
       );
     }
 
-    // ============================================================
-    // 页面状态判断
-    // ============================================================
-
-    function isNormalSignPage(
+    function isChallenge(
       html,
       text
     ) {
@@ -540,77 +445,18 @@
         String(html || "");
 
       const plainText =
-        String(text || "")
-          .replace(/\s+/g, " ")
-          .trim();
+        compact(text);
 
       return (
-        /k_misign/i.test(
-          source
-        ) ||
-        /id=["'](?:lxdays|lxtdays|lxreward)["']/i.test(
-          source
-        ) ||
-        (
-          /奶昔签到/i.test(
-            plainText
-          ) &&
-          /连续签到|累计签到|签到等级|今日排名/i.test(
-            plainText
-          )
-        )
-      );
-    }
-
-    function isCloudflarePage(
-      html,
-      text
-    ) {
-      const source =
-        String(html || "");
-
-      const plainText =
-        String(text || "")
-          .replace(/\s+/g, " ")
-          .trim();
-
-      if (
-        isNormalSignPage(
-          source,
-          plainText
-        )
-      ) {
-        return false;
-      }
-
-      const challengeTitle =
         /<title[^>]*>\s*(?:just a moment|attention required|security verification)\s*<\/title>/i.test(
           source
-        );
-
-      const challengeText =
-        /checking your browser|verify you are human|正在验证您是否为真人|验证您是真人|请完成安全验证|执行安全验证|浏览器检查中/i.test(
+        ) ||
+        /checking your browser|verify you are human|正在验证您是否为真人|验证您是真人|请完成安全验证|执行安全验证/i.test(
           plainText
-        );
-
-      const challengeForm =
-        /id=["']challenge-form["']/i.test(
-          source
         ) ||
-        /name=["']cf-turnstile-response["']/i.test(
+        /id=["']challenge-form["']|name=["']cf-turnstile-response["']|\b__cf_chl_/i.test(
           source
-        ) ||
-        /class=["'][^"']*cf-browser-verification[^"']*["']/i.test(
-          source
-        ) ||
-        /\b__cf_chl_[a-z0-9_-]+/i.test(
-          source
-        );
-
-      return (
-        challengeTitle ||
-        challengeText ||
-        challengeForm
+        )
       );
     }
 
@@ -621,70 +467,49 @@
       const source =
         String(html || "");
 
-      const plainText =
-        String(text || "");
-
-      const explicitMessage =
-        /请先登录|请登录后|登录后才能|您需要先登录|登录状态失效|登录信息失效|重新登录/i.test(
-          plainText
-        );
-
-      const loginForm =
-        /name=["']username["']/i.test(
-          source
-        ) &&
-        /name=["']password["']/i.test(
-          source
-        ) &&
-        /(?:action=login|logging)/i.test(
-          source
-        );
-
       return (
-        explicitMessage ||
-        loginForm
+        /请先登录|请登录后|登录后才能|您需要先登录|登录状态失效|登录信息失效|重新登录/i.test(
+          String(text || "")
+        ) ||
+        (
+          /name=["']username["']/i.test(
+            source
+          ) &&
+          /name=["']password["']/i.test(
+            source
+          ) &&
+          /(?:action=login|logging)/i.test(
+            source
+          )
+        )
       );
     }
 
-    function isAlreadySigned(text) {
-      const normalized =
-        String(text || "")
-          .replace(/\s+/g, " ")
-          .trim();
-
+    function isAlreadySigned(
+      text
+    ) {
       return /您今天已经签到|今天已经签到|今日已经签到|您今日已经签到|今日已签到|今天已签到|已签到|已完成签到|签到已完成|明天再来|无需重复签到|重复签到|已经签过到|今日已签/i.test(
-        normalized
+        compact(text)
       );
     }
 
-    function isSignSuccess(text) {
-      const normalized =
-        String(text || "")
-          .replace(/\s+/g, " ")
-          .trim();
-
-      return /签到成功|成功签到|已签到|今日已签|今天已签|签到已完成|恭喜.{0,40}(?:签到|获得)|获得.{0,40}(?:经验|积分|金币|奶昔|威望)/i.test(
-        normalized
-      );
-    }
-
-    function isSignFailure(text) {
+    function isSignFailure(
+      text
+    ) {
       return /签到失败|操作失败|参数错误|非法请求|formhash.{0,20}(?:错误|无效|失效)|请先登录|登录后才能|系统错误|发生错误|请求失败|未定义操作/i.test(
         String(text || "")
       );
     }
 
-    // ============================================================
-    // formhash 与签到地址
-    // ============================================================
-
-    function toAbsoluteUrl(value) {
+    function absoluteUrl(value) {
       const url =
         decodeHtml(
           String(value || "").trim()
         );
 
-      if (!url) return "";
+      if (!url) {
+        return "";
+      }
 
       if (
         /^https?:\/\//i.test(url)
@@ -701,16 +526,57 @@
       if (
         url.charAt(0) === "/"
       ) {
-        return CONFIG.baseUrl + url;
+        return BASE_URL + url;
       }
 
       return (
-        `${CONFIG.baseUrl}/` +
+        `${BASE_URL}/` +
         url.replace(/^\.?\//, "")
       );
     }
 
-    function extractFormhash(html) {
+    function extractSignUrl(html) {
+      const source =
+        decodeHtml(
+          String(html || "")
+        );
+
+      const patterns = [
+        /href\s*=\s*["']([^"']*plugin\.php\?id=k_misign:sign[^"']*operation=qiandao[^"']*)["']/i,
+
+        /href\s*=\s*["']([^"']*k_misign-sign\.html[^"']*operation=qiandao[^"']*)["']/i,
+
+        /(?:ajaxget|ajaxpost)\s*\(\s*["']([^"']*operation=qiandao[^"']*)["']/i,
+
+        /showWindow\s*\([^,]+,\s*["']([^"']*operation=qiandao[^"']*)["']/i,
+      ];
+
+      for (
+        let i = 0;
+        i < patterns.length;
+        i += 1
+      ) {
+        const match =
+          source.match(
+            patterns[i]
+          );
+
+        if (
+          match &&
+          match[1]
+        ) {
+          return absoluteUrl(
+            match[1]
+          );
+        }
+      }
+
+      return "";
+    }
+
+    function extractFormhash(
+      html
+    ) {
       const source =
         decodeHtml(
           String(html || "")
@@ -721,27 +587,17 @@
 
         /value=["']([^"']+)["'][^>]*name=["']formhash["']/i,
 
-        /id=["']formhash["'][^>]*value=["']([^"']+)["']/i,
-
-        /value=["']([^"']+)["'][^>]*id=["']formhash["']/i,
-
         /(?:\?|&)formhash=([a-zA-Z0-9]+)/i,
-
-        /["']formhash["']\s*[:=]\s*["']([a-zA-Z0-9]+)["']/i,
-
-        /\bFORMHASH\s*=\s*["']([a-zA-Z0-9]+)["']/i,
-
-        /formhash\s*:\s*["']([a-zA-Z0-9]+)["']/i,
       ];
 
       for (
-        let index = 0;
-        index < patterns.length;
-        index += 1
+        let i = 0;
+        i < patterns.length;
+        i += 1
       ) {
         const match =
           source.match(
-            patterns[index]
+            patterns[i]
           );
 
         if (
@@ -757,290 +613,192 @@
       return "";
     }
 
-    function extractSignUrl(html) {
-      const source =
-        decodeHtml(
-          String(html || "")
-        );
-
-      const patterns = [
-        /href\s*=\s*["']([^"']*k_misign-sign\.html[^"']*operation=qiandao[^"']*)["']/i,
-
-        /href\s*=\s*["']([^"']*plugin\.php\?id=k_misign:sign[^"']*operation=qiandao[^"']*)["']/i,
-
-        /href\s*=\s*["']([^"']*operation=qiandao[^"']*)["']/i,
-
-        /(?:ajaxget|ajaxpost)\s*\(\s*["']([^"']*operation=qiandao[^"']*)["']/i,
-
-        /showWindow\s*\([^,]+,\s*["']([^"']*operation=qiandao[^"']*)["']/i,
-
-        /(?:location\.href|window\.location)\s*=\s*["']([^"']*operation=qiandao[^"']*)["']/i,
-
-        /["']([^"']*k_misign-sign\.html\?operation=qiandao[^"']*)["']/i,
-
-        /["']([^"']*plugin\.php\?id=k_misign:sign[^"']*operation=qiandao[^"']*)["']/i,
-      ];
-
-      for (
-        let index = 0;
-        index < patterns.length;
-        index += 1
-      ) {
-        const match =
-          source.match(
-            patterns[index]
-          );
-
-        if (
-          match &&
-          match[1]
-        ) {
-          return toAbsoluteUrl(
-            match[1]
-          );
-        }
-      }
-
-      return "";
-    }
-
-    function buildSignUrls(
+    function buildSignUrl(
       formhash
     ) {
-      const encoded =
-        encodeURIComponent(
+      return (
+        `${BASE_URL}/plugin.php?id=k_misign:sign` +
+        "&operation=qiandao" +
+        "&format=text" +
+        `&formhash=${encodeURIComponent(
           formhash
-        );
-
-      return [
-        (
-          `${CONFIG.baseUrl}/k_misign-sign.html` +
-          `?operation=qiandao` +
-          `&format=button` +
-          `&formhash=${encoded}`
-        ),
-
-        (
-          `${CONFIG.baseUrl}/plugin.php?id=k_misign:sign` +
-          `&operation=qiandao` +
-          `&format=text` +
-          `&formhash=${encoded}`
-        ),
-
-        (
-          `${CONFIG.baseUrl}/plugin.php?id=k_misign:sign` +
-          `&operation=qiandao` +
-          `&format=empty` +
-          `&formhash=${encoded}`
-        ),
-      ];
+        )}`
+      );
     }
 
-    // ============================================================
-    // 签到页统计解析
-    // ============================================================
-
-    function extractNumberById(
+    function numberById(
       html,
       id
     ) {
-      const escapedId =
+      const escaped =
         String(id).replace(
           /[.*+?^${}()|[\]\\]/g,
           "\\$&"
         );
 
-      const openingPattern =
-        new RegExp(
-          `<[^>]+id=["']${escapedId}["'][^>]*>`,
-          "i"
+      const source =
+        String(html || "");
+
+      const opening =
+        source.match(
+          new RegExp(
+            `<[^>]+id=["']${escaped}["'][^>]*>`,
+            "i"
+          )
         );
 
-      const openingMatch =
-        String(html || "").match(
-          openingPattern
-        );
-
-      if (openingMatch) {
+      if (opening) {
         const valueMatch =
-          openingMatch[0].match(
+          opening[0].match(
             /\bvalue\s*=\s*["']([^"']*)["']/i
           );
 
-        if (valueMatch) {
-          const value =
-            normalizeNumber(
-              valueMatch[1]
-            );
-
-          if (
-            Number.isFinite(value)
-          ) {
-            return value;
-          }
-        }
-      }
-
-      const elementPattern =
-        new RegExp(
-          `<([a-z0-9]+)[^>]*id=["']${escapedId}["'][^>]*>` +
-            `([\\s\\S]*?)<\\/\\1>`,
-          "i"
-        );
-
-      const elementMatch =
-        String(html || "").match(
-          elementPattern
-        );
-
-      if (elementMatch) {
-        const value =
-          normalizeNumber(
-            stripHtml(
-              elementMatch[2]
-            )
-          );
+        const number =
+          valueMatch
+            ? toNumber(
+                valueMatch[1]
+              )
+            : null;
 
         if (
-          Number.isFinite(value)
+          Number.isFinite(number)
         ) {
-          return value;
+          return number;
         }
       }
 
-      return null;
+      const element =
+        source.match(
+          new RegExp(
+            `<([a-z0-9]+)[^>]*id=["']${escaped}["'][^>]*>` +
+              `([\\s\\S]*?)<\\/\\1>`,
+            "i"
+          )
+        );
+
+      return element
+        ? toNumber(
+            stripHtml(
+              element[2]
+            )
+          )
+        : null;
     }
 
-    function extractSignStats(
+    function parseStats(
       html,
       text
     ) {
-      const normalized =
-        String(text || "").replace(
-          /\s+/g,
-          " "
-        );
+      const source =
+        compact(text);
 
-      let streakDays =
-        extractNumberById(
+      let streak =
+        numberById(
           html,
           "lxdays"
         );
 
-      let totalDays =
-        extractNumberById(
+      let total =
+        numberById(
           html,
           "lxtdays"
         );
 
-      const rewardExp =
-        extractNumberById(
-          html,
-          "lxreward"
-        );
-
       if (
-        !Number.isFinite(
-          streakDays
-        )
+        !Number.isFinite(streak)
       ) {
-        /*
-         * 奶昔移动页实际顺序：
-         * 1天 连续签到 128天 累计签到
-         */
-        streakDays =
-          firstMatchedNumber(
-            normalized,
+        streak =
+          firstNumber(
+            source,
             [
               /(\d+)\s*天\s*连续签到/i,
+
               /连续签到\s*[：:]?\s*(\d+)\s*天/i,
-              /连续\s*[：:]?\s*(\d+)\s*天/i,
             ]
           );
       }
 
       if (
-        !Number.isFinite(
-          totalDays
-        )
+        !Number.isFinite(total)
       ) {
-        totalDays =
-          firstMatchedNumber(
-            normalized,
+        total =
+          firstNumber(
+            source,
             [
               /(\d+)\s*天\s*累计签到/i,
+
               /累计签到\s*[：:]?\s*(\d+)\s*天/i,
-              /签到总天数\s*[：:]?\s*(\d+)\s*天/i,
             ]
           );
       }
 
-      const todayRank =
-        firstMatchedNumber(
-          normalized,
-          [
-            /(\d+)\s*今日排名/i,
-            /今日排名\s*[：:]?\s*(\d+)/i,
-          ]
-        );
-
       const levelMatch =
-        normalized.match(
+        source.match(
           /\bLv\s*[：:]?\s*(\d+)/i
         );
 
       return {
-        rewardExp:
-          rewardExp,
+        reward:
+          numberById(
+            html,
+            "lxreward"
+          ),
 
-        streakDays:
-          streakDays,
+        rank:
+          firstNumber(
+            source,
+            [
+              /(\d+)\s*今日排名/i,
 
-        totalDays:
-          totalDays,
+              /今日排名\s*[：:]?\s*(\d+)/i,
+            ]
+          ),
 
-        todayRank:
-          todayRank,
+        streak:
+          streak,
+
+        total:
+          total,
 
         level:
           levelMatch
-            ? `Lv ${levelMatch[1]}`
+            ? levelMatch[1]
             : "",
       };
     }
 
-    function mergeSignStats(
+    function mergeStats(
       primary,
       fallback
     ) {
       return {
-        rewardExp:
+        reward:
           Number.isFinite(
-            primary.rewardExp
+            primary.reward
           )
-            ? primary.rewardExp
-            : fallback.rewardExp,
+            ? primary.reward
+            : fallback.reward,
 
-        streakDays:
+        rank:
           Number.isFinite(
-            primary.streakDays
+            primary.rank
           )
-            ? primary.streakDays
-            : fallback.streakDays,
+            ? primary.rank
+            : fallback.rank,
 
-        totalDays:
+        streak:
           Number.isFinite(
-            primary.totalDays
+            primary.streak
           )
-            ? primary.totalDays
-            : fallback.totalDays,
+            ? primary.streak
+            : fallback.streak,
 
-        todayRank:
+        total:
           Number.isFinite(
-            primary.todayRank
+            primary.total
           )
-            ? primary.todayRank
-            : fallback.todayRank,
+            ? primary.total
+            : fallback.total,
 
         level:
           primary.level ||
@@ -1049,11 +807,9 @@
       };
     }
 
-    // ============================================================
-    // 真实积分记录解析
-    // ============================================================
-
-    function parseCreditLog(html) {
+    function parseCreditLog(
+      html
+    ) {
       const source =
         String(html || "");
 
@@ -1062,7 +818,7 @@
           /\bdiscuz_uid\s*=\s*["'](\d+)["']/i
         );
 
-      const blocks =
+      const items =
         source.match(
           /<li\b[^>]*>[\s\S]*?<\/li>/gi
         ) || [];
@@ -1070,71 +826,61 @@
       const records = [];
 
       for (
-        let index = 0;
-        index < blocks.length;
-        index += 1
+        let i = 0;
+        i < items.length &&
+        records.length < 3;
+        i += 1
       ) {
-        const block =
-          blocks[index];
-
-        const allText =
-          stripHtml(block);
+        const item = items[i];
 
         if (
           !/奶昔签到/.test(
-            allText
+            stripHtml(item)
           )
         ) {
           continue;
         }
 
         const change =
-          extractClassContent(
-            block,
+          classText(
+            item,
             "xi1"
           );
 
         const time =
-          extractClassContent(
-            block,
+          classText(
+            item,
             "mtime"
           );
 
-        let description =
-          extractClassContent(
-            block,
-            "txt"
-          );
-
-        const creditTypeMatch =
-          block.match(
-            /<span[^>]*>\s*([^<]+?)\s*<span[^>]*class=["'][^"']*\bxi1\b[^"']*["'][^>]*>/i
-          );
-
-        const creditType =
-          creditTypeMatch
-            ? stripHtml(
-                creditTypeMatch[1]
-              )
-            : "经验";
-
-        if (
-          !change ||
-          !time
-        ) {
+        if (!change || !time) {
           continue;
         }
 
-        if (!description) {
-          const amount =
-            String(change).replace(
-              /^\+/,
-              ""
-            );
+        const typeMatch =
+          item.match(
+            /<span[^>]*>\s*([^<]+?)\s*<span[^>]*class=["'][^"']*\bxi1\b[^"']*["'][^>]*>/i
+          );
 
-          description =
-            `签到成功，获得 ${amount} ${creditType}`;
-        }
+        const type =
+          typeMatch
+            ? stripHtml(
+                typeMatch[1]
+              )
+            : "经验";
+
+        const amount =
+          change.replace(
+            /^\+/,
+            ""
+          );
+
+        const description =
+          classText(
+            item,
+            "txt"
+          ) ||
+          `签到成功，获得${amount}${type}`;
 
         records.push({
           time:
@@ -1143,9 +889,8 @@
           change:
             change,
 
-          creditType:
-            creditType ||
-            "经验",
+          type:
+            type || "经验",
 
           description:
             description,
@@ -1153,20 +898,19 @@
       }
 
       return {
-        userId:
+        uid:
           uidMatch
             ? uidMatch[1]
             : "",
 
         records:
-          records.slice(
-            0,
-            3
-          ),
+          records,
       };
     }
 
-    function extractProfileNickname(html) {
+    function extractNickname(
+      html
+    ) {
       const source =
         String(html || "");
 
@@ -1174,176 +918,79 @@
         /<title[^>]*>\s*([\s\S]*?)\s*的个人资料(?:\s+奶昔论坛)?\s*<\/title>/i,
 
         /<meta[^>]+name=["']keywords["'][^>]+content=["']([^"']+?)的个人资料["']/i,
-
-        /<meta[^>]+content=["']([^"']+?)的个人资料["'][^>]+name=["']keywords["']/i,
       ];
 
       for (
-        let index = 0;
-        index < patterns.length;
-        index += 1
+        let i = 0;
+        i < patterns.length;
+        i += 1
       ) {
         const match =
           source.match(
-            patterns[index]
+            patterns[i]
           );
 
-        if (
-          match &&
-          match[1]
-        ) {
-          const nickname =
-            stripHtml(
-              match[1]
-            ).trim();
+        const nickname =
+          match && match[1]
+            ? stripHtml(
+                match[1]
+              ).trim()
+            : "";
 
-          if (nickname) {
-            return nickname;
-          }
+        if (nickname) {
+          return nickname;
         }
       }
 
       return "";
     }
 
-    function fetchNicknameAndFinish(
-      resultText,
-      signStats,
-      creditData,
-      alreadySigned
-    ) {
-      const storedNickname =
-        $persistentStore.read(
-          CONFIG.nicknameKey
-        ) || "";
-
-      if (!creditData.userId) {
-        creditData.nickname =
-          storedNickname;
-
-        outputSuccess(
-          resultText,
-          signStats,
-          creditData,
-          alreadySigned
-        );
-
-        return;
-      }
-
-      const profileUrl =
-        `${CONFIG.baseUrl}/home.php?mod=space` +
-        `&uid=${encodeURIComponent(
-          creditData.userId
-        )}` +
-        "&do=profile&mycenter=1" +
-        `&_=${Date.now()}`;
-
-      httpGet(
-        profileUrl,
-        CONFIG.creditLogUrl,
-        function (
-          error,
-          response,
-          html
-        ) {
-          const status =
-            getStatus(response);
-
-          let nickname = "";
-
-          if (
-            !error &&
-            isHttpSuccess(status)
-          ) {
-            nickname =
-              extractProfileNickname(
-                html
-              );
-          }
-
-          if (nickname) {
-            $persistentStore.write(
-              nickname,
-              CONFIG.nicknameKey
-            );
-          }
-
-          creditData.nickname =
-            nickname ||
-            storedNickname ||
-            "未获取";
-
-          outputSuccess(
-            resultText,
-            signStats,
-            creditData,
-            alreadySigned
-          );
-        },
-        false
-      );
-    }
-
-    function buildResultReport(
-      resultText,
-      signStats,
-      creditData
+    function report(
+      result,
+      stats,
+      account
     ) {
       const records =
-        creditData.records || [];
+        account.records || [];
 
       const latest =
-        records.length
-          ? records[0]
-          : null;
+        records[0] || null;
 
-      let latestChange =
-        "未获取";
+      const latestChange =
+        latest
+          ? `${latest.change}${latest.type}`
+          : Number.isFinite(
+                stats.reward
+              )
+            ? `+${stats.reward}经验`
+            : "未获取";
 
-      let latestTime =
-        "未获取";
-
-      let latestDescription =
-        "未获取";
-
-      if (latest) {
-        latestChange =
-          `${latest.change} ${latest.creditType}`;
-
-        latestTime =
-          latest.time;
-
-        latestDescription =
-          latest.description;
-      } else if (
-        Number.isFinite(
-          signStats.rewardExp
-        )
-      ) {
-        latestChange =
-          `+${signStats.rewardExp} 经验`;
-
-        latestTime =
-          formatChinaTime();
-
-        latestDescription =
-          `签到成功，获得 ${signStats.rewardExp} 经验`;
-      }
+      const latestDescription =
+        latest
+          ? latest.description
+          : Number.isFinite(
+                stats.reward
+              )
+            ? `签到成功，获得${stats.reward}经验`
+            : "未获取";
 
       const lines = [
         "📌 签到结果",
 
-        resultText,
+        result,
 
         "",
 
         `用户昵称：${
-          creditData.nickname ||
+          account.nickname ||
           "未获取"
         }`,
 
-        `最新变动：${latestTime}`,
+        `最新变动：${
+          latest
+            ? latest.time
+            : "未获取"
+        }`,
 
         `变动数值：${latestChange}`,
 
@@ -1353,31 +1000,32 @@
 
         `今日排名：${
           Number.isFinite(
-            signStats.todayRank
+            stats.rank
           )
-            ? signStats.todayRank
+            ? stats.rank
             : "未获取"
         }`,
 
         `连续签到：${
           Number.isFinite(
-            signStats.streakDays
+            stats.streak
           )
-            ? `${signStats.streakDays} 天`
+            ? `${stats.streak}天`
             : "未获取"
         }`,
 
         `累计签到：${
           Number.isFinite(
-            signStats.totalDays
+            stats.total
           )
-            ? `${signStats.totalDays} 天`
+            ? `${stats.total}天`
             : "未获取"
         }`,
 
         `签到等级：${
-          signStats.level ||
-          "未获取"
+          stats.level
+            ? `Lv${stats.level}`
+            : "未获取"
         }`,
 
         "",
@@ -1387,9 +1035,9 @@
 
       if (records.length) {
         records.forEach(
-          function (record) {
+          function (item) {
             lines.push(
-              `- ${record.time}：${record.change}（${record.description}）`
+              `- ${item.time}：${item.change}（${item.description}）`
             );
           }
         );
@@ -1402,203 +1050,92 @@
       return lines.join("\n");
     }
 
-    function outputSuccess(
-      resultText,
-      signStats,
-      creditData,
+    function success(
+      result,
+      stats,
+      account,
       alreadySigned
     ) {
-      const report =
-        buildResultReport(
-          resultText,
-          signStats,
-          creditData
-        );
-
-      console.log(report);
+      console.log(
+        report(
+          result,
+          stats,
+          account
+        )
+      );
 
       const latest =
-        creditData.records &&
-        creditData.records.length
-          ? creditData.records[0]
-          : null;
+        account.records &&
+        account.records[0];
 
-      const noticeLines = [
+      const body = [
         `用户昵称：${
-          creditData.nickname ||
+          account.nickname ||
           "未获取"
         }`,
-
-        resultText,
       ];
 
       if (latest) {
-        noticeLines.push(
-          `${latest.time}：${latest.change} ${latest.creditType}`
-        );
+        body.push(
+          `${latest.time}：${latest.change}${latest.type}`,
 
-        noticeLines.push(
           latest.description
         );
       }
 
       if (
         Number.isFinite(
-          signStats.streakDays
+          stats.streak
         )
       ) {
-        noticeLines.push(
-          `连续签到 ${signStats.streakDays} 天`
+        body.push(
+          `连续签到${stats.streak}天`
         );
       }
 
       if (
         !alreadySigned ||
-        CONFIG.notifyAlreadySigned
+        NOTIFY_ALREADY_SIGNED
       ) {
         notify(
           "✅ 奶昔论坛签到",
-          resultText,
-          noticeLines.join("\n")
+          result,
+          body.join("\n")
         );
       }
 
-      finish();
+      done();
     }
 
-    function fetchCreditLogAndFinish(
-      resultText,
-      signStats,
-      alreadySigned
-    ) {
-      const separator =
-        CONFIG.creditLogUrl.indexOf(
-          "?"
-        ) >= 0
-          ? "&"
-          : "?";
-
-      const url =
-        `${CONFIG.creditLogUrl}` +
-        `${separator}_=${Date.now()}`;
-
-      log(
-        "读取积分记录页面"
-      );
-
-      httpGet(
-        url,
-        `${CONFIG.baseUrl}/`,
-        function (
-          error,
-          response,
-          html
-        ) {
-          const status =
-            getStatus(response);
-
-          const text =
-            stripHtml(html);
-
-          if (
-            error ||
-            !isHttpSuccess(status)
-          ) {
-            log(
-              error
-                ? `积分记录请求失败：${error}`
-                : `积分记录页面返回 HTTP ${status}`
-            );
-
-            outputSuccess(
-              resultText,
-              signStats,
-              {
-                userId: "",
-
-                nickname:
-                  $persistentStore.read(
-                    CONFIG.nicknameKey
-                  ) || "未获取",
-
-                records: [],
-              },
-              alreadySigned
-            );
-
-            return;
-          }
-
-          if (
-            isLoginInvalid(
-              html,
-              text
-            )
-          ) {
-            log(
-              "积分记录页面显示未登录"
-            );
-
-            outputSuccess(
-              resultText,
-              signStats,
-              {
-                userId: "",
-
-                nickname:
-                  $persistentStore.read(
-                    CONFIG.nicknameKey
-                  ) || "未获取",
-
-                records: [],
-              },
-              alreadySigned
-            );
-
-            return;
-          }
-
-          const creditData =
-            parseCreditLog(html);
-
-          fetchNicknameAndFinish(
-            resultText,
-            signStats,
-            creditData,
-            alreadySigned
-          );
-        },
-        false
-      );
-    }
-
-    function outputFailure(
+    function failure(
       message,
       raw
     ) {
-      const rawPreview =
-        preview(
-          raw,
-          350
-        );
-
       const lines = [
         "📌 签到结果",
+
         "签到失败",
+
         message,
       ];
 
-      if (rawPreview) {
+      const snippet =
+        compact(raw).slice(
+          0,
+          350
+        );
+
+      if (snippet) {
         lines.push(
           "",
-          `返回：${rawPreview}`
+
+          `返回：${snippet}`
         );
       }
 
-      const report =
-        lines.join("\n");
-
-      console.log(report);
+      console.log(
+        lines.join("\n")
+      );
 
       notify(
         "❌ 奶昔论坛签到",
@@ -1606,97 +1143,204 @@
         message
       );
 
-      finish();
+      done();
     }
 
-    // ============================================================
-    // 签到验证与提交
-    // ============================================================
-
-    function verifySign(
-      signResponseText,
-      signResponseHtml,
-      signPageUrl,
-      previousStats
+    function resolveNickname(
+      result,
+      stats,
+      account,
+      alreadySigned
     ) {
-      log(
-        "重新打开签到页面验证签到状态"
-      );
+      const cachedNickname =
+        $persistentStore.read(
+          STORE.nickname
+        ) || "";
 
-      httpGet(
-        signPageUrl,
-        signPageUrl,
+      const cachedUid =
+        $persistentStore.read(
+          STORE.nicknameUid
+        ) || "";
+
+      /*
+       * 同一账号已有昵称缓存时，
+       * 不再重复请求个人资料页。
+       */
+      if (
+        account.uid &&
+        cachedUid === account.uid &&
+        cachedNickname
+      ) {
+        account.nickname =
+          cachedNickname;
+
+        success(
+          result,
+          stats,
+          account,
+          alreadySigned
+        );
+
+        return;
+      }
+
+      if (!account.uid) {
+        account.nickname =
+          cachedNickname ||
+          "未获取";
+
+        success(
+          result,
+          stats,
+          account,
+          alreadySigned
+        );
+
+        return;
+      }
+
+      const profileUrl =
+        `${BASE_URL}/home.php?mod=space` +
+        `&uid=${encodeURIComponent(
+          account.uid
+        )}` +
+        "&do=profile&mycenter=1";
+
+      request(
+        profileUrl,
+        CREDIT_LOG_URL,
+        false,
         function (
           error,
-          response,
+          status,
           html
         ) {
-          const status =
-            getStatus(response);
+          const nickname =
+            !error &&
+            isHttpSuccess(status)
+              ? extractNickname(
+                  html
+                )
+              : "";
 
+          if (nickname) {
+            $persistentStore.write(
+              nickname,
+              STORE.nickname
+            );
+
+            $persistentStore.write(
+              account.uid,
+              STORE.nicknameUid
+            );
+          }
+
+          account.nickname =
+            nickname ||
+            cachedNickname ||
+            "未获取";
+
+          success(
+            result,
+            stats,
+            account,
+            alreadySigned
+          );
+        }
+      );
+    }
+
+    function fetchCreditLog(
+      result,
+      stats,
+      alreadySigned
+    ) {
+      request(
+        `${CREDIT_LOG_URL}&_=${Date.now()}`,
+
+        `${BASE_URL}/`,
+
+        false,
+
+        function (
+          error,
+          status,
+          html
+        ) {
           const text =
             stripHtml(html);
 
-          log(
-            `验证页面：${preview(
-              text,
-              300
-            )}`
-          );
-
-          if (error) {
-            if (
-              isSignSuccess(
-                signResponseText
-              ) &&
-              !isSignFailure(
-                signResponseText
-              )
-            ) {
-              const responseStats =
-                extractSignStats(
-                  signResponseHtml,
-                  signResponseText
-                );
-
-              fetchCreditLogAndFinish(
-                "签到成功",
-                mergeSignStats(
-                  responseStats,
-                  previousStats
-                ),
-                false
-              );
-
-              return;
-            }
-
-            outputFailure(
-              `签到请求已发送，但验证页面请求失败：${error}`,
-              signResponseText
-            );
-
-            return;
-          }
-
           if (
-            !isHttpSuccess(status)
-          ) {
-            outputFailure(
-              `签到验证页面返回 HTTP ${status}`,
-              text
-            );
-
-            return;
-          }
-
-          if (
-            isCloudflarePage(
+            error ||
+            !isHttpSuccess(status) ||
+            isLoginInvalid(
               html,
               text
             )
           ) {
-            outputFailure(
+            resolveNickname(
+              result,
+              stats,
+              {
+                uid: "",
+                records: [],
+              },
+              alreadySigned
+            );
+
+            return;
+          }
+
+          resolveNickname(
+            result,
+            stats,
+            parseCreditLog(html),
+            alreadySigned
+          );
+        }
+      );
+    }
+
+    function verifySign(
+      previousStats
+    ) {
+      request(
+        SIGN_PAGE_URL,
+
+        SIGN_PAGE_URL,
+
+        false,
+
+        function (
+          error,
+          status,
+          html
+        ) {
+          const text =
+            stripHtml(html);
+
+          if (
+            error ||
+            !isHttpSuccess(status)
+          ) {
+            failure(
+              error
+                ? `签到请求已发送，但验证页面请求失败：${error}`
+                : `签到验证页面返回 HTTP ${status}`,
+
+              text
+            );
+
+            return;
+          }
+
+          if (
+            isChallenge(
+              html,
+              text
+            )
+          ) {
+            failure(
               "验证签到结果时触发安全验证",
               text
             );
@@ -1710,7 +1354,7 @@
               text
             )
           ) {
-            outputFailure(
+            failure(
               "Cookie 已失效，验证页面显示未登录",
               text
             );
@@ -1718,152 +1362,75 @@
             return;
           }
 
-          const verified =
-            isAlreadySigned(text) ||
-            isSignSuccess(text) ||
-            (
-              isSignSuccess(
-                signResponseText
-              ) &&
-              !isSignFailure(
-                signResponseText
-              )
-            );
-
-          if (!verified) {
-            outputFailure(
+          if (
+            !isAlreadySigned(text)
+          ) {
+            failure(
               "签到请求已经发送，但重新打开签到页后仍未显示已签到",
-              text ||
-                signResponseText
+              text
             );
 
             return;
           }
 
-          const pageStats =
-            extractSignStats(
-              html,
-              text
-            );
-
-          const responseStats =
-            extractSignStats(
-              signResponseHtml,
-              signResponseText
-            );
-
-          const stats =
-            mergeSignStats(
-              pageStats,
-              mergeSignStats(
-                responseStats,
-                previousStats
-              )
-            );
-
-          fetchCreditLogAndFinish(
+          fetchCreditLog(
             "签到成功",
-            stats,
+
+            mergeStats(
+              parseStats(
+                html,
+                text
+              ),
+              previousStats
+            ),
+
             false
           );
-        },
-        false
+        }
       );
     }
 
-    function submitSignUrls(
-      signUrls,
-      signPageUrl,
-      index,
+    function submitSign(
+      signUrl,
       previousStats
     ) {
-      const currentIndex =
-        Number.isFinite(index)
-          ? index
-          : 0;
-
-      if (
-        currentIndex >=
-        signUrls.length
-      ) {
-        outputFailure(
-          "所有签到接口均请求失败"
-        );
-
-        return;
-      }
-
-      const signUrl =
-        signUrls[
-          currentIndex
-        ];
-
-      log(
-        `执行签到接口 ${currentIndex + 1}/${signUrls.length}：${signUrl}`
-      );
-
-      httpGet(
+      request(
         signUrl,
-        signPageUrl,
+
+        SIGN_PAGE_URL,
+
+        true,
+
         function (
           error,
-          response,
+          status,
           html
         ) {
-          const status =
-            getStatus(response);
-
           const text =
             stripHtml(html);
-
-          log(
-            `签到接口响应：${preview(
-              text ||
-                html ||
-                "(空响应)",
-              350
-            )}`
-          );
 
           if (
             error ||
             !isHttpSuccess(status)
           ) {
-            if (
-              currentIndex + 1 <
-              signUrls.length
-            ) {
-              log(
-                "当前签到接口失败，尝试备用接口"
-              );
-
-              submitSignUrls(
-                signUrls,
-                signPageUrl,
-                currentIndex + 1,
-                previousStats
-              );
-
-              return;
-            }
-
-            outputFailure(
+            failure(
               error
                 ? `签到接口请求失败：${error}`
                 : `签到接口返回 HTTP ${status}`,
-              text || html
+
+              text
             );
 
             return;
           }
 
           if (
-            isCloudflarePage(
+            isChallenge(
               html,
               text
             )
           ) {
-            outputFailure(
+            failure(
               "签到接口触发了安全验证",
               text
             );
@@ -1877,7 +1444,7 @@
               text
             )
           ) {
-            outputFailure(
+            failure(
               "签到接口显示 Cookie 已失效",
               text
             );
@@ -1889,25 +1456,7 @@
             isSignFailure(text) &&
             !isAlreadySigned(text)
           ) {
-            if (
-              currentIndex + 1 <
-              signUrls.length
-            ) {
-              log(
-                "当前签到接口返回失败，尝试备用接口"
-              );
-
-              submitSignUrls(
-                signUrls,
-                signPageUrl,
-                currentIndex + 1,
-                previousStats
-              );
-
-              return;
-            }
-
-            outputFailure(
+            failure(
               "奶昔论坛返回签到失败",
               text
             );
@@ -1916,73 +1465,52 @@
           }
 
           verifySign(
-            text,
-            html,
-            signPageUrl,
             previousStats
           );
-        },
-        true
+        }
       );
     }
 
-    // ============================================================
-    // 获取 formhash 与处理签到页面
-    // ============================================================
+    function openSignPage() {
+      request(
+        SIGN_PAGE_URL,
 
-    function getFormhashFromHome(
-      signPageUrl,
-      previousStats
-    ) {
-      const homeUrl =
-        `${CONFIG.baseUrl}/`;
+        `${BASE_URL}/`,
 
-      log(
-        "签到页面未找到 formhash，尝试从论坛首页获取"
-      );
+        false,
 
-      httpGet(
-        homeUrl,
-        signPageUrl,
         function (
           error,
-          response,
-          homeHtml
+          status,
+          html
         ) {
-          const status =
-            getStatus(response);
-
-          const homeText =
-            stripHtml(homeHtml);
-
-          if (error) {
-            outputFailure(
-              `获取论坛首页失败：${error}`
-            );
-
-            return;
-          }
+          const text =
+            stripHtml(html);
 
           if (
+            error ||
             !isHttpSuccess(status)
           ) {
-            outputFailure(
-              `论坛首页返回 HTTP ${status}`,
-              homeText
+            failure(
+              error
+                ? `签到页面请求失败：${error}`
+                : `签到页面返回 HTTP ${status}`,
+
+              text
             );
 
             return;
           }
 
           if (
-            isCloudflarePage(
-              homeHtml,
-              homeText
+            isChallenge(
+              html,
+              text
             )
           ) {
-            outputFailure(
-              "论坛首页触发安全验证",
-              homeText
+            failure(
+              "签到页面触发了安全验证",
+              text
             );
 
             return;
@@ -1990,283 +1518,98 @@
 
           if (
             isLoginInvalid(
-              homeHtml,
-              homeText
+              html,
+              text
             )
           ) {
-            outputFailure(
-              "论坛首页显示 Cookie 已失效",
-              homeText
+            failure(
+              "奶昔论坛 Cookie 已失效或不完整，请重新登录获取 Cookie",
+              text
+            );
+
+            return;
+          }
+
+          const stats =
+            parseStats(
+              html,
+              text
+            );
+
+          if (
+            isAlreadySigned(text)
+          ) {
+            fetchCreditLog(
+              "今天已完成签到",
+              stats,
+              true
+            );
+
+            return;
+          }
+
+          const extractedUrl =
+            extractSignUrl(html);
+
+          if (extractedUrl) {
+            submitSign(
+              extractedUrl,
+              stats
             );
 
             return;
           }
 
           const formhash =
-            extractFormhash(
-              homeHtml
-            );
+            extractFormhash(html);
 
-          if (!formhash) {
-            outputFailure(
-              "签到页面和论坛首页均未获取到 formhash",
-              homeText
-            );
-
-            return;
-          }
-
-          log(
-            `从论坛首页获取到 formhash：${formhash}`
-          );
-
-          submitSignUrls(
-            buildSignUrls(
-              formhash
-            ),
-            signPageUrl,
-            0,
-            previousStats
-          );
-        },
-        false
-      );
-    }
-
-    function processSignPage(
-      pageIndex,
-      html
-    ) {
-      const signPageUrl =
-        CONFIG.signPages[
-          pageIndex
-        ];
-
-      const text =
-        stripHtml(html);
-
-      const pageStats =
-        extractSignStats(
-          html,
-          text
-        );
-
-      log(
-        `签到页面：${preview(
-          text,
-          350
-        )}`
-      );
-
-      if (
-        isCloudflarePage(
-          html,
-          text
-        )
-      ) {
-        outputFailure(
-          "签到页面触发了 Cloudflare 或安全验证",
-          text
-        );
-
-        return;
-      }
-
-      if (
-        isLoginInvalid(
-          html,
-          text
-        )
-      ) {
-        outputFailure(
-          "奶昔论坛 Cookie 已失效或不完整，请重新登录获取 Cookie",
-          text
-        );
-
-        return;
-      }
-
-      if (
-        isAlreadySigned(
-          text
-        )
-      ) {
-        fetchCreditLogAndFinish(
-          "今天已完成签到",
-          pageStats,
-          true
-        );
-
-        return;
-      }
-
-      const extractedSignUrl =
-        extractSignUrl(html);
-
-      if (
-        extractedSignUrl
-      ) {
-        log(
-          `从签到页面提取到签到地址：${extractedSignUrl}`
-        );
-
-        submitSignUrls(
-          [extractedSignUrl],
-          signPageUrl,
-          0,
-          pageStats
-        );
-
-        return;
-      }
-
-      const pageFormhash =
-        extractFormhash(html);
-
-      if (pageFormhash) {
-        log(
-          `从签到页面获取到 formhash：${pageFormhash}`
-        );
-
-        submitSignUrls(
-          buildSignUrls(
-            pageFormhash
-          ),
-          signPageUrl,
-          0,
-          pageStats
-        );
-
-        return;
-      }
-
-      getFormhashFromHome(
-        signPageUrl,
-        pageStats
-      );
-    }
-
-    function openSignPage(
-      pageIndex
-    ) {
-      const index =
-        Number.isFinite(
-          pageIndex
-        )
-          ? pageIndex
-          : 0;
-
-      if (
-        index >=
-        CONFIG.signPages.length
-      ) {
-        outputFailure(
-          "所有签到页面均无法打开"
-        );
-
-        return;
-      }
-
-      const signPageUrl =
-        CONFIG.signPages[
-          index
-        ];
-
-      log(
-        `打开签到页面 ${index + 1}/${CONFIG.signPages.length}`
-      );
-
-      httpGet(
-        signPageUrl,
-        `${CONFIG.baseUrl}/`,
-        function (
-          error,
-          response,
-          html
-        ) {
-          const status =
-            getStatus(response);
-
-          if (
-            error ||
-            !isHttpSuccess(status)
-          ) {
-            if (
-              index + 1 <
-              CONFIG.signPages.length
-            ) {
-              log(
-                error
-                  ? `当前签到页面请求失败，尝试备用页面：${error}`
-                  : `当前签到页面返回 HTTP ${status}，尝试备用页面`
-              );
-
-              openSignPage(
-                index + 1
-              );
-
-              return;
-            }
-
-            outputFailure(
-              error
-                ? `签到页面请求失败：${error}`
-                : `签到页面返回 HTTP ${status}`,
-              stripHtml(html)
+          if (formhash) {
+            submitSign(
+              buildSignUrl(
+                formhash
+              ),
+              stats
             );
 
             return;
           }
 
-          processSignPage(
-            index,
-            html
+          failure(
+            "签到页面未找到签到地址或 formhash",
+            text
           );
-        },
-        false
+        }
       );
     }
 
-    // ============================================================
-    // 签到入口
-    // ============================================================
+    if (!cookie) {
+      failure(
+        "尚未获取 Cookie，请启用插件后使用 Safari 登录并刷新奶昔论坛"
+      );
+
+      return;
+    }
+
+    if (
+      /[^\x00-\xff]/.test(
+        cookie
+      )
+    ) {
+      failure(
+        "保存的 Cookie 含有非法字符，请重新登录奶昔论坛获取 Cookie"
+      );
+
+      return;
+    }
 
     try {
-      log(
-        "奶昔论坛签到任务开始"
-      );
-
-      if (!cookie) {
-        outputFailure(
-          "尚未获取 Cookie，请启用插件后使用 Safari 登录并刷新奶昔论坛"
-        );
-
-        return;
-      }
-
-      if (
-        /[^\x00-\xff]/.test(
-          cookie
-        )
-      ) {
-        outputFailure(
-          "保存的 Cookie 含有非法字符，请重新登录奶昔论坛获取 Cookie"
-        );
-
-        return;
-      }
-
-      openSignPage(0);
+      openSignPage();
     } catch (error) {
-      outputFailure(
+      failure(
         `脚本运行异常：${error}`
       );
     }
   }
-
-  // ============================================================
-  // 自动判断运行模式
-  // ============================================================
 
   if (isRequestMode()) {
     captureCookie();
