@@ -1,9 +1,18 @@
 /*
- * 奶昔论坛自动签到（Loon 合并版）
+ * 奶昔论坛自动签到（Loon 合并修复版）
  *
  * 同一个脚本同时负责：
  *   1. http-request：自动获取并保存 Cookie
  *   2. cron：读取 Cookie 并执行签到
+ *
+ * 修复内容：
+ *   - 修复正常签到页面被误判为 Cloudflare 验证页
+ *   - 优先使用 k_misign-sign.html 签到接口
+ *   - 支持从签到页面、论坛首页提取 formhash
+ *   - 支持从 HTML、onclick、JavaScript 中提取签到地址
+ *   - 签到接口返回空内容时，重新打开签到页验证
+ *   - 主签到接口失败时自动尝试 plugin.php 备用接口
+ *   - 支持读取奖励、连续签到和累计签到
  *
  * 持久化键：
  *   naixi_cookie
@@ -38,8 +47,52 @@
       "Version/18.0 Mobile/15E148 Safari/604.1",
   };
 
+  let hasFinished = false;
+
+  // ============================================================
+  // 通用工具
+  // ============================================================
+
   function log(message) {
     console.log(`[${CONFIG.title}] ${message}`);
+  }
+
+  function notify(title, subtitle, content) {
+    try {
+      $notification.post(
+        title,
+        subtitle || "",
+        content || ""
+      );
+    } catch (error) {
+      log(`发送通知失败：${error}`);
+    }
+  }
+
+  function finish(value) {
+    if (hasFinished) {
+      return;
+    }
+
+    hasFinished = true;
+
+    try {
+      if (typeof value === "undefined") {
+        $done();
+      } else {
+        $done(value);
+      }
+    } catch (error) {
+      log(`结束脚本失败：${error}`);
+    }
+  }
+
+  function isRequestMode() {
+    return (
+      typeof $request !== "undefined" &&
+      $request &&
+      $request.headers
+    );
   }
 
   function getHeader(headers, targetName) {
@@ -73,30 +126,65 @@
   }
 
   function parseCookies(cookieHeader) {
-    return String(cookieHeader || "")
+    const result = {};
+
+    String(cookieHeader || "")
       .split(";")
       .map(function (part) {
-        const text = part.trim();
-        const separator = text.indexOf("=");
+        return part.trim();
+      })
+      .filter(Boolean)
+      .forEach(function (part) {
+        const separator = part.indexOf("=");
 
         if (separator <= 0) {
-          return null;
+          return;
         }
 
-        return {
-          name: text.slice(0, separator).trim(),
-          value: text.slice(separator + 1).trim(),
-        };
-      })
-      .filter(Boolean);
+        const name = part.slice(0, separator).trim();
+        const value = part.slice(separator + 1).trim();
+
+        if (name) {
+          result[name] = value;
+        }
+      });
+
+    return result;
   }
 
-  function findAuthCookie(cookies) {
-    for (let index = 0; index < cookies.length; index += 1) {
-      const cookie = cookies[index];
+  function serializeCookies(cookieMap) {
+    return Object.keys(cookieMap || {})
+      .map(function (name) {
+        return `${name}=${cookieMap[name]}`;
+      })
+      .join("; ");
+  }
 
-      if (/^(?:.*_)?auth$/i.test(String(cookie.name || ""))) {
-        return cookie;
+  function mergeCookieHeaders(oldHeader, newHeader) {
+    const oldCookies = parseCookies(oldHeader);
+    const newCookies = parseCookies(newHeader);
+
+    Object.keys(newCookies).forEach(function (name) {
+      oldCookies[name] = newCookies[name];
+    });
+
+    return serializeCookies(oldCookies);
+  }
+
+  function findAuthCookie(cookieMap) {
+    const names = Object.keys(cookieMap || {});
+
+    for (let index = 0; index < names.length; index += 1) {
+      const name = names[index];
+
+      if (
+        /^auth$/i.test(name) ||
+        /_auth$/i.test(name)
+      ) {
+        return {
+          name: name,
+          value: cookieMap[name],
+        };
       }
     }
 
@@ -140,6 +228,8 @@
       .replace(/&apos;/gi, "'")
       .replace(/&lt;/gi, "<")
       .replace(/&gt;/gi, ">")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&#160;/gi, " ")
       .replace(/&#x2f;/gi, "/")
       .replace(/&#47;/gi, "/")
       .replace(/&#(\d+);/g, function (_, code) {
@@ -165,7 +255,7 @@
         )
         .replace(/<br\s*\/?>/gi, "\n")
         .replace(
-          /<\/(?:div|p|li|tr|td|h\d)>/gi,
+          /<\/(?:div|p|li|tr|td|h\d|span|a)>/gi,
           "\n"
         )
         .replace(/<[^>]+>/g, " ")
@@ -200,32 +290,17 @@
     return status >= 200 && status < 400;
   }
 
-  function notify(title, subtitle, content) {
-    try {
-      $notification.post(
-        title,
-        subtitle || "",
-        content || ""
-      );
-    } catch (error) {
-      log(`通知失败：${error}`);
-    }
-  }
-
-  function finishRequest() {
-    $done({});
-  }
-
-  function finishCron() {
-    $done();
-  }
-
-  function isRequestMode() {
-    return (
-      typeof $request !== "undefined" &&
-      $request &&
-      $request.headers
+  function normalizeNumber(value) {
+    const number = Number.parseInt(
+      String(
+        value == null ? "" : value
+      ).trim(),
+      10
     );
+
+    return Number.isFinite(number)
+      ? number
+      : null;
   }
 
   // ============================================================
@@ -239,46 +314,60 @@
       );
 
       if (
-        !/^https:\/\/forum\.naixi\.net\//i.test(
+        !/^https:\/\/forum\.naixi\.net(?:\/|$)/i.test(
           requestUrl
         )
       ) {
-        finishRequest();
+        finish({});
         return;
       }
 
-      const cookieHeader = normalizeCookie(
+      const requestCookie = normalizeCookie(
         getHeader(
           $request.headers,
           "Cookie"
         )
       );
 
-      if (!cookieHeader) {
+      if (!requestCookie) {
         log("当前请求没有携带 Cookie");
-        finishRequest();
+        finish({});
         return;
       }
 
-      const cookies = parseCookies(cookieHeader);
+      const requestCookieMap =
+        parseCookies(requestCookie);
+
       const authCookie =
-        findAuthCookie(cookies);
+        findAuthCookie(requestCookieMap);
 
       /*
-       * 没有 auth 字段时通常仍然是游客状态。
-       * 不保存，避免覆盖之前有效的登录 Cookie。
+       * 没有 auth 字段时通常还是游客状态。
+       * 不保存，避免游客 Cookie 覆盖有效登录 Cookie。
        */
       if (
         !authCookie ||
         !authCookie.value
       ) {
         log(
-          `检测到 ${cookies.length} 个 Cookie，但没有登录认证 Cookie`
+          `检测到 ${Object.keys(requestCookieMap).length} 个 Cookie，但没有登录认证 Cookie`
         );
 
-        finishRequest();
+        finish({});
         return;
       }
+
+      const oldCookie = normalizeCookie(
+        $persistentStore.read(
+          CONFIG.cookieKey
+        ) || ""
+      );
+
+      const mergedCookie =
+        mergeCookieHeaders(
+          oldCookie,
+          requestCookie
+        );
 
       const previousAuth =
         $persistentStore.read(
@@ -287,7 +376,7 @@
 
       const cookieSaved =
         $persistentStore.write(
-          cookieHeader,
+          mergedCookie,
           CONFIG.cookieKey
         );
 
@@ -316,19 +405,17 @@
           "无法写入 Loon 持久化数据"
         );
 
-        finishRequest();
+        finish({});
         return;
       }
 
       log(
-        `Cookie 保存成功，共 ${cookies.length} 项，认证字段：` +
-          `${authCookie.name}=${maskValue(
-            authCookie.value
-          )}`
+        `Cookie 保存成功，共 ${Object.keys(parseCookies(mergedCookie)).length} 项，认证字段：` +
+          `${authCookie.name}=${maskValue(authCookie.value)}`
       );
 
       /*
-       * 登录认证 Cookie 没有变化时不重复通知。
+       * 登录认证 Cookie 没变化时不重复通知。
        */
       if (
         previousAuth !==
@@ -337,13 +424,12 @@
         notify(
           "✅ 奶昔论坛",
           "Cookie 获取成功",
-          `已保存 ${cookies.length} 个 Cookie\n` +
-            `认证字段：${authCookie.name}\n` +
+          `认证字段：${authCookie.name}\n` +
             "签到脚本将自动读取"
         );
       }
 
-      finishRequest();
+      finish({});
     } catch (error) {
       log(`Cookie 获取异常：${error}`);
 
@@ -353,12 +439,12 @@
         String(error || "未知错误")
       );
 
-      finishRequest();
+      finish({});
     }
   }
 
   // ============================================================
-  // 定时签到模式
+  // 签到模式
   // ============================================================
 
   function runSign() {
@@ -387,13 +473,13 @@
         );
       }
 
-      finishCron();
+      finish();
     }
 
     function failure(message, raw) {
       const rawPreview = preview(
         raw,
-        300
+        350
       );
 
       const content = rawPreview
@@ -408,7 +494,7 @@
         content
       );
 
-      finishCron();
+      finish();
     }
 
     function buildHeaders(referer) {
@@ -429,6 +515,9 @@
           `${CONFIG.baseUrl}/`,
 
         Connection: "keep-alive",
+
+        "X-Requested-With":
+          "XMLHttpRequest",
       };
     }
 
@@ -440,8 +529,7 @@
       const options = {
         url: url,
         timeout: CONFIG.timeout,
-        headers:
-          buildHeaders(referer),
+        headers: buildHeaders(referer),
       };
 
       log(`GET ${url}`);
@@ -477,16 +565,93 @@
       );
     }
 
+    // ============================================================
+    // 页面判断
+    // ============================================================
+
+    function isNormalSignPage(
+      html,
+      text
+    ) {
+      const source = String(
+        html || ""
+      );
+
+      const plainText = String(
+        text || ""
+      )
+        .replace(/\s+/g, " ")
+        .trim();
+
+      return (
+        /k_misign/i.test(source) ||
+        /id=["'](?:lxdays|lxtdays|lxreward)["']/i.test(
+          source
+        ) ||
+        (
+          /奶昔签到/i.test(plainText) &&
+          /连续签到|累计签到|签到等级|今日排名/i.test(
+            plainText
+          )
+        )
+      );
+    }
+
     function isCloudflarePage(
       html,
       text
     ) {
-      const content =
-        `${String(html || "")}\n` +
-        `${String(text || "")}`;
+      const source = String(
+        html || ""
+      );
 
-      return /cf-chl-|challenge-platform|cloudflare|checking your browser|just a moment|验证您是真人|安全检查/i.test(
-        content
+      const plainText = String(
+        text || ""
+      )
+        .replace(/\s+/g, " ")
+        .trim();
+
+      /*
+       * 页面已经出现正常签到内容时，
+       * 即使源码包含 Cloudflare 静态资源也不能误判。
+       */
+      if (
+        isNormalSignPage(
+          source,
+          plainText
+        )
+      ) {
+        return false;
+      }
+
+      const challengeTitle =
+        /<title[^>]*>\s*(?:just a moment|attention required|security verification)\s*<\/title>/i.test(
+          source
+        );
+
+      const challengeText =
+        /checking your browser|verify you are human|正在验证您是否为真人|验证您是真人|请完成安全验证|执行安全验证|浏览器检查中/i.test(
+          plainText
+        );
+
+      const challengeForm =
+        /id=["']challenge-form["']/i.test(
+          source
+        ) ||
+        /name=["']cf-turnstile-response["']/i.test(
+          source
+        ) ||
+        /class=["'][^"']*cf-browser-verification[^"']*["']/i.test(
+          source
+        ) ||
+        /\b__cf_chl_[a-z0-9_-]+/i.test(
+          source
+        );
+
+      return (
+        challengeTitle ||
+        challengeText ||
+        challengeForm
       );
     }
 
@@ -498,13 +663,13 @@
         html || ""
       );
 
-      const normalized = String(
+      const plainText = String(
         text || ""
       );
 
       const explicitMessage =
-        /请先登录|请登录后|登录后才能|您需要先登录|登录状态失效|重新登录/i.test(
-          normalized
+        /请先登录|请登录后|登录后才能|您需要先登录|登录状态失效|登录信息失效|重新登录/i.test(
+          plainText
         );
 
       const loginForm =
@@ -518,35 +683,40 @@
           source
         );
 
-      const loginRedirect =
-        /member\.php\?mod=logging(?:&amp;|&)action=login/i.test(
+      const loginTitle =
+        /<title[^>]*>[^<]*(?:登录|会员登录)[^<]*<\/title>/i.test(
           source
-        );
+        ) &&
+        loginForm;
 
       return (
         explicitMessage ||
         loginForm ||
-        loginRedirect
+        loginTitle
       );
     }
 
     function isAlreadySigned(text) {
-      return /您今天已经签到|今天已经签到|今日已经签到|您今日已经签到|今日已签到|今天已签到|已完成签到|明天再来|无需重复签到|重复签到/i.test(
+      return /您今天已经签到|今天已经签到|今日已经签到|您今日已经签到|今日已签到|今天已签到|已完成签到|签到已完成|明天再来|无需重复签到|重复签到|已经签过到|今日已签/i.test(
         String(text || "")
       );
     }
 
     function isSignSuccess(text) {
-      return /签到成功|成功签到|恭喜.{0,30}(?:签到|获得)|获得.{0,30}(?:经验|积分|金币|奶昔|威望)|签到已完成/i.test(
+      return /签到成功|成功签到|恭喜.{0,40}(?:签到|获得)|获得.{0,40}(?:经验|积分|金币|奶昔|威望)|签到已完成/i.test(
         String(text || "")
       );
     }
 
     function isSignFailure(text) {
-      return /签到失败|操作失败|参数错误|非法请求|formhash.{0,10}(?:错误|无效)|请先登录|登录后才能|系统错误|发生错误|请求失败/i.test(
+      return /签到失败|操作失败|参数错误|非法请求|formhash.{0,20}(?:错误|无效|失效)|请先登录|登录后才能|系统错误|发生错误|请求失败|未定义操作/i.test(
         String(text || "")
       );
     }
+
+    // ============================================================
+    // formhash 与签到地址
+    // ============================================================
 
     function toAbsoluteUrl(value) {
       const url = decodeHtml(
@@ -566,9 +736,7 @@
       }
 
       if (url.charAt(0) === "/") {
-        return (
-          CONFIG.baseUrl + url
-        );
+        return CONFIG.baseUrl + url;
       }
 
       return (
@@ -578,8 +746,8 @@
     }
 
     function extractFormhash(html) {
-      const source = String(
-        html || ""
+      const source = decodeHtml(
+        String(html || "")
       );
 
       const patterns = [
@@ -591,11 +759,13 @@
 
         /value=["']([^"']+)["'][^>]*id=["']formhash["']/i,
 
-        /(?:\?|&|&amp;)formhash=([a-zA-Z0-9]+)/i,
+        /(?:\?|&)formhash=([a-zA-Z0-9]+)/i,
 
         /["']formhash["']\s*[:=]\s*["']([a-zA-Z0-9]+)["']/i,
 
         /\bFORMHASH\s*=\s*["']([a-zA-Z0-9]+)["']/i,
+
+        /formhash\s*:\s*["']([a-zA-Z0-9]+)["']/i,
       ];
 
       for (
@@ -603,15 +773,14 @@
         index < patterns.length;
         index += 1
       ) {
-        const match = source.match(
-          patterns[index]
-        );
+        const match =
+          source.match(patterns[index]);
 
         if (
           match &&
           match[1]
         ) {
-          return decodeHtml(
+          return String(
             match[1]
           ).trim();
         }
@@ -621,18 +790,26 @@
     }
 
     function extractSignUrl(html) {
-      const source = String(
-        html || ""
+      const source = decodeHtml(
+        String(html || "")
       );
 
       const patterns = [
+        /href\s*=\s*["']([^"']*k_misign-sign\.html[^"']*operation=qiandao[^"']*)["']/i,
+
+        /href\s*=\s*["']([^"']*plugin\.php\?id=k_misign:sign[^"']*operation=qiandao[^"']*)["']/i,
+
         /href\s*=\s*["']([^"']*operation=qiandao[^"']*)["']/i,
 
-        /href\s*=\s*["']([^"']*k_misign[^"']*operation[^"']*)["']/i,
+        /(?:ajaxget|ajaxpost)\s*\(\s*["']([^"']*operation=qiandao[^"']*)["']/i,
+
+        /showWindow\s*\([^,]+,\s*["']([^"']*operation=qiandao[^"']*)["']/i,
 
         /(?:location\.href|window\.location)\s*=\s*["']([^"']*operation=qiandao[^"']*)["']/i,
 
-        /showWindow\s*\([^,]+,\s*["']([^"']*operation=qiandao[^"']*)["']/i,
+        /onclick\s*=\s*["'][^"']*["']([^"']*operation=qiandao[^"']*)["']/i,
+
+        /["']([^"']*k_misign-sign\.html\?operation=qiandao[^"']*)["']/i,
 
         /["']([^"']*plugin\.php\?id=k_misign:sign[^"']*operation=qiandao[^"']*)["']/i,
       ];
@@ -642,9 +819,8 @@
         index < patterns.length;
         index += 1
       ) {
-        const match = source.match(
-          patterns[index]
-        );
+        const match =
+          source.match(patterns[index]);
 
         if (
           match &&
@@ -659,31 +835,30 @@
       return "";
     }
 
-    function buildSignUrl(
-      formhash
-    ) {
-      return (
-        `${CONFIG.baseUrl}/plugin.php?id=k_misign:sign` +
-        "&operation=qiandao" +
-        `&formhash=${encodeURIComponent(
-          formhash
-        )}` +
-        "&format=empty"
-      );
+    function buildSignUrls(formhash) {
+      const encoded =
+        encodeURIComponent(formhash);
+
+      return [
+        (
+          `${CONFIG.baseUrl}/k_misign-sign.html` +
+          `?operation=qiandao` +
+          `&format=button` +
+          `&formhash=${encoded}`
+        ),
+
+        (
+          `${CONFIG.baseUrl}/plugin.php?id=k_misign:sign` +
+          `&operation=qiandao` +
+          `&formhash=${encoded}` +
+          `&format=empty`
+        ),
+      ];
     }
 
-    function normalizeNumber(value) {
-      const number = parseInt(
-        String(
-          value == null ? "" : value
-        ).trim(),
-        10
-      );
-
-      return Number.isFinite(number)
-        ? number
-        : null;
-    }
+    // ============================================================
+    // 签到统计
+    // ============================================================
 
     function extractElementTag(
       html,
@@ -830,7 +1005,9 @@
             text,
             [
               /连续签到\s*[：:]?\s*(\d+)\s*天/i,
-              /连续\s*(\d+)\s*天/i,
+              /连续\s*[：:]?\s*(\d+)\s*天/i,
+              /(\d+)\s*天\s*连续签到/i,
+              /(\d+)\s*天\s*连续/i,
             ]
           );
       }
@@ -847,6 +1024,8 @@
               /累计签到\s*[：:]?\s*(\d+)\s*天/i,
               /总签到\s*[：:]?\s*(\d+)\s*天/i,
               /签到总天数\s*[：:]?\s*(\d+)\s*天/i,
+              /(\d+)\s*天\s*累计签到/i,
+              /(\d+)\s*天\s*累计/i,
             ]
           );
       }
@@ -855,7 +1034,8 @@
         reward:
           Number.isFinite(
             rewardExp
-          )
+          ) &&
+          rewardExp > 0
             ? `${rewardExp} 经验`
             : extractReward(text),
 
@@ -942,13 +1122,17 @@
       return parts.join("；");
     }
 
+    // ============================================================
+    // 签到验证
+    // ============================================================
+
     function verifySign(
       signResponseText,
       signResponseHtml,
       signPageUrl
     ) {
       log(
-        "重新打开签到页面验证结果"
+        "重新打开签到页面验证签到状态"
       );
 
       httpGet(
@@ -968,11 +1152,15 @@
           log(
             `验证页面：${preview(
               text,
-              250
+              300
             )}`
           );
 
           if (error) {
+            /*
+             * 验证页面请求失败，但签到接口明确返回成功时，
+             * 仍可按成功处理。
+             */
             if (
               isSignSuccess(
                 signResponseText
@@ -1010,7 +1198,7 @@
             !isHttpSuccess(status)
           ) {
             failure(
-              `验证页面返回 HTTP ${status}`,
+              `签到验证页面返回 HTTP ${status}`,
               text
             );
 
@@ -1024,7 +1212,7 @@
             )
           ) {
             failure(
-              "验证签到结果时触发了安全验证",
+              "验证签到结果时触发安全验证",
               text
             );
 
@@ -1059,9 +1247,8 @@
 
           if (!verified) {
             failure(
-              "未能确认签到成功，论坛签到页面可能已经变化",
-              text ||
-                signResponseText
+              "签到请求已经发送，但重新打开签到页后仍未显示已签到",
+              text || signResponseText
             );
 
             return;
@@ -1085,33 +1272,47 @@
               responseStats
             );
 
-          const alreadySigned =
-            isAlreadySigned(
-              signResponseText
-            ) &&
-            !isSignSuccess(
-              signResponseText
-            );
-
           success(
             buildResultMessage(
-              alreadySigned
-                ? "今天已完成签到"
-                : "签到成功",
+              "签到成功",
               stats
             ),
-            alreadySigned
+            false
           );
         }
       );
     }
 
-    function submitSign(
-      signUrl,
-      signPageUrl
+    // ============================================================
+    // 执行签到
+    // ============================================================
+
+    function submitSignUrls(
+      signUrls,
+      signPageUrl,
+      index
     ) {
+      const currentIndex =
+        Number.isFinite(index)
+          ? index
+          : 0;
+
+      if (
+        currentIndex >=
+        signUrls.length
+      ) {
+        failure(
+          "所有签到接口均请求失败"
+        );
+
+        return;
+      }
+
+      const signUrl =
+        signUrls[currentIndex];
+
       log(
-        `执行签到：${signUrl}`
+        `执行签到接口 ${currentIndex + 1}/${signUrls.length}：${signUrl}`
       );
 
       httpGet(
@@ -1129,25 +1330,37 @@
             stripHtml(html);
 
           log(
-            `签到响应：${preview(
-              text || html,
-              300
+            `签到接口响应：${preview(
+              text || html || "(空响应)",
+              350
             )}`
           );
 
-          if (error) {
-            failure(
-              `签到接口请求失败：${error}`
-            );
-
-            return;
-          }
-
           if (
+            error ||
             !isHttpSuccess(status)
           ) {
+            if (
+              currentIndex + 1 <
+              signUrls.length
+            ) {
+              log(
+                `当前签到接口失败，尝试备用接口`
+              );
+
+              submitSignUrls(
+                signUrls,
+                signPageUrl,
+                currentIndex + 1
+              );
+
+              return;
+            }
+
             failure(
-              `签到接口返回 HTTP ${status}`,
+              error
+                ? `签到接口请求失败：${error}`
+                : `签到接口返回 HTTP ${status}`,
               text || html
             );
 
@@ -1161,7 +1374,7 @@
             )
           ) {
             failure(
-              "签到接口触发了 Cloudflare 或安全验证",
+              "签到接口触发了安全验证",
               text
             );
 
@@ -1186,6 +1399,23 @@
             isSignFailure(text) &&
             !isAlreadySigned(text)
           ) {
+            if (
+              currentIndex + 1 <
+              signUrls.length
+            ) {
+              log(
+                "当前签到接口返回失败，尝试备用接口"
+              );
+
+              submitSignUrls(
+                signUrls,
+                signPageUrl,
+                currentIndex + 1
+              );
+
+              return;
+            }
+
             failure(
               "奶昔论坛返回签到失败",
               text
@@ -1194,6 +1424,11 @@
             return;
           }
 
+          /*
+           * k_misign 的 format=empty 或 format=button
+           * 可能返回空内容，因此无论响应是否有成功文字，
+           * 都重新打开签到页验证。
+           */
           verifySign(
             text,
             html,
@@ -1203,9 +1438,130 @@
       );
     }
 
+    function submitExtractedSignUrl(
+      signUrl,
+      signPageUrl
+    ) {
+      submitSignUrls(
+        [signUrl],
+        signPageUrl,
+        0
+      );
+    }
+
+    // ============================================================
+    // 获取 formhash
+    // ============================================================
+
+    function getFormhashFromHome(
+      signPageUrl
+    ) {
+      const homeUrl =
+        `${CONFIG.baseUrl}/`;
+
+      log(
+        "签到页面未找到 formhash，尝试从论坛首页获取"
+      );
+
+      httpGet(
+        homeUrl,
+        signPageUrl,
+        function (
+          error,
+          response,
+          homeHtml
+        ) {
+          const status =
+            getStatus(response);
+
+          const homeText =
+            stripHtml(homeHtml);
+
+          if (error) {
+            failure(
+              `获取论坛首页失败：${error}`
+            );
+
+            return;
+          }
+
+          if (
+            !isHttpSuccess(status)
+          ) {
+            failure(
+              `论坛首页返回 HTTP ${status}`,
+              homeText
+            );
+
+            return;
+          }
+
+          if (
+            isCloudflarePage(
+              homeHtml,
+              homeText
+            )
+          ) {
+            failure(
+              "论坛首页触发安全验证",
+              homeText
+            );
+
+            return;
+          }
+
+          if (
+            isLoginInvalid(
+              homeHtml,
+              homeText
+            )
+          ) {
+            failure(
+              "论坛首页显示 Cookie 已失效",
+              homeText
+            );
+
+            return;
+          }
+
+          const formhash =
+            extractFormhash(
+              homeHtml
+            );
+
+          if (!formhash) {
+            failure(
+              "签到页面和论坛首页均未获取到 formhash",
+              homeText
+            );
+
+            return;
+          }
+
+          log(
+            `从论坛首页获取到 formhash：${formhash}`
+          );
+
+          const signUrls =
+            buildSignUrls(
+              formhash
+            );
+
+          submitSignUrls(
+            signUrls,
+            signPageUrl,
+            0
+          );
+        }
+      );
+    }
+
+    // ============================================================
+    // 处理签到页面
+    // ============================================================
+
     function processSignPage(
       pageIndex,
-      response,
       html
     ) {
       const signPageUrl =
@@ -1219,7 +1575,7 @@
       log(
         `签到页面：${preview(
           text,
-          300
+          350
         )}`
       );
 
@@ -1230,7 +1586,7 @@
         )
       ) {
         failure(
-          "签到页面触发了 Cloudflare 或浏览器安全验证，Loon 无法完成网页验证",
+          "签到页面触发了 Cloudflare 或安全验证",
           text
         );
 
@@ -1271,51 +1627,45 @@
         return;
       }
 
-      let signUrl =
+      const extractedSignUrl =
         extractSignUrl(html);
 
-      if (!signUrl) {
-        const formhash =
-          extractFormhash(html);
+      if (extractedSignUrl) {
+        log(
+          `从签到页面提取到签到地址：${extractedSignUrl}`
+        );
 
-        if (formhash) {
-          log(
-            `获取到 formhash：${formhash}`
-          );
-
-          signUrl =
-            buildSignUrl(
-              formhash
-            );
-        }
-      }
-
-      if (!signUrl) {
-        if (
-          pageIndex + 1 <
-          CONFIG.signPages.length
-        ) {
-          log(
-            "当前页面未找到签到链接，尝试备用签到页面"
-          );
-
-          openSignPage(
-            pageIndex + 1
-          );
-
-          return;
-        }
-
-        failure(
-          "未找到签到链接，也未获取到 formhash，可能签到页面结构已经变化",
-          text
+        submitExtractedSignUrl(
+          extractedSignUrl,
+          signPageUrl
         );
 
         return;
       }
 
-      submitSign(
-        signUrl,
+      const pageFormhash =
+        extractFormhash(html);
+
+      if (pageFormhash) {
+        log(
+          `从签到页面获取到 formhash：${pageFormhash}`
+        );
+
+        const signUrls =
+          buildSignUrls(
+            pageFormhash
+          );
+
+        submitSignUrls(
+          signUrls,
+          signPageUrl,
+          0
+        );
+
+        return;
+      }
+
+      getFormhashFromHome(
         signPageUrl
       );
     }
@@ -1324,7 +1674,20 @@
       pageIndex
     ) {
       const index =
-        pageIndex || 0;
+        Number.isFinite(pageIndex)
+          ? pageIndex
+          : 0;
+
+      if (
+        index >=
+        CONFIG.signPages.length
+      ) {
+        failure(
+          "所有签到页面均无法打开"
+        );
+
+        return;
+      }
 
       const signPageUrl =
         CONFIG.signPages[index];
@@ -1344,30 +1707,8 @@
           const status =
             getStatus(response);
 
-          if (error) {
-            if (
-              index + 1 <
-              CONFIG.signPages.length
-            ) {
-              log(
-                `签到页面请求失败，尝试备用页面：${error}`
-              );
-
-              openSignPage(
-                index + 1
-              );
-
-              return;
-            }
-
-            failure(
-              `签到页面请求失败：${error}`
-            );
-
-            return;
-          }
-
           if (
+            error ||
             !isHttpSuccess(status)
           ) {
             if (
@@ -1375,7 +1716,9 @@
               CONFIG.signPages.length
             ) {
               log(
-                `签到页面返回 HTTP ${status}，尝试备用页面`
+                error
+                  ? `当前签到页面请求失败，尝试备用页面：${error}`
+                  : `当前签到页面返回 HTTP ${status}，尝试备用页面`
               );
 
               openSignPage(
@@ -1386,7 +1729,9 @@
             }
 
             failure(
-              `签到页面返回 HTTP ${status}`,
+              error
+                ? `签到页面请求失败：${error}`
+                : `签到页面返回 HTTP ${status}`,
               stripHtml(html)
             );
 
@@ -1395,12 +1740,15 @@
 
           processSignPage(
             index,
-            response,
             html
           );
         }
       );
     }
+
+    // ============================================================
+    // 签到入口
+    // ============================================================
 
     try {
       log(
@@ -1409,7 +1757,7 @@
 
       if (!cookie) {
         failure(
-          "尚未获取 Cookie，请先启用插件，然后使用 Safari 登录并刷新奶昔论坛"
+          "尚未获取 Cookie，请启用插件后使用 Safari 登录并刷新奶昔论坛"
         );
 
         return;
