@@ -5,15 +5,6 @@
  *   1. http-request：自动获取并保存 Cookie
  *   2. cron：读取 Cookie 并执行签到
  *
- * 修复内容：
- *   - 修复正常签到页面被误判为 Cloudflare 验证页
- *   - 优先使用 k_misign-sign.html 签到接口
- *   - 支持从签到页面、论坛首页提取 formhash
- *   - 支持从 HTML、onclick、JavaScript 中提取签到地址
- *   - 签到接口返回空内容时，重新打开签到页验证
- *   - 主签到接口失败时自动尝试 plugin.php 备用接口
- *   - 支持读取奖励、连续签到和累计签到
- *
  * 持久化键：
  *   naixi_cookie
  *   naixi_auth_value
@@ -33,7 +24,6 @@
     cookieTimeKey: "naixi_cookie_time",
 
     timeout: 30000,
-
     notifyAlreadySigned: true,
 
     signPages: [
@@ -414,9 +404,6 @@
           `${authCookie.name}=${maskValue(authCookie.value)}`
       );
 
-      /*
-       * 登录认证 Cookie 没变化时不重复通知。
-       */
       if (
         previousAuth !==
         authCookie.value
@@ -444,7 +431,7 @@
   }
 
   // ============================================================
-  // 签到模式
+  // 定时签到模式
   // ============================================================
 
   function runSign() {
@@ -566,7 +553,7 @@
     }
 
     // ============================================================
-    // 页面判断
+    // 页面状态判断
     // ============================================================
 
     function isNormalSignPage(
@@ -611,10 +598,6 @@
         .replace(/\s+/g, " ")
         .trim();
 
-      /*
-       * 页面已经出现正常签到内容时，
-       * 即使源码包含 Cloudflare 静态资源也不能误判。
-       */
       if (
         isNormalSignPage(
           source,
@@ -696,15 +679,37 @@
       );
     }
 
+    /*
+     * 修复：
+     * 增加最简单的“已签到”匹配。
+     */
     function isAlreadySigned(text) {
-      return /您今天已经签到|今天已经签到|今日已经签到|您今日已经签到|今日已签到|今天已签到|已完成签到|签到已完成|明天再来|无需重复签到|重复签到|已经签过到|今日已签/i.test(
-        String(text || "")
+      const normalized = String(
+        text || ""
+      )
+        .replace(/\s+/g, " ")
+        .trim();
+
+      return /您今天已经签到|今天已经签到|今日已经签到|您今日已经签到|今日已签到|今天已签到|已签到|已完成签到|签到已完成|明天再来|无需重复签到|重复签到|已经签过到|今日已签/i.test(
+        normalized
       );
     }
 
+    /*
+     * 修复：
+     * 签到接口返回 XML：
+     * <root><![CDATA[已签到]]></root>
+     * 也应当识别为成功。
+     */
     function isSignSuccess(text) {
-      return /签到成功|成功签到|恭喜.{0,40}(?:签到|获得)|获得.{0,40}(?:经验|积分|金币|奶昔|威望)|签到已完成/i.test(
-        String(text || "")
+      const normalized = String(
+        text || ""
+      )
+        .replace(/\s+/g, " ")
+        .trim();
+
+      return /签到成功|成功签到|已签到|今日已签|今天已签|签到已完成|恭喜.{0,40}(?:签到|获得)|获得.{0,40}(?:经验|积分|金币|奶昔|威望)/i.test(
+        normalized
       );
     }
 
@@ -807,8 +812,6 @@
 
         /(?:location\.href|window\.location)\s*=\s*["']([^"']*operation=qiandao[^"']*)["']/i,
 
-        /onclick\s*=\s*["'][^"']*["']([^"']*operation=qiandao[^"']*)["']/i,
-
         /["']([^"']*k_misign-sign\.html\?operation=qiandao[^"']*)["']/i,
 
         /["']([^"']*plugin\.php\?id=k_misign:sign[^"']*operation=qiandao[^"']*)["']/i,
@@ -845,6 +848,13 @@
           `?operation=qiandao` +
           `&format=button` +
           `&formhash=${encoded}`
+        ),
+
+        (
+          `${CONFIG.baseUrl}/plugin.php?id=k_misign:sign` +
+          `&operation=qiandao` +
+          `&formhash=${encoded}` +
+          `&format=text`
         ),
 
         (
@@ -1157,10 +1167,6 @@
           );
 
           if (error) {
-            /*
-             * 验证页面请求失败，但签到接口明确返回成功时，
-             * 仍可按成功处理。
-             */
             if (
               isSignSuccess(
                 signResponseText
@@ -1272,12 +1278,23 @@
               responseStats
             );
 
+          /*
+           * 签到接口返回“已签到”时，
+           * 说明签到状态已经生效。
+           */
+          const responseAlreadySigned =
+            isAlreadySigned(
+              signResponseText
+            );
+
           success(
             buildResultMessage(
-              "签到成功",
+              responseAlreadySigned
+                ? "今天已完成签到"
+                : "签到成功",
               stats
             ),
-            false
+            responseAlreadySigned
           );
         }
       );
@@ -1345,7 +1362,7 @@
               signUrls.length
             ) {
               log(
-                `当前签到接口失败，尝试备用接口`
+                "当前签到接口失败，尝试备用接口"
               );
 
               submitSignUrls(
@@ -1424,11 +1441,6 @@
             return;
           }
 
-          /*
-           * k_misign 的 format=empty 或 format=button
-           * 可能返回空内容，因此无论响应是否有成功文字，
-           * 都重新打开签到页验证。
-           */
           verifySign(
             text,
             html,
@@ -1450,7 +1462,7 @@
     }
 
     // ============================================================
-    // 获取 formhash
+    // 从首页获取 formhash
     // ============================================================
 
     function getFormhashFromHome(
