@@ -24,6 +24,7 @@
     cookieKey: "naixi_cookie",
     authKey: "naixi_auth_value",
     cookieTimeKey: "naixi_cookie_time",
+    nicknameKey: "naixi_forum_nickname",
 
     timeout: 30000,
     notifyAlreadySigned: true,
@@ -49,7 +50,8 @@
   // ============================================================
 
   function log(message) {
-    console.log(`[${CONFIG.title}] ${message}`);
+    // 关闭过程日志，只保留最终签到结果。
+    void message;
   }
 
   function notify(title, subtitle, content) {
@@ -290,7 +292,9 @@
 
     const match = String(block || "").match(pattern);
 
-    return match ? stripHtml(match[1]) : "";
+    return match
+      ? stripHtml(match[1])
+      : "";
   }
 
   // ============================================================
@@ -399,7 +403,8 @@
         notify(
           "✅ 奶昔论坛",
           "Cookie 获取成功",
-          `认证字段：${authCookie.name}\n签到脚本将自动读取`
+          `认证字段：${authCookie.name}\n` +
+            "签到脚本将自动读取"
         );
       }
 
@@ -430,9 +435,13 @@
       ) || ""
     );
 
-    function buildHeaders(referer, ajax) {
+    function buildHeaders(
+      referer,
+      ajax
+    ) {
       const headers = {
-        Cookie: cookie,
+        Cookie:
+          cookie,
 
         "User-Agent":
           CONFIG.userAgent,
@@ -472,12 +481,17 @@
       ajax
     ) {
       const options = {
-        url: url,
-        timeout: CONFIG.timeout,
-        headers: buildHeaders(
-          referer,
-          ajax
-        ),
+        url:
+          url,
+
+        timeout:
+          CONFIG.timeout,
+
+        headers:
+          buildHeaders(
+            referer,
+            ajax
+          ),
       };
 
       log(`GET ${url}`);
@@ -492,9 +506,8 @@
           const status =
             getStatus(response);
 
-          const data = String(
-            body || ""
-          );
+          const data =
+            String(body || "");
 
           if (error) {
             log(
@@ -523,18 +536,18 @@
       html,
       text
     ) {
-      const source = String(
-        html || ""
-      );
+      const source =
+        String(html || "");
 
-      const plainText = String(
-        text || ""
-      )
-        .replace(/\s+/g, " ")
-        .trim();
+      const plainText =
+        String(text || "")
+          .replace(/\s+/g, " ")
+          .trim();
 
       return (
-        /k_misign/i.test(source) ||
+        /k_misign/i.test(
+          source
+        ) ||
         /id=["'](?:lxdays|lxtdays|lxreward)["']/i.test(
           source
         ) ||
@@ -553,15 +566,13 @@
       html,
       text
     ) {
-      const source = String(
-        html || ""
-      );
+      const source =
+        String(html || "");
 
-      const plainText = String(
-        text || ""
-      )
-        .replace(/\s+/g, " ")
-        .trim();
+      const plainText =
+        String(text || "")
+          .replace(/\s+/g, " ")
+          .trim();
 
       if (
         isNormalSignPage(
@@ -607,13 +618,11 @@
       html,
       text
     ) {
-      const source = String(
-        html || ""
-      );
+      const source =
+        String(html || "");
 
-      const plainText = String(
-        text || ""
-      );
+      const plainText =
+        String(text || "");
 
       const explicitMessage =
         /请先登录|请登录后|登录后才能|您需要先登录|登录状态失效|登录信息失效|重新登录/i.test(
@@ -638,11 +647,10 @@
     }
 
     function isAlreadySigned(text) {
-      const normalized = String(
-        text || ""
-      )
-        .replace(/\s+/g, " ")
-        .trim();
+      const normalized =
+        String(text || "")
+          .replace(/\s+/g, " ")
+          .trim();
 
       return /您今天已经签到|今天已经签到|今日已经签到|您今日已经签到|今日已签到|今天已签到|已签到|已完成签到|签到已完成|明天再来|无需重复签到|重复签到|已经签过到|今日已签/i.test(
         normalized
@@ -650,11 +658,10 @@
     }
 
     function isSignSuccess(text) {
-      const normalized = String(
-        text || ""
-      )
-        .replace(/\s+/g, " ")
-        .trim();
+      const normalized =
+        String(text || "")
+          .replace(/\s+/g, " ")
+          .trim();
 
       return /签到成功|成功签到|已签到|今日已签|今天已签|签到已完成|恭喜.{0,40}(?:签到|获得)|获得.{0,40}(?:经验|积分|金币|奶昔|威望)/i.test(
         normalized
@@ -672,9 +679,10 @@
     // ============================================================
 
     function toAbsoluteUrl(value) {
-      const url = decodeHtml(
-        String(value || "").trim()
-      );
+      const url =
+        decodeHtml(
+          String(value || "").trim()
+        );
 
       if (!url) return "";
 
@@ -703,9 +711,10 @@
     }
 
     function extractFormhash(html) {
-      const source = decodeHtml(
-        String(html || "")
-      );
+      const source =
+        decodeHtml(
+          String(html || "")
+        );
 
       const patterns = [
         /name=["']formhash["'][^>]*value=["']([^"']+)["']/i,
@@ -749,9 +758,10 @@
     }
 
     function extractSignUrl(html) {
-      const source = decodeHtml(
-        String(html || "")
-      );
+      const source =
+        decodeHtml(
+          String(html || "")
+        );
 
       const patterns = [
         /href\s*=\s*["']([^"']*k_misign-sign\.html[^"']*operation=qiandao[^"']*)["']/i,
@@ -834,12 +844,11 @@
       html,
       id
     ) {
-      const escapedId = String(
-        id
-      ).replace(
-        /[.*+?^${}()|[\]\\]/g,
-        "\\$&"
-      );
+      const escapedId =
+        String(id).replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&"
+        );
 
       const openingPattern =
         new RegExp(
@@ -848,9 +857,7 @@
         );
 
       const openingMatch =
-        String(
-          html || ""
-        ).match(
+        String(html || "").match(
           openingPattern
         );
 
@@ -882,9 +889,7 @@
         );
 
       const elementMatch =
-        String(
-          html || ""
-        ).match(
+        String(html || "").match(
           elementPattern
         );
 
@@ -910,9 +915,11 @@
       html,
       text
     ) {
-      const normalized = String(
-        text || ""
-      ).replace(/\s+/g, " ");
+      const normalized =
+        String(text || "").replace(
+          /\s+/g,
+          " "
+        );
 
       let streakDays =
         extractNumberById(
@@ -937,12 +944,16 @@
           streakDays
         )
       ) {
+        /*
+         * 奶昔移动页实际顺序：
+         * 1天 连续签到 128天 累计签到
+         */
         streakDays =
           firstMatchedNumber(
             normalized,
             [
-              /连续签到\s*[：:]?\s*(\d+)\s*天/i,
               /(\d+)\s*天\s*连续签到/i,
+              /连续签到\s*[：:]?\s*(\d+)\s*天/i,
               /连续\s*[：:]?\s*(\d+)\s*天/i,
             ]
           );
@@ -957,8 +968,8 @@
           firstMatchedNumber(
             normalized,
             [
-              /累计签到\s*[：:]?\s*(\d+)\s*天/i,
               /(\d+)\s*天\s*累计签到/i,
+              /累计签到\s*[：:]?\s*(\d+)\s*天/i,
               /签到总天数\s*[：:]?\s*(\d+)\s*天/i,
             ]
           );
@@ -968,8 +979,8 @@
         firstMatchedNumber(
           normalized,
           [
-            /今日排名\s*[：:]?\s*(\d+)/i,
             /(\d+)\s*今日排名/i,
+            /今日排名\s*[：:]?\s*(\d+)/i,
           ]
         );
 
@@ -1043,9 +1054,8 @@
     // ============================================================
 
     function parseCreditLog(html) {
-      const source = String(
-        html || ""
-      );
+      const source =
+        String(html || "");
 
       const uidMatch =
         source.match(
@@ -1117,9 +1127,7 @@
 
         if (!description) {
           const amount =
-            String(
-              change
-            ).replace(
+            String(change).replace(
               /^\+/,
               ""
             );
@@ -1156,6 +1164,125 @@
             3
           ),
       };
+    }
+
+    function extractProfileNickname(html) {
+      const source =
+        String(html || "");
+
+      const patterns = [
+        /<title[^>]*>\s*([\s\S]*?)\s*的个人资料(?:\s+奶昔论坛)?\s*<\/title>/i,
+
+        /<meta[^>]+name=["']keywords["'][^>]+content=["']([^"']+?)的个人资料["']/i,
+
+        /<meta[^>]+content=["']([^"']+?)的个人资料["'][^>]+name=["']keywords["']/i,
+      ];
+
+      for (
+        let index = 0;
+        index < patterns.length;
+        index += 1
+      ) {
+        const match =
+          source.match(
+            patterns[index]
+          );
+
+        if (
+          match &&
+          match[1]
+        ) {
+          const nickname =
+            stripHtml(
+              match[1]
+            ).trim();
+
+          if (nickname) {
+            return nickname;
+          }
+        }
+      }
+
+      return "";
+    }
+
+    function fetchNicknameAndFinish(
+      resultText,
+      signStats,
+      creditData,
+      alreadySigned
+    ) {
+      const storedNickname =
+        $persistentStore.read(
+          CONFIG.nicknameKey
+        ) || "";
+
+      if (!creditData.userId) {
+        creditData.nickname =
+          storedNickname;
+
+        outputSuccess(
+          resultText,
+          signStats,
+          creditData,
+          alreadySigned
+        );
+
+        return;
+      }
+
+      const profileUrl =
+        `${CONFIG.baseUrl}/home.php?mod=space` +
+        `&uid=${encodeURIComponent(
+          creditData.userId
+        )}` +
+        "&do=profile&mycenter=1" +
+        `&_=${Date.now()}`;
+
+      httpGet(
+        profileUrl,
+        CONFIG.creditLogUrl,
+        function (
+          error,
+          response,
+          html
+        ) {
+          const status =
+            getStatus(response);
+
+          let nickname = "";
+
+          if (
+            !error &&
+            isHttpSuccess(status)
+          ) {
+            nickname =
+              extractProfileNickname(
+                html
+              );
+          }
+
+          if (nickname) {
+            $persistentStore.write(
+              nickname,
+              CONFIG.nicknameKey
+            );
+          }
+
+          creditData.nickname =
+            nickname ||
+            storedNickname ||
+            "未获取";
+
+          outputSuccess(
+            resultText,
+            signStats,
+            creditData,
+            alreadySigned
+          );
+        },
+        false
+      );
     }
 
     function buildResultReport(
@@ -1205,12 +1332,16 @@
       }
 
       const lines = [
-        "===奶昔论坛===",
         "📌 签到结果",
+
         resultText,
+
         "",
 
-        `用户ID：${creditData.userId || "未获取"}`,
+        `用户昵称：${
+          creditData.nickname ||
+          "未获取"
+        }`,
 
         `最新变动：${latestTime}`,
 
@@ -1244,7 +1375,10 @@
             : "未获取"
         }`,
 
-        `签到等级：${signStats.level || "未获取"}`,
+        `签到等级：${
+          signStats.level ||
+          "未获取"
+        }`,
 
         "",
 
@@ -1290,6 +1424,11 @@
           : null;
 
       const noticeLines = [
+        `用户昵称：${
+          creditData.nickname ||
+          "未获取"
+        }`,
+
         resultText,
       ];
 
@@ -1376,6 +1515,12 @@
               signStats,
               {
                 userId: "",
+
+                nickname:
+                  $persistentStore.read(
+                    CONFIG.nicknameKey
+                  ) || "未获取",
+
                 records: [],
               },
               alreadySigned
@@ -1399,6 +1544,12 @@
               signStats,
               {
                 userId: "",
+
+                nickname:
+                  $persistentStore.read(
+                    CONFIG.nicknameKey
+                  ) || "未获取",
+
                 records: [],
               },
               alreadySigned
@@ -1410,11 +1561,7 @@
           const creditData =
             parseCreditLog(html);
 
-          log(
-            `积分记录读取完成：用户ID ${creditData.userId || "未获取"}，签到记录 ${creditData.records.length} 条`
-          );
-
-          outputSuccess(
+          fetchNicknameAndFinish(
             resultText,
             signStats,
             creditData,
@@ -1436,7 +1583,6 @@
         );
 
       const lines = [
-        "===奶昔论坛===",
         "📌 签到结果",
         "签到失败",
         message,
@@ -1573,12 +1719,8 @@
           }
 
           const verified =
-            isAlreadySigned(
-              text
-            ) ||
-            isSignSuccess(
-              text
-            ) ||
+            isAlreadySigned(text) ||
+            isSignSuccess(text) ||
             (
               isSignSuccess(
                 signResponseText
@@ -1744,12 +1886,8 @@
           }
 
           if (
-            isSignFailure(
-              text
-            ) &&
-            !isAlreadySigned(
-              text
-            )
+            isSignFailure(text) &&
+            !isAlreadySigned(text)
           ) {
             if (
               currentIndex + 1 <
@@ -1815,9 +1953,7 @@
             getStatus(response);
 
           const homeText =
-            stripHtml(
-              homeHtml
-            );
+            stripHtml(homeHtml);
 
           if (error) {
             outputFailure(
@@ -1828,9 +1964,7 @@
           }
 
           if (
-            !isHttpSuccess(
-              status
-            )
+            !isHttpSuccess(status)
           ) {
             outputFailure(
               `论坛首页返回 HTTP ${status}`,
@@ -2055,9 +2189,7 @@
 
           if (
             error ||
-            !isHttpSuccess(
-              status
-            )
+            !isHttpSuccess(status)
           ) {
             if (
               index + 1 <
