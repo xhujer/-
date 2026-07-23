@@ -8,9 +8,9 @@
 
 [Argument]
 
-cron = input,"10 9 * * *",tag=签到时间,desc=默认每天 09:10 执行签到
+cron = input,"0 0 * * *",tag=签到时间
 
-cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录或刷新奶昔论坛时自动保存 Cookie
+cookieCapture = switch,true,tag=自动获取 Cookie
 
 [Script]
 
