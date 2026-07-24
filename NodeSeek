@@ -1,7 +1,7 @@
 #!name=NodeSeek 自动签到
 #!desc=自动抓取 Cookie，支持随机或固定签到，并显示签到奖励、排名和账户信息
 #!author=ming
-#!icon=https://www.nodeseek.com/favicon.ico
+#!icon=https://cdn.nodeimage.com/i/jQkBni6VOwjCQ8zOaWzlhbDPAoHE3Svz.jpeg
 #!homepage=https://www.nodeseek.com/
 #!system=iOS,iPadOS
 #!date=2026-07-25
