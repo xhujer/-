@@ -1,5 +1,5 @@
 #!name=NodeSeek 自动签到
-#!desc=自动抓取 Cookie，并支持随机或固定模式定时签到
+#!desc=自动抓取 Cookie，支持随机或固定签到，并显示签到奖励、排名和账户信息
 #!author=ming
 #!icon=https://www.nodeseek.com/favicon.ico
 #!homepage=https://www.nodeseek.com/
@@ -9,11 +9,11 @@
 
 RunTime = input,"0 6 * * *",tag=每日签到时间,desc=默认每天早上 06:00 执行签到
 
-CaptureCookie = switch,true,tag=自动获取 Cookie,desc=开启后登录或刷新 NodeSeek 自动保存 Cookie
+CaptureCookie = switch,true,tag=自动获取 Cookie,desc=开启后访问 NodeSeek 自动保存 Cookie
 
 Random = switch,true,tag=随机签到,desc=开启为随机签到，关闭为固定签到
 
-MemberID = input,"",tag=NodeSeek 成员 ID,desc=填写个人主页 /space/ 后面的数字，例如 26589
+MemberID = input,"44709",tag=成员 ID,desc=个人主页 space 后面的数字
 
 [Script]
 
