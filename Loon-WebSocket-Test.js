@@ -1,209 +1,307 @@
-const TEST_TIMEOUT = 15000;
+/*
+ * NodeSeek Cookie 捕获与 Fog WebSocket 握手修复测试
+ *
+ * 功能：
+ * 1. 从 Safari 的 NodeSeek 请求中保存 Cookie 和 User-Agent
+ * 2. 尝试拦截 /edge-cgi/fog WebSocket 握手
+ * 3. 注入正确的 Origin、Referer、Cookie 和 User-Agent
+ */
 
-const TARGETS = [
-  {
-    name: "Postman Echo",
-    url: "wss://ws.postman-echo.com/raw"
-  },
-  {
-    name: "NodeSeek Fog",
-    url: "wss://www.nodeseek.com/edge-cgi/fog"
+const SCRIPT_NAME = "NodeSeek Fog 握手";
+const DOMAIN = "nodeseek.com";
+
+const KEY_COOKIE = "nodeseek_cookie";
+const KEY_USER_AGENT = "nodeseek_user_agent";
+const KEY_CAPTURE_TIME = "nodeseek_capture_time";
+
+function log(message) {
+  console.log(`[${SCRIPT_NAME}] ${message}`);
+}
+
+function readHeader(headers, name) {
+  if (!headers || typeof headers !== "object") {
+    return "";
   }
-];
 
-const results = [];
+  const target = String(name).toLowerCase();
 
-function cleanText(value) {
-  return String(value ?? "")
-    .replace(/\u0000/g, "")
-    .replace(/\r/g, "")
-    .trim();
+  for (const key of Object.keys(headers)) {
+    if (String(key).toLowerCase() === target) {
+      return String(headers[key] || "");
+    }
+  }
+
+  return "";
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+function removeHeader(headers, name) {
+  const target = String(name).toLowerCase();
+
+  for (const key of Object.keys(headers)) {
+    if (String(key).toLowerCase() === target) {
+      delete headers[key];
+    }
+  }
 }
 
-function testWebSocket(target) {
-  return new Promise((resolve) => {
-    let socket = null;
-    let finished = false;
-    let timer = null;
-    const startedAt = Date.now();
+function setHeader(headers, name, value) {
+  removeHeader(headers, name);
 
-    function finish(status, detail) {
-      if (finished) {
-        return;
-      }
+  if (value !== undefined && value !== null && String(value) !== "") {
+    headers[name] = String(value);
+  }
+}
 
-      finished = true;
+function maskCookie(cookie) {
+  if (!cookie) {
+    return "无";
+  }
 
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
+  if (cookie.length <= 20) {
+    return `${cookie.slice(0, 5)}***`;
+  }
 
-      const elapsed = Date.now() - startedAt;
+  return `${cookie.slice(0, 10)}***${cookie.slice(-6)}`;
+}
 
-      const result = {
-        name: target.name,
-        url: target.url,
-        status,
-        detail: cleanText(detail),
-        elapsed
-      };
+function saveRequestIdentity(headers) {
+  const requestCookie = readHeader(headers, "Cookie");
+  const requestUserAgent = readHeader(headers, "User-Agent");
 
-      results.push(result);
+  let cookieUpdated = false;
+  let userAgentUpdated = false;
 
-      console.log(
-        `${target.name}：${status}，` +
-        `${result.detail}，耗时 ${elapsed}ms`
+  if (requestCookie) {
+    const oldCookie =
+      $persistentStore.read(KEY_COOKIE) || "";
+
+    if (requestCookie !== oldCookie) {
+      $persistentStore.write(
+        requestCookie,
+        KEY_COOKIE
       );
 
-      if (socket) {
-        try {
-          socket.onopen = null;
-          socket.onmessage = null;
-          socket.onerror = null;
-          socket.onclose = null;
-          socket.close();
-        } catch {}
-
-        socket = null;
-      }
-
-      resolve(result);
+      cookieUpdated = true;
     }
+  }
 
-    try {
-      socket = new WebSocket(target.url);
+  if (requestUserAgent) {
+    const oldUserAgent =
+      $persistentStore.read(KEY_USER_AGENT) || "";
 
-      try {
-        socket.binaryType = "arraybuffer";
-      } catch {}
+    if (requestUserAgent !== oldUserAgent) {
+      $persistentStore.write(
+        requestUserAgent,
+        KEY_USER_AGENT
+      );
 
-      socket.onopen = () => {
-        finish(
-          "连接成功",
-          `readyState=${socket.readyState}`
-        );
-      };
+      userAgentUpdated = true;
+    }
+  }
 
-      socket.onmessage = (event) => {
-        const data = event?.data;
+  if (cookieUpdated || userAgentUpdated) {
+    const captureTime =
+      new Date().toLocaleString();
 
-        if (data instanceof ArrayBuffer) {
-          console.log(
-            `${target.name} 收到二进制消息：` +
-            `${data.byteLength} 字节`
-          );
-        } else {
-          console.log(
-            `${target.name} 收到消息：` +
-            `${String(data).slice(0, 100)}`
-          );
-        }
-      };
+    $persistentStore.write(
+      captureTime,
+      KEY_CAPTURE_TIME
+    );
 
-      socket.onerror = (event) => {
-        finish(
-          "连接错误",
-          event?.message ||
-          event?.error?.message ||
-          "未返回具体错误"
-        );
-      };
+    log("NodeSeek 身份信息已更新");
 
-      socket.onclose = (event) => {
-        finish(
-          "连接关闭",
-          `code=${event?.code ?? "未知"}，` +
-          `reason=${cleanText(event?.reason) || "无"}`
-        );
-      };
-
-      timer = setTimeout(() => {
-        finish(
-          "连接超时",
-          `readyState=${socket?.readyState ?? "未知"}`
-        );
-      }, TEST_TIMEOUT);
-    } catch (error) {
-      finish(
-        "创建失败",
-        error?.message || error
+    if (cookieUpdated) {
+      log(
+        `Cookie：${maskCookie(requestCookie)}`
       );
     }
+
+    if (userAgentUpdated) {
+      log(
+        `User-Agent：${requestUserAgent}`
+      );
+    }
+  }
+}
+
+function isFogRequest(url) {
+  return (
+    typeof url === "string" &&
+    /\/edge-cgi\/fog(?:[?#]|$)/i.test(url)
+  );
+}
+
+function handleFogHandshake(url, originalHeaders) {
+  const headers = {
+    ...originalHeaders
+  };
+
+  /*
+   * 当前握手本身可能已经带有 Cookie 和 UA。
+   * 优先使用当前请求中的值，缺少时读取此前捕获的值。
+   */
+  const currentCookie =
+    readHeader(headers, "Cookie");
+
+  const currentUserAgent =
+    readHeader(headers, "User-Agent");
+
+  const savedCookie =
+    $persistentStore.read(KEY_COOKIE) || "";
+
+  const savedUserAgent =
+    $persistentStore.read(KEY_USER_AGENT) || "";
+
+  const finalCookie =
+    currentCookie || savedCookie;
+
+  const finalUserAgent =
+    savedUserAgent || currentUserAgent;
+
+  setHeader(
+    headers,
+    "Origin",
+    "https://www.nodeseek.com"
+  );
+
+  setHeader(
+    headers,
+    "Referer",
+    "https://www.nodeseek.com/"
+  );
+
+  if (finalCookie) {
+    setHeader(
+      headers,
+      "Cookie",
+      finalCookie
+    );
+  }
+
+  if (finalUserAgent) {
+    setHeader(
+      headers,
+      "User-Agent",
+      finalUserAgent
+    );
+  }
+
+  /*
+   * 删除可能暴露 generic 页面来源的 Fetch Metadata，
+   * 避免与手动写入的 Origin 冲突。
+   */
+  removeHeader(
+    headers,
+    "Sec-Fetch-Site"
+  );
+
+  removeHeader(
+    headers,
+    "Sec-Fetch-Mode"
+  );
+
+  removeHeader(
+    headers,
+    "Sec-Fetch-Dest"
+  );
+
+  log("=== NodeSeek Fog 握手已拦截 ===");
+  log(`URL：${url}`);
+  log(`Origin：${readHeader(headers, "Origin")}`);
+  log(`Referer：${readHeader(headers, "Referer")}`);
+
+  log(
+    `Cookie：${
+      finalCookie
+        ? `已注入（${maskCookie(finalCookie)}）`
+        : "未找到"
+    }`
+  );
+
+  log(
+    `User-Agent：${
+      finalUserAgent
+        ? "已注入"
+        : "未找到"
+    }`
+  );
+
+  const captureTime =
+    $persistentStore.read(KEY_CAPTURE_TIME) || "未知";
+
+  log(`身份捕获时间：${captureTime}`);
+
+  $notification.post(
+    SCRIPT_NAME,
+    "Fog 握手已拦截",
+    [
+      `Cookie：${finalCookie ? "已注入" : "未找到"}`,
+      `User-Agent：${finalUserAgent ? "已注入" : "未找到"}`,
+      `Origin：https://www.nodeseek.com`
+    ].join("\n")
+  );
+
+  /*
+   * 使用修改后的完整请求头继续握手。
+   */
+  $done({
+    headers
   });
 }
 
-function buildHtml() {
-  const rows = results
-    .map((item) => {
-      return `
-        <div style="
-          margin-bottom:14px;
-          padding:14px;
-          border-radius:12px;
-          background:rgba(128,128,128,0.12);
-        ">
-          <strong>${escapeHtml(item.name)}</strong><br>
-          状态：${escapeHtml(item.status)}<br>
-          详情：${escapeHtml(item.detail)}<br>
-          耗时：${item.elapsed}ms
-        </div>
-      `;
-    })
-    .join("");
+function main() {
+  const request =
+    typeof $request !== "undefined"
+      ? $request
+      : null;
 
-  return `
-    <div style="
-      padding:16px;
-      font-family:-apple-system,BlinkMacSystemFont,sans-serif;
-      line-height:1.6;
-    ">
-      <h2>WebSocket 对照测试</h2>
-      ${rows}
-    </div>
-  `;
+  if (!request || !request.url) {
+    log("没有获取到 $request");
+
+    $done({});
+    return;
+  }
+
+  const url =
+    String(request.url);
+
+  const headers =
+    request.headers || {};
+
+  /*
+   * 每次访问 NodeSeek 都尝试更新 Cookie 和 UA。
+   */
+  saveRequestIdentity(headers);
+
+  if (isFogRequest(url)) {
+    handleFogHandshake(
+      url,
+      headers
+    );
+
+    return;
+  }
+
+  /*
+   * 普通网页请求不做修改。
+   */
+  $done({});
 }
 
-(async () => {
-  try {
-    console.log("=== WebSocket 对照测试 ===");
-    console.log(`WebSocket：${typeof WebSocket}`);
+try {
+  main();
+} catch (error) {
+  log(
+    `执行异常：${String(
+      error && (
+        error.stack ||
+        error.message
+      ) || error
+    )}`
+  );
 
-    if (typeof WebSocket !== "function") {
-      $done({
-        title: "❌ WebSocket 不可用",
-        htmlMessage: "<h2>WebSocket 构造器不存在</h2>"
-      });
-
-      return;
-    }
-
-    for (const target of TARGETS) {
-      await testWebSocket(target);
-    }
-
-    $done({
-      title: "WebSocket 对照测试完成",
-      htmlMessage: buildHtml()
-    });
-  } catch (error) {
-    $done({
-      title: "❌ 测试异常",
-      htmlMessage:
-        `<pre>${escapeHtml(
-          error?.stack ||
-          error?.message ||
-          error
-        )}</pre>`
-    });
-  }
-})();
+  /*
+   * 出错时保持原请求继续，避免影响网页访问。
+   */
+  $done({});
+}
