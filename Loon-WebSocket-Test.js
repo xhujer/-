@@ -1,10 +1,11 @@
-const SCRIPT_NAME = "Loon 环境检测";
+const SCRIPT_NAME = "Loon WebSocket 环境检测";
 const FOG_URL = "wss://www.nodeseek.com/edge-cgi/fog";
 const CONNECT_TIMEOUT = 8000;
 
 let finished = false;
 let socket = null;
 let timer = null;
+const logs = [];
 
 function cleanText(value) {
   return String(value ?? "")
@@ -13,16 +14,53 @@ function cleanText(value) {
     .trim();
 }
 
-function log(name, value) {
-  console.log(`${name}：${value}`);
+function addLog(name, value = "") {
+  const line = value === ""
+    ? cleanText(name)
+    : `${cleanText(name)}：${cleanText(value)}`;
+
+  logs.push(line);
+  console.log(line);
 }
 
-function notify(title, subtitle = "", body = "") {
-  $notification.post(
-    cleanText(title) || SCRIPT_NAME,
-    cleanText(subtitle),
-    cleanText(body)
-  );
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildHtml(title, details) {
+  const content = [
+    ...logs,
+    "",
+    `=== ${title} ===`,
+    details
+  ].join("\n");
+
+  return `
+  <div style="
+    padding:16px;
+    font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+    line-height:1.65;
+    word-break:break-word;
+  ">
+    <h2 style="margin:0 0 14px 0;">
+      ${escapeHtml(title)}
+    </h2>
+
+    <pre style="
+      margin:0;
+      padding:14px;
+      border-radius:12px;
+      background:rgba(128,128,128,0.12);
+      white-space:pre-wrap;
+      word-break:break-word;
+      font-size:14px;
+    ">${escapeHtml(content)}</pre>
+  </div>`;
 }
 
 function closeSocket() {
@@ -31,20 +69,22 @@ function closeSocket() {
     timer = null;
   }
 
-  if (socket) {
-    try {
-      socket.onopen = null;
-      socket.onmessage = null;
-      socket.onerror = null;
-      socket.onclose = null;
-      socket.close();
-    } catch {}
-
-    socket = null;
+  if (!socket) {
+    return;
   }
+
+  try {
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onerror = null;
+    socket.onclose = null;
+    socket.close();
+  } catch {}
+
+  socket = null;
 }
 
-function finish(title, body) {
+function finish(title, details) {
   if (finished) {
     return;
   }
@@ -52,17 +92,24 @@ function finish(title, body) {
   finished = true;
   closeSocket();
 
+  const finalTitle = cleanText(title);
+  const finalDetails = cleanText(details);
+
   console.log("");
-  console.log(`=== ${title} ===`);
-  console.log(body);
+  console.log(`=== ${finalTitle} ===`);
+  console.log(finalDetails);
 
-  notify(
-    SCRIPT_NAME,
-    title,
-    body
-  );
-
-  $done();
+  /*
+   * generic 脚本必须返回 title 和 htmlMessage，
+   * 否则 Loon 会显示空白结果页。
+   */
+  $done({
+    title: finalTitle,
+    htmlMessage: buildHtml(
+      finalTitle,
+      finalDetails
+    )
+  });
 }
 
 function bytesToHex(buffer) {
@@ -75,6 +122,18 @@ function bytesToHex(buffer) {
         .padStart(2, "0");
     })
     .join("");
+}
+
+function safeJson(value) {
+  try {
+    return JSON.stringify(
+      value,
+      null,
+      2
+    );
+  } catch {
+    return String(value);
+  }
 }
 
 async function testWebCrypto() {
@@ -112,44 +171,51 @@ async function testWebCrypto() {
     return {
       available: true,
       message:
-        `WebCrypto SHA-256 可用\n` +
-        `${bytesToHex(digest)}`
+        "WebCrypto SHA-256 可用\n" +
+        bytesToHex(digest)
     };
   } catch (error) {
     return {
       available: false,
       message:
-        `WebCrypto SHA-256 执行失败：` +
-        `${cleanText(
+        "WebCrypto SHA-256 执行失败：" +
+        cleanText(
           error?.message || error
-        )}`
+        )
     };
   }
 }
 
-async function printEnvironment() {
-  console.log(
+async function inspectEnvironment() {
+  addLog(
     "=== Loon JavaScript 环境检测 ==="
   );
 
-  log(
-    "Loon 信息",
+  addLog(
+    "$loon",
     typeof $loon !== "undefined"
-      ? JSON.stringify($loon)
+      ? safeJson($loon)
       : "undefined"
   );
 
-  log(
+  addLog(
+    "$environment",
+    typeof $environment !== "undefined"
+      ? safeJson($environment)
+      : "undefined"
+  );
+
+  addLog(
     "WebSocket",
     typeof WebSocket
   );
 
-  log(
+  addLog(
     "crypto",
     typeof crypto
   );
 
-  log(
+  addLog(
     "crypto.subtle",
     typeof crypto !== "undefined" &&
     crypto
@@ -157,7 +223,7 @@ async function printEnvironment() {
       : "undefined"
   );
 
-  log(
+  addLog(
     "crypto.getRandomValues",
     typeof crypto !== "undefined" &&
     crypto
@@ -165,7 +231,7 @@ async function printEnvironment() {
       : "undefined"
   );
 
-  log(
+  addLog(
     "crypto.randomUUID",
     typeof crypto !== "undefined" &&
     crypto
@@ -173,57 +239,57 @@ async function printEnvironment() {
       : "undefined"
   );
 
-  log(
+  addLog(
     "TextEncoder",
     typeof TextEncoder
   );
 
-  log(
+  addLog(
     "TextDecoder",
     typeof TextDecoder
   );
 
-  log(
+  addLog(
     "Uint8Array",
     typeof Uint8Array
   );
 
-  log(
+  addLog(
     "ArrayBuffer",
     typeof ArrayBuffer
   );
 
-  log(
+  addLog(
     "Blob",
     typeof Blob
   );
 
-  log(
+  addLog(
     "Worker",
     typeof Worker
   );
 
-  log(
+  addLog(
     "URL",
     typeof URL
   );
 
-  log(
+  addLog(
     "btoa",
     typeof btoa
   );
 
-  log(
+  addLog(
     "atob",
     typeof atob
   );
 
-  log(
+  addLog(
     "document",
     typeof document
   );
 
-  log(
+  addLog(
     "location",
     typeof location
   );
@@ -231,39 +297,32 @@ async function printEnvironment() {
   const cryptoResult =
     await testWebCrypto();
 
-  console.log(
+  addLog(
+    "WebCrypto 测试",
     cryptoResult.message
   );
 
   return cryptoResult;
 }
 
-function testFogWebSocket(
-  cryptoResult
-) {
+function testFogWebSocket(cryptoResult) {
   if (typeof WebSocket !== "function") {
-    const details = [
-      "WebSocket：不支持",
-      cryptoResult.message,
-      "",
-      "结论：Loon 当前脚本环境不能直接建立 NodeSeek Fog WebSocket。"
-    ].join("\n");
-
     finish(
       "❌ WebSocket 不可用",
-      details
+      [
+        "WebSocket：不支持",
+        cryptoResult.message,
+        "",
+        "结论：Loon 当前脚本环境不能直接建立 NodeSeek Fog WebSocket。"
+      ].join("\n")
     );
 
     return;
   }
 
-  console.log("");
-  console.log(
-    "检测到 WebSocket 构造器"
-  );
-
-  console.log(
-    `开始连接：${FOG_URL}`
+  addLog(
+    "Fog 测试",
+    `开始连接 ${FOG_URL}`
   );
 
   try {
@@ -276,17 +335,15 @@ function testFogWebSocket(
     } catch {}
 
     socket.onopen = () => {
-      const details = [
-        "WebSocket：可用",
-        "NodeSeek Fog：连接成功",
-        cryptoResult.message,
-        "",
-        "结论：可以继续尝试制作纯 Loon Fog 验证脚本。"
-      ].join("\n");
-
       finish(
         "✅ Fog 连接成功",
-        details
+        [
+          "WebSocket：可用",
+          "NodeSeek Fog：连接成功",
+          cryptoResult.message,
+          "",
+          "结论：可以继续制作纯 Loon Fog 验证脚本。"
+        ].join("\n")
       );
     };
 
@@ -294,24 +351,31 @@ function testFogWebSocket(
       const data =
         event?.data;
 
-      let description = "";
-
       if (
+        typeof ArrayBuffer !== "undefined" &&
         data instanceof ArrayBuffer
       ) {
-        description =
-          `收到二进制消息，${data.byteLength} 字节`;
-      } else if (
-        typeof data === "string"
-      ) {
-        description =
-          `收到文本消息，${data.length} 字符`;
-      } else {
-        description =
-          `收到消息，类型：${typeof data}`;
+        addLog(
+          "Fog 消息",
+          `二进制数据 ${data.byteLength} 字节`
+        );
+
+        return;
       }
 
-      console.log(description);
+      if (typeof data === "string") {
+        addLog(
+          "Fog 消息",
+          `文本数据 ${data.length} 字符`
+        );
+
+        return;
+      }
+
+      addLog(
+        "Fog 消息",
+        `类型 ${typeof data}`
+      );
     };
 
     socket.onerror = (event) => {
@@ -323,18 +387,14 @@ function testFogWebSocket(
           "未返回具体错误"
         );
 
-      const details = [
-        "WebSocket：构造器存在",
-        "NodeSeek Fog：连接失败",
-        `错误：${errorText}`,
-        cryptoResult.message,
-        "",
-        "结论：Loon 有 WebSocket 对象，但当前无法连接 Fog。"
-      ].join("\n");
-
       finish(
         "❌ Fog 连接失败",
-        details
+        [
+          "WebSocket：构造器存在",
+          "NodeSeek Fog：连接失败",
+          `错误：${errorText}`,
+          cryptoResult.message
+        ].join("\n")
       );
     };
 
@@ -343,58 +403,39 @@ function testFogWebSocket(
         return;
       }
 
-      const code =
-        event?.code ?? "未知";
-
-      const reason =
-        cleanText(
-          event?.reason
-        ) || "无";
-
-      const details = [
-        "WebSocket：构造器存在",
-        "NodeSeek Fog：连接已关闭",
-        `关闭代码：${code}`,
-        `关闭原因：${reason}`,
-        cryptoResult.message
-      ].join("\n");
-
       finish(
-        "⚠️ Fog 连接关闭",
-        details
+        "⚠️ Fog 连接已关闭",
+        [
+          "WebSocket：构造器存在",
+          `关闭代码：${event?.code ?? "未知"}`,
+          `关闭原因：${cleanText(event?.reason) || "无"}`,
+          cryptoResult.message
+        ].join("\n")
       );
     };
 
     timer = setTimeout(() => {
-      const readyState =
-        socket?.readyState ??
-        "未知";
-
-      const details = [
-        "WebSocket：构造器存在",
-        `NodeSeek Fog：${CONNECT_TIMEOUT / 1000} 秒内未建立连接`,
-        `readyState：${readyState}`,
-        cryptoResult.message
-      ].join("\n");
-
       finish(
         "⚠️ Fog 连接超时",
-        details
+        [
+          "WebSocket：构造器存在",
+          `${CONNECT_TIMEOUT / 1000} 秒内未建立连接`,
+          `readyState：${socket?.readyState ?? "未知"}`,
+          cryptoResult.message
+        ].join("\n")
       );
     }, CONNECT_TIMEOUT);
   } catch (error) {
-    const details = [
-      "WebSocket：构造器存在",
-      "NodeSeek Fog：创建连接时异常",
-      `错误：${cleanText(
-        error?.message || error
-      )}`,
-      cryptoResult.message
-    ].join("\n");
-
     finish(
       "❌ WebSocket 创建失败",
-      details
+      [
+        "WebSocket：构造器存在",
+        "NodeSeek Fog：创建连接时发生异常",
+        `错误：${cleanText(
+          error?.message || error
+        )}`,
+        cryptoResult.message
+      ].join("\n")
     );
   }
 }
@@ -402,7 +443,7 @@ function testFogWebSocket(
 (async () => {
   try {
     const cryptoResult =
-      await printEnvironment();
+      await inspectEnvironment();
 
     testFogWebSocket(
       cryptoResult
