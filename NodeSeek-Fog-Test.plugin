@@ -1,0 +1,19 @@
+#!name=NodeSeek Fog 握手测试
+#!desc=捕获 NodeSeek Cookie 与 User-Agent，并尝试修复 Loon generic 环境中的 Fog WebSocket 握手
+#!author=tianbian
+#!icon=https://www.nodeseek.com/favicon.ico
+#!homepage=https://www.nodeseek.com/
+#!system=iOS,iPadOS
+#!loon_version=3.5.0(969)
+#!date=2026-07-25
+#!tag=NodeSeek,WebSocket,Fog,测试
+
+[Script]
+
+http-request ^(?:https?|wss?):\/\/(?:www\.)?nodeseek\.com\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/NodeSeek-Fog-Handshake.js,tag=NodeSeek身份捕获与Fog握手修复,requires-body=false,timeout=10,enable=true
+
+generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/Loon-WebSocket-Test.js,tag=NodeSeek Fog连接测试,timeout=40,enable=true
+
+[Mitm]
+
+hostname = nodeseek.com, www.nodeseek.com
