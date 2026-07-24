@@ -1,6 +1,6 @@
 #!name = 奶昔论坛自动签到
 #!desc = 自动获取奶昔论坛 Cookie，并执行每日签到
-#!author = tianbian
+#!author = Ming
 #!date = 2026-07-23
 #!icon = https://forum.naixi.net/favicon.ico
 #!system = iOS,iPadOS
