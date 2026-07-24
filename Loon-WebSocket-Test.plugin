@@ -1,0 +1,11 @@
+#!name=Loon WebSocket 环境检测
+#!desc=检测 Loon 脚本环境是否支持 WebSocket、WebCrypto，并测试 NodeSeek Fog 连接
+#!author=ming
+#!icon=https://www.nodeseek.com/favicon.ico
+#!homepage=https://www.nodeseek.com/
+#!system=iOS,iPadOS
+#!date=2026-07-25
+
+[Script]
+
+generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/Loon-WebSocket-Test.js,tag=Loon WebSocket 环境检测,timeout=15,img-url=network
