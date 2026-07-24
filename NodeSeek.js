@@ -5,18 +5,11 @@ const KEY_COOKIE = "nodeseek_cookie";
 const KEY_USER_AGENT = "nodeseek_user_agent";
 const KEY_RANDOM = "nodeseek_random";
 const KEY_MEMBER_ID = "nodeseek_member_id";
-const KEY_BOARD_STATS = "nodeseek_board_stats";
-
-const DEFAULT_MEMBER_ID = "44709";
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) " +
   "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 " +
   "Mobile/15E148 Safari/604.1";
-
-/* ==============================
- * 基础工具
- * ============================== */
 
 function read(key) {
   return $persistentStore.read(key);
@@ -59,9 +52,9 @@ function notify(title, subtitle = "", body = "") {
   );
 }
 
-function sleep(milliseconds) {
+function sleep(ms) {
   return new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
+    setTimeout(resolve, ms);
   });
 }
 
@@ -87,7 +80,15 @@ function getStatusCode(response) {
 
 function parseJson(value) {
   try {
-    return JSON.parse(String(value || ""));
+    let result = JSON.parse(
+      String(value ?? "")
+    );
+
+    if (typeof result === "string") {
+      result = JSON.parse(result);
+    }
+
+    return result;
   } catch {
     return null;
   }
@@ -124,10 +125,6 @@ function chinaDateKey(value = Date.now()) {
     .toISOString()
     .slice(0, 10);
 }
-
-/* ==============================
- * HTTP 请求
- * ============================== */
 
 function httpGet(options) {
   return new Promise((resolve, reject) => {
@@ -179,8 +176,7 @@ function isCloudflarePage(response, data) {
     text.includes("just a moment") ||
     text.includes("cf-chl-") ||
     text.includes("challenge-platform") ||
-    text.includes("cloudflare ray id") ||
-    text.includes("performing security verification")
+    text.includes("cloudflare ray id")
   );
 }
 
@@ -321,55 +317,8 @@ function getSignMode() {
   };
 }
 
-function normalizeMemberId(value) {
-  const text =
-    cleanText(value);
-
-  const match =
-    text.match(
-      /(?:\/space\/)?(\d+)/
-    );
-
-  return match?.[1] || "";
-}
-
-function getMemberId() {
-  const argument =
-    getArg("MemberID") ??
-    getArg("memberId") ??
-    getArg("member_id");
-
-  const argumentId =
-    normalizeMemberId(argument);
-
-  if (argumentId) {
-    write(
-      argumentId,
-      KEY_MEMBER_ID
-    );
-
-    return argumentId;
-  }
-
-  const storedId =
-    normalizeMemberId(
-      read(KEY_MEMBER_ID)
-    );
-
-  if (storedId) {
-    return storedId;
-  }
-
-  write(
-    DEFAULT_MEMBER_ID,
-    KEY_MEMBER_ID
-  );
-
-  return DEFAULT_MEMBER_ID;
-}
-
 /* ==============================
- * Cookie 处理
+ * Cookie 和用户信息抓取
  * ============================== */
 
 function normalizeCookie(value) {
@@ -395,372 +344,63 @@ function getCookieFromHeaders(headers) {
   );
 }
 
-function parseCookiePairs(cookie) {
-  const pairs = [];
+function hasCookie(cookie, name) {
+  const target =
+    String(name).toLowerCase();
 
-  String(cookie || "")
+  return String(cookie || "")
     .split(";")
-    .forEach((part) => {
-      const item =
-        part.trim();
-
+    .some((part) => {
       const index =
-        item.indexOf("=");
+        part.indexOf("=");
 
       if (index <= 0) {
-        return;
+        return false;
       }
 
-      const name =
-        item.slice(0, index).trim();
-
-      const value =
-        item.slice(index + 1).trim();
-
-      if (name) {
-        pairs.push({
-          name,
-          value
-        });
-      }
-    });
-
-  return pairs;
-}
-
-/**
- * 不再直接用新 Cookie 覆盖旧 Cookie。
- * 将新旧 Cookie 合并，避免某个请求只携带部分 Cookie，
- * 导致 cf_clearance 或登录字段丢失。
- */
-function mergeCookies(oldCookie, newCookie) {
-  const map = {};
-  const order = [];
-
-  function add(cookie) {
-    parseCookiePairs(cookie)
-      .forEach(({ name, value }) => {
-        if (
-          !Object.prototype
-            .hasOwnProperty
-            .call(map, name)
-        ) {
-          order.push(name);
-        }
-
-        map[name] = value;
-      });
-  }
-
-  add(oldCookie);
-  add(newCookie);
-
-  return order
-    .filter((name) => map[name] !== "")
-    .map((name) => {
-      return `${name}=${map[name]}`;
-    })
-    .join("; ");
-}
-
-function hasCookieName(cookie, targetName) {
-  const target =
-    String(targetName).toLowerCase();
-
-  return parseCookiePairs(cookie)
-    .some(({ name }) => {
-      return name.toLowerCase() === target;
-    });
-}
-
-/* ==============================
- * HTML 处理
- * ============================== */
-
-function decodeUnicodeEscapes(value) {
-  return String(value || "")
-    .replace(
-      /\\u([0-9a-fA-F]{4})/g,
-      (_, hex) => {
-        return String.fromCharCode(
-          parseInt(hex, 16)
-        );
-      }
-    );
-}
-
-function decodeHtmlEntities(value) {
-  return String(value || "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#34;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&apos;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&amp;/gi, "&")
-    .replace(
-      /&#(\d+);/g,
-      (_, code) => {
-        return String.fromCharCode(
-          Number(code)
-        );
-      }
-    )
-    .replace(
-      /&#x([0-9a-f]+);/gi,
-      (_, code) => {
-        return String.fromCharCode(
-          parseInt(code, 16)
-        );
-      }
-    );
-}
-
-function htmlToText(html) {
-  return decodeHtmlEntities(
-    decodeUnicodeEscapes(html)
-  )
-    .replace(
-      /<script\b[^>]*>[\s\S]*?<\/script>/gi,
-      " "
-    )
-    .replace(
-      /<style\b[^>]*>[\s\S]*?<\/style>/gi,
-      " "
-    )
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\\n|\\r|\\t/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/* ==============================
- * Board 奖励和排名
- * ============================== */
-
-function parseBoardStats(body) {
-  const raw =
-    decodeUnicodeEscapes(
-      decodeHtmlEntities(body)
-    );
-
-  const text =
-    htmlToText(raw);
-
-  const sources = [
-    raw,
-    text
-  ];
-
-  for (const source of sources) {
-    const fullMatch =
-      String(source).match(
-        /今日签到获得鸡腿\s*(\d+)\s*个[\s\S]{0,100}?当前排名第\s*(\d+)/i
+      return (
+        part
+          .slice(0, index)
+          .trim()
+          .toLowerCase() === target
       );
-
-    if (fullMatch) {
-      return {
-        reward: Number(fullMatch[1]),
-        rank: Number(fullMatch[2]),
-        date: chinaDateKey()
-      };
-    }
-  }
-
-  let reward = null;
-  let rank = null;
-
-  for (const source of sources) {
-    if (reward === null) {
-      const rewardMatch =
-        String(source).match(
-          /今日签到获得鸡腿\s*(\d+)\s*个/i
-        );
-
-      if (rewardMatch?.[1]) {
-        reward =
-          Number(rewardMatch[1]);
-      }
-    }
-
-    if (rank === null) {
-      const rankMatch =
-        String(source).match(
-          /当前排名第\s*(\d+)/i
-        );
-
-      if (rankMatch?.[1]) {
-        rank =
-          Number(rankMatch[1]);
-      }
-    }
-  }
-
-  if (
-    reward === null &&
-    rank === null
-  ) {
-    return null;
-  }
-
-  return {
-    reward,
-    rank,
-    date: chinaDateKey()
-  };
+    });
 }
-
-function saveBoardStats(stats) {
-  if (!stats) {
-    return;
-  }
-
-  write(
-    JSON.stringify({
-      reward:
-        isNumber(stats.reward)
-          ? Number(stats.reward)
-          : null,
-
-      rank:
-        isNumber(stats.rank)
-          ? Number(stats.rank)
-          : null,
-
-      date:
-        stats.date ||
-        chinaDateKey()
-    }),
-    KEY_BOARD_STATS
-  );
-}
-
-function readBoardStats() {
-  const json =
-    parseJson(
-      read(KEY_BOARD_STATS)
-    );
-
-  if (
-    !json ||
-    json.date !== chinaDateKey()
-  ) {
-    return null;
-  }
-
-  return {
-    reward:
-      isNumber(json.reward)
-        ? Number(json.reward)
-        : null,
-
-    rank:
-      isNumber(json.rank)
-        ? Number(json.rank)
-        : null,
-
-    date:
-      json.date
-  };
-}
-
-/**
- * Safari 打开 /board 时，
- * 从真实浏览器响应中抓取奖励和排名。
- */
-async function captureBoardResponse() {
-  const url =
-    String($request?.url || "");
-
-  if (
-    !/\/board(?:\?|$)/i.test(url)
-  ) {
-    return;
-  }
-
-  const body =
-    String($response?.body || "");
-
-  if (
-    !body ||
-    isCloudflarePage(
-      $response,
-      body
-    )
-  ) {
-    return;
-  }
-
-  const stats =
-    parseBoardStats(body);
-
-  if (!stats) {
-    return;
-  }
-
-  saveBoardStats(stats);
-
-  const line =
-    `📊 今日签到获得鸡腿 ${stats.reward} 个` +
-    ` | 当前排名第 ${stats.rank}`;
-
-  print(`✅ 签到排名已更新\n${line}`);
-}
-
-/* ==============================
- * 自动抓取 Cookie
- * ============================== */
 
 async function captureRequest() {
   const url =
     String($request?.url || "");
 
-  if (
-    !url.includes("nodeseek.com")
-  ) {
+  if (!url.includes("nodeseek.com")) {
     return;
   }
 
   const headers =
     $request?.headers || {};
 
-  const incomingCookie =
+  const cookie =
     getCookieFromHeaders(headers);
 
+  const oldCookie =
+    read(KEY_COOKIE) || "";
+
+  const hasLoginCookie =
+    hasCookie(cookie, "session") ||
+    hasCookie(cookie, "pjwt") ||
+    hasCookie(cookie, "fog");
+
+  /*
+   * 使用浏览器当前请求携带的完整 Cookie。
+   * 不再合并旧 Cookie，避免保留已经失效的
+   * cf_clearance 或其他旧字段。
+   */
   if (
-    incomingCookie &&
-    incomingCookie.length >= 20
+    cookie.length >= 20 &&
+    (hasLoginCookie || !oldCookie)
   ) {
-    const oldCookie =
-      read(KEY_COOKIE) || "";
-
-    const mergedCookie =
-      mergeCookies(
-        oldCookie,
-        incomingCookie
-      );
-
-    if (
-      mergedCookie &&
-      mergedCookie !== oldCookie
-    ) {
-      write(
-        mergedCookie,
-        KEY_COOKIE
-      );
-
-      const containsClearance =
-        hasCookieName(
-          mergedCookie,
-          "cf_clearance"
-        );
-
-      print(
-        containsClearance
-          ? "✅ Cookie 已更新，已包含 Cloudflare 凭据"
-          : "✅ Cookie 已更新"
-      );
+    if (cookie !== oldCookie) {
+      write(cookie, KEY_COOKIE);
+      print("✅ NodeSeek Cookie 已更新");
     }
   }
 
@@ -779,10 +419,12 @@ async function captureRequest() {
     );
   }
 
+  /*
+   * 访问个人主页时自动保存成员 ID。
+   * 正常情况下也会从签到排行榜接口自动取得。
+   */
   const memberMatch =
-    url.match(
-      /\/space\/(\d+)/
-    );
+    url.match(/\/space\/(\d+)/i);
 
   if (memberMatch?.[1]) {
     write(
@@ -796,18 +438,16 @@ async function captureRequest() {
  * 请求头
  * ============================== */
 
-function buildApiHeaders(
+function buildCommonHeaders(
   cookie,
   userAgent,
   referer
 ) {
   return {
     "Accept": "*/*",
+
     "Accept-Language":
       "zh-CN,zh-Hans;q=0.9,en;q=0.8",
-
-    "Origin":
-      `https://${DOMAIN}`,
 
     "Referer":
       referer ||
@@ -822,9 +462,6 @@ function buildApiHeaders(
     "Sec-Fetch-Site":
       "same-origin",
 
-    "X-Requested-With":
-      "XMLHttpRequest",
-
     "User-Agent":
       userAgent ||
       DEFAULT_USER_AGENT,
@@ -835,7 +472,155 @@ function buildApiHeaders(
 }
 
 /* ==============================
- * 签到
+ * 签到排行榜接口
+ * ============================== */
+
+function parseBoardData(json) {
+  if (
+    !json ||
+    typeof json !== "object"
+  ) {
+    throw new Error(
+      "签到排行榜返回格式无效"
+    );
+  }
+
+  const record =
+    json.record &&
+    typeof json.record === "object"
+      ? json.record
+      : null;
+
+  let signedToday = false;
+
+  if (record) {
+    const recordDate =
+      chinaDateKey(
+        record.created_at
+      );
+
+    signedToday =
+      !recordDate ||
+      recordDate === chinaDateKey();
+  }
+
+  return {
+    signedToday,
+
+    memberId:
+      record?.member_id
+        ? String(record.member_id)
+        : "",
+
+    gain:
+      isNumber(record?.gain)
+        ? Number(record.gain)
+        : null,
+
+    rank:
+      isNumber(json.order)
+        ? Number(json.order)
+        : null,
+
+    total:
+      isNumber(json.total)
+        ? Number(json.total)
+        : null,
+
+    createdAt:
+      cleanText(
+        record?.created_at
+      )
+  };
+}
+
+async function getBoardData(
+  cookie,
+  userAgent
+) {
+  const {
+    response,
+    data
+  } = await httpGet({
+    url:
+      `https://${DOMAIN}` +
+      `/api/attendance/board` +
+      `?page=1&_=${Date.now()}`,
+
+    headers: {
+      ...buildCommonHeaders(
+        cookie,
+        userAgent,
+        `https://${DOMAIN}/sw.js?v=0.3.34`
+      ),
+
+      "Cache-Control":
+        "no-cache",
+
+      "Pragma":
+        "no-cache"
+    }
+  });
+
+  const code =
+    getStatusCode(response);
+
+  if (
+    isCloudflarePage(
+      response,
+      data
+    )
+  ) {
+    throw new Error(
+      `签到排行榜被 Cloudflare 拦截（HTTP ${code}）`
+    );
+  }
+
+  const json =
+    parseJson(data);
+
+  if (!json) {
+    throw new Error(
+      `签到排行榜解析失败（HTTP ${code}）`
+    );
+  }
+
+  const board =
+    parseBoardData(json);
+
+  if (board.memberId) {
+    write(
+      board.memberId,
+      KEY_MEMBER_ID
+    );
+  }
+
+  return board;
+}
+
+async function getBoardDataSafe(
+  cookie,
+  userAgent
+) {
+  try {
+    return await getBoardData(
+      cookie,
+      userAgent
+    );
+  } catch (error) {
+    console.log(
+      `签到排行榜：${cleanText(
+        error?.message ||
+        error
+      )}`
+    );
+
+    return null;
+  }
+}
+
+/* ==============================
+ * 签到接口
  * ============================== */
 
 function extractGain(message) {
@@ -861,7 +646,10 @@ function extractGain(message) {
   return null;
 }
 
-function parseSignResult(json, httpCode) {
+function parseSignResult(
+  json,
+  httpCode
+) {
   const message =
     cleanText(
       json?.message ||
@@ -880,14 +668,12 @@ function parseSignResult(json, httpCode) {
   if (already) {
     return {
       status: "already",
+
       message:
         message ||
         "今天已完成签到，请勿重复操作",
-      gain,
-      current:
-        isNumber(json?.current)
-          ? Number(json.current)
-          : null
+
+      gain
     };
   }
 
@@ -909,12 +695,7 @@ function parseSignResult(json, httpCode) {
               "签到成功"
             ),
 
-      gain,
-
-      current:
-        isNumber(json?.current)
-          ? Number(json.current)
-          : null
+      gain
     };
   }
 
@@ -925,8 +706,7 @@ function parseSignResult(json, httpCode) {
       message ||
       `签到失败（HTTP ${httpCode}）`,
 
-    gain: null,
-    current: null
+    gain: null
   };
 }
 
@@ -940,14 +720,35 @@ async function signIn(
     `/api/attendance` +
     `?random=${random ? "true" : "false"}`;
 
+  /*
+   * 恢复原来能够正常工作的请求格式：
+   * Content-Type 为 JSON，正文为 {}。
+   */
   const headers = {
-    ...buildApiHeaders(
-      cookie,
-      userAgent,
-      `https://${DOMAIN}/board`
-    ),
+    "Accept":
+      "application/json, text/plain, */*",
 
-    "Content-Length": "0"
+    "Accept-Language":
+      "zh-CN,zh-Hans;q=0.9,en;q=0.8",
+
+    "Content-Type":
+      "application/json;charset=utf-8",
+
+    "Origin":
+      `https://${DOMAIN}`,
+
+    "Referer":
+      `https://${DOMAIN}/board`,
+
+    "X-Requested-With":
+      "XMLHttpRequest",
+
+    "User-Agent":
+      userAgent ||
+      DEFAULT_USER_AGENT,
+
+    "Cookie":
+      cookie
   };
 
   const {
@@ -955,7 +756,8 @@ async function signIn(
     data
   } = await httpPost({
     url,
-    headers
+    headers,
+    body: "{}"
   });
 
   const code =
@@ -971,10 +773,9 @@ async function signIn(
       status: "cloudflare",
 
       message:
-        "签到请求被 Cloudflare 拦截",
+        `签到接口被 Cloudflare 拦截（HTTP ${code}）`,
 
-      gain: null,
-      current: null
+      gain: null
     };
   }
 
@@ -989,12 +790,11 @@ async function signIn(
         `签到结果解析失败（HTTP ${code}）：` +
         (
           cleanText(data)
-            .slice(0, 160) ||
+            .slice(0, 120) ||
           "空响应"
         ),
 
-      gain: null,
-      current: null
+      gain: null
     };
   }
 
@@ -1004,208 +804,37 @@ async function signIn(
   );
 }
 
-/* ==============================
- * 当天签到积分记录
- * ============================== */
-
-function parseCreditRecord(record) {
-  if (!Array.isArray(record)) {
-    return null;
-  }
-
-  const amount =
-    record[0];
-
-  const balance =
-    record[1];
-
-  const description =
-    cleanText(record[2]);
-
-  const timestamp =
-    cleanText(record[3]);
-
-  if (
-    !description ||
-    !timestamp
-  ) {
-    return null;
-  }
-
-  return {
-    amount:
-      isNumber(amount)
-        ? Number(amount)
-        : null,
-
-    balance:
-      isNumber(balance)
-        ? Number(balance)
-        : null,
-
-    description,
-    timestamp,
-    date:
-      chinaDateKey(timestamp)
-  };
-}
-
-async function getTodayCreditRecord(
+async function getBoardAfterSign(
   cookie,
   userAgent
 ) {
-  const {
-    response,
-    data
-  } = await httpGet({
-    url:
-      `https://${DOMAIN}` +
-      `/api/account/credit/page-1` +
-      `?_=${Date.now()}`,
+  const delays = [
+    500,
+    1000,
+    1800
+  ];
 
-    headers:
-      buildApiHeaders(
+  let lastBoard = null;
+
+  for (const delay of delays) {
+    await sleep(delay);
+
+    lastBoard =
+      await getBoardDataSafe(
         cookie,
-        userAgent,
-        `https://${DOMAIN}/board`
-      )
-  });
+        userAgent
+      );
 
-  if (
-    isCloudflarePage(
-      response,
-      data
-    )
-  ) {
-    return null;
-  }
-
-  const json =
-    parseJson(data);
-
-  const records =
-    Array.isArray(json?.data)
-      ? json.data
-      : [];
-
-  const today =
-    chinaDateKey();
-
-  for (const rawRecord of records) {
-    const record =
-      parseCreditRecord(rawRecord);
-
-    if (!record) {
-      continue;
-    }
-
-    const isToday =
-      record.date === today;
-
-    const isAttendance =
-      /签到收益|签到/i
-        .test(record.description) &&
-      /鸡腿/i
-        .test(record.description);
-
-    if (
-      isToday &&
-      isAttendance
-    ) {
-      return {
-        gain:
-          record.amount,
-
-        balance:
-          record.balance,
-
-        description:
-          record.description,
-
-        timestamp:
-          record.timestamp
-      };
+    if (lastBoard?.signedToday) {
+      return lastBoard;
     }
   }
 
-  return null;
+  return lastBoard;
 }
 
 /* ==============================
- * 后台尝试读取 Board
- * ============================== */
-
-async function getBoardStats(
-  cookie,
-  userAgent
-) {
-  try {
-    const {
-      response,
-      data
-    } = await httpGet({
-      url:
-        `https://${DOMAIN}/board` +
-        `?_=${Date.now()}`,
-
-      headers: {
-        "Accept":
-          "text/html,application/xhtml+xml," +
-          "application/xml;q=0.9,*/*;q=0.8",
-
-        "Accept-Language":
-          "zh-CN,zh-Hans;q=0.9,en;q=0.8",
-
-        "Cache-Control":
-          "no-cache",
-
-        "Pragma":
-          "no-cache",
-
-        "Referer":
-          `https://${DOMAIN}/board`,
-
-        "Sec-Fetch-Dest":
-          "document",
-
-        "Sec-Fetch-Mode":
-          "navigate",
-
-        "Sec-Fetch-Site":
-          "same-origin",
-
-        "User-Agent":
-          userAgent ||
-          DEFAULT_USER_AGENT,
-
-        "Cookie":
-          cookie
-      }
-    });
-
-    if (
-      isCloudflarePage(
-        response,
-        data
-      )
-    ) {
-      return readBoardStats();
-    }
-
-    const stats =
-      parseBoardStats(data);
-
-    if (stats) {
-      saveBoardStats(stats);
-      return stats;
-    }
-  } catch {}
-
-  return readBoardStats();
-}
-
-/* ==============================
- * 用户信息
+ * 用户资料
  * ============================== */
 
 async function getAccountInfo(
@@ -1213,9 +842,13 @@ async function getAccountInfo(
   userAgent,
   memberId
 ) {
-  if (!/^\d+$/.test(memberId)) {
+  if (
+    !/^\d+$/.test(
+      String(memberId || "")
+    )
+  ) {
     throw new Error(
-      "成员 ID 无效"
+      "未识别到成员 ID"
     );
   }
 
@@ -1226,14 +859,31 @@ async function getAccountInfo(
     url:
       `https://${DOMAIN}` +
       `/api/account/getInfo/${memberId}` +
-      `?readme=1&_=${Date.now()}`,
+      `?_=${Date.now()}`,
 
-    headers:
-      buildApiHeaders(
+    headers: {
+      "Accept":
+        "application/json, text/plain, */*",
+
+      "Accept-Language":
+        "zh-CN,zh-Hans;q=0.9,en;q=0.8",
+
+      "Referer":
+        `https://${DOMAIN}/space/${memberId}`,
+
+      "X-Requested-With":
+        "XMLHttpRequest",
+
+      "User-Agent":
+        userAgent ||
+        DEFAULT_USER_AGENT,
+
+      "Cookie":
         cookie,
-        userAgent,
-        `https://${DOMAIN}/space/${memberId}`
-      )
+
+      "Cache-Control":
+        "no-cache"
+    }
   });
 
   const code =
@@ -1246,7 +896,7 @@ async function getAccountInfo(
     )
   ) {
     throw new Error(
-      "用户信息请求被 Cloudflare 拦截"
+      `用户信息被 Cloudflare 拦截（HTTP ${code}）`
     );
   }
 
@@ -1328,42 +978,37 @@ function getResultTitle(status) {
   return "❌ NodeSeek 签到失败";
 }
 
-function formatAttendanceLine(
-  boardStats,
-  signResult,
-  creditRecord
+function formatBoardLine(
+  board,
+  signResult
 ) {
-  const reward =
-    isNumber(boardStats?.reward)
-      ? Number(boardStats.reward)
+  const gain =
+    isNumber(board?.gain)
+      ? Number(board.gain)
       : (
           isNumber(signResult?.gain)
             ? Number(signResult.gain)
-            : (
-                isNumber(creditRecord?.gain)
-                  ? Number(creditRecord.gain)
-                  : null
-              )
+            : null
         );
 
   const rank =
-    isNumber(boardStats?.rank)
-      ? Number(boardStats.rank)
+    isNumber(board?.rank)
+      ? Number(board.rank)
       : null;
 
   if (
-    reward !== null &&
+    gain !== null &&
     rank !== null
   ) {
     return (
-      `📊 今日签到获得鸡腿 ${reward} 个` +
+      `📊 今日签到获得鸡腿 ${gain} 个` +
       ` | 当前排名第 ${rank}`
     );
   }
 
-  if (reward !== null) {
+  if (gain !== null) {
     return (
-      `📊 今日签到获得鸡腿 ${reward} 个` +
+      `📊 今日签到获得鸡腿 ${gain} 个` +
       ` | 当前排名暂未获取`
     );
   }
@@ -1374,7 +1019,7 @@ function formatAttendanceLine(
     );
   }
 
-  return "⚠️ 今日签到奖励和排名暂未获取";
+  return "⚠️ 今日签到奖励和排名获取失败";
 }
 
 function formatAccountLine(account) {
@@ -1398,19 +1043,8 @@ function formatAccountLine(account) {
 (async () => {
   try {
     /*
-     * HTTP Response 模式：
-     * 抓取 Board 奖励和排名
-     */
-    if (
-      typeof $response !== "undefined"
-    ) {
-      await captureBoardResponse();
-      return done({});
-    }
-
-    /*
      * HTTP Request 模式：
-     * 合并 Cookie、保存 User-Agent
+     * 自动保存 Cookie、User-Agent 和个人主页 ID。
      */
     if (
       typeof $request !== "undefined"
@@ -1427,8 +1061,7 @@ function formatAccountLine(account) {
 
     if (!cookie) {
       const message =
-        "请开启自动获取 Cookie，" +
-        "然后在 Safari 登录并刷新 NodeSeek";
+        "请开启自动获取 Cookie，然后在 Safari 登录并刷新 NodeSeek";
 
       print(
         `❌ NodeSeek 签到失败\n${message}`
@@ -1452,114 +1085,163 @@ function formatAccountLine(account) {
     const signMode =
       getSignMode();
 
-    const memberId =
-      getMemberId();
-
     console.log(
       `签到模式：${signMode.name}`
     );
 
-    console.log(
-      `成员 ID：${memberId}`
-    );
-
     /*
-     * 1. 执行签到
+     * 先查询签到排行榜。
+     *
+     * 今天已经签到时直接读取结果，
+     * 不再重复请求签到接口，
+     * 避免重复签到请求触发 Cloudflare 403。
      */
-    let signResult =
-      await signIn(
-        cookie,
-        userAgent,
-        signMode.random
-      );
-
-    if (
-      signResult.status === "success"
-    ) {
-      await sleep(700);
-    }
-
-    /*
-     * 2. 读取当天积分记录
-     */
-    let creditRecord = null;
-
-    try {
-      creditRecord =
-        await getTodayCreditRecord(
-          cookie,
-          userAgent
-        );
-    } catch (error) {
-      console.log(
-        `积分记录：${cleanText(
-          error?.message ||
-          error
-        )}`
-      );
-    }
-
-    /*
-     * 签到接口被 Cloudflare 拦截，
-     * 但积分记录显示今天已经签到：
-     * 按“今日已签到”输出，避免误报。
-     */
-    if (
-      signResult.status === "cloudflare" &&
-      creditRecord
-    ) {
-      signResult = {
-        status: "already",
-
-        message:
-          `检测到今日签到记录，` +
-          `获得 ${creditRecord.gain} 鸡腿`,
-
-        gain:
-          creditRecord.gain,
-
-        current:
-          creditRecord.balance
-      };
-    }
-
-    if (
-      signResult.gain === null &&
-      creditRecord &&
-      isNumber(creditRecord.gain)
-    ) {
-      signResult.gain =
-        Number(creditRecord.gain);
-    }
-
-    /*
-     * 3. 获取奖励和排名
-     */
-    const boardStats =
-      await getBoardStats(
+    let boardBefore =
+      await getBoardDataSafe(
         cookie,
         userAgent
       );
 
+    let boardAfter =
+      boardBefore;
+
+    let signResult;
+
+    if (boardBefore?.signedToday) {
+      signResult = {
+        status: "already",
+
+        message:
+          "今天已完成签到，请勿重复操作",
+
+        gain:
+          boardBefore.gain
+      };
+    } else {
+      /*
+       * 今天尚未签到，执行签到请求。
+       */
+      signResult =
+        await signIn(
+          cookie,
+          userAgent,
+          signMode.random
+        );
+
+      /*
+       * 签到后重新查询排行榜。
+       * 接口数据可能稍有延迟，因此自动重试。
+       */
+      boardAfter =
+        await getBoardAfterSign(
+          cookie,
+          userAgent
+        );
+
+      if (boardAfter?.signedToday) {
+        const gain =
+          isNumber(boardAfter.gain)
+            ? Number(boardAfter.gain)
+            : signResult.gain;
+
+        if (
+          signResult.status === "success"
+        ) {
+          signResult.gain = gain;
+
+          if (gain !== null) {
+            signResult.message =
+              `签到成功，获得 ${gain} 鸡腿`;
+          }
+        } else if (
+          signResult.status === "already"
+        ) {
+          signResult.gain = gain;
+        } else if (
+          boardBefore &&
+          boardBefore.signedToday === false
+        ) {
+          /*
+           * 签到前明确没有记录，
+           * 签到后出现记录，可确定本次签到成功。
+           */
+          signResult = {
+            status: "success",
+
+            message:
+              gain !== null
+                ? `签到成功，获得 ${gain} 鸡腿`
+                : "签到成功",
+
+            gain
+          };
+        } else {
+          /*
+           * 签到前排行榜请求失败，无法确认之前状态。
+           * 签到后发现当天记录，按已签到处理。
+           */
+          signResult = {
+            status: "already",
+
+            message:
+              "检测到今天已经完成签到",
+
+            gain
+          };
+        }
+      }
+    }
+
+    const board =
+      boardAfter ||
+      boardBefore;
+
     /*
-     * 4. 获取账户信息
+     * 成员 ID 优先从排行榜 record.member_id 获取。
+     * 无需在插件中手动内置。
+     */
+    const memberId =
+      board?.memberId ||
+      cleanText(
+        read(KEY_MEMBER_ID)
+      );
+
+    if (memberId) {
+      write(
+        memberId,
+        KEY_MEMBER_ID
+      );
+
+      console.log(
+        `成员 ID：${memberId}`
+      );
+    } else {
+      console.log(
+        "成员 ID：未识别"
+      );
+    }
+
+    /*
+     * 获取昵称、总鸡腿、等级、帖子和评论。
      */
     let account = null;
 
-    try {
-      account =
-        await getAccountInfo(
-          cookie,
-          userAgent,
-          memberId
+    if (memberId) {
+      try {
+        account =
+          await getAccountInfo(
+            cookie,
+            userAgent,
+            memberId
+          );
+      } catch (error) {
+        console.log(
+          `用户信息：${cleanText(
+            error?.message ||
+            error
+          )}`
         );
-    } catch (error) {
-      console.log(
-        `用户信息：${cleanText(
-          error?.message ||
-          error
-        )}`
-      );
+      }
     }
 
     const title =
@@ -1567,41 +1249,39 @@ function formatAccountLine(account) {
         signResult.status
       );
 
-    const attendanceLine =
-      formatAttendanceLine(
-        boardStats,
-        signResult,
-        creditRecord
+    const boardLine =
+      formatBoardLine(
+        board,
+        signResult
       );
 
     const accountLine =
       formatAccountLine(account);
 
-    let extraNotice = "";
+    let extra = "";
 
     if (
       signResult.status === "cloudflare"
     ) {
-      extraNotice =
-        "\n请开启自动获取 Cookie，" +
-        "在 Safari 完成验证并刷新 /board";
+      extra =
+        "\nCookie 或 Cloudflare 验证已失效，请开启自动获取 Cookie 后刷新一次 NodeSeek";
     }
 
     const output =
       `${title}\n` +
       `${signResult.message}\n` +
-      `${attendanceLine}\n` +
+      `${boardLine}\n` +
       `${accountLine}` +
-      `${extraNotice}`;
+      extra;
 
     print(output);
 
     notify(
       title,
       signResult.message,
-      `${attendanceLine}\n` +
+      `${boardLine}\n` +
       `${accountLine}` +
-      `${extraNotice}`
+      extra
     );
 
     return done();
