@@ -2,9 +2,10 @@ const SCRIPT_NAME = "NodeSeek签到";
 const DOMAIN = "www.nodeseek.com";
 
 const KEY_COOKIE = "nodeseek_cookie";
-const KEY_RANDOM = "nodeseek_random";
 const KEY_UA = "nodeseek_user_agent";
+const KEY_RANDOM = "nodeseek_random";
 const KEY_USER_ID = "nodeseek_user_id";
+const KEY_USERNAME = "nodeseek_username";
 
 const DEFAULT_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) " +
@@ -15,77 +16,47 @@ function read(key) {
   return $persistentStore.read(key);
 }
 
-function write(val, key) {
-  return $persistentStore.write(String(val), key);
+function write(value, key) {
+  return $persistentStore.write(String(value), key);
 }
 
-function done(obj = {}) {
-  $done(obj);
+function done(value = {}) {
+  $done(value);
 }
 
-function cleanText(s) {
-  return String(s ?? "")
+function cleanText(value) {
+  return String(value ?? "")
     .replace(/\u0000/g, "")
     .replace(/\r/g, "")
     .trim();
 }
 
-function printResult(text) {
-  const out = cleanText(text);
-  if (out) console.log(out);
-}
-
 function notify(title, subtitle = "", body = "") {
-  const t = cleanText(title) || "通知";
-  const s = cleanText(subtitle);
-  let b = cleanText(body);
+  let text = cleanText(body);
 
-  const MAX = 900;
-  if (b.length > MAX) {
-    b = b.slice(0, MAX) + "…";
+  if (text.length > 900) {
+    text = text.slice(0, 900) + "…";
   }
 
-  $notification.post(t, s, b);
+  $notification.post(
+    cleanText(title) || SCRIPT_NAME,
+    cleanText(subtitle),
+    text
+  );
 }
 
-function httpRequest(method, options) {
-  return new Promise((resolve, reject) => {
-    const callback = (error, response, data) => {
-      if (error) {
-        reject(error);
-        return;
-      }
+function print(text) {
+  const output = cleanText(text);
 
-      resolve({
-        resp: response,
-        data
-      });
-    };
-
-    if (String(method).toLowerCase() === "post") {
-      $httpClient.post(options, callback);
-    } else {
-      $httpClient.get(options, callback);
-    }
-  });
-}
-
-function httpGet(options) {
-  return httpRequest("get", options);
-}
-
-function httpPost(options) {
-  return httpRequest("post", options);
-}
-
-function getStatusCode(resp) {
-  return Number(resp?.status || resp?.statusCode || 0);
+  if (output) {
+    console.log(output);
+  }
 }
 
 function getHeader(headers, name) {
   const target = String(name).toLowerCase();
 
-  for (const key in (headers || {})) {
+  for (const key in headers || {}) {
     if (String(key).toLowerCase() === target) {
       return headers[key];
     }
@@ -94,77 +65,234 @@ function getHeader(headers, name) {
   return null;
 }
 
-function normalizeCookie(str) {
-  return String(str || "")
+function getStatusCode(response) {
+  return Number(
+    response?.status ||
+    response?.statusCode ||
+    0
+  );
+}
+
+function httpGet(options) {
+  return new Promise((resolve, reject) => {
+    $httpClient.get(
+      options,
+      (error, response, data) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve({
+          response: response || {},
+          data: data ?? ""
+        });
+      }
+    );
+  });
+}
+
+function httpPost(options) {
+  return new Promise((resolve, reject) => {
+    $httpClient.post(
+      options,
+      (error, response, data) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve({
+          response: response || {},
+          data: data ?? ""
+        });
+      }
+    );
+  });
+}
+
+function parseJson(text) {
+  try {
+    return JSON.parse(String(text || ""));
+  } catch {
+    return null;
+  }
+}
+
+function hasNumber(value) {
+  return (
+    value !== null &&
+    value !== undefined &&
+    value !== "" &&
+    Number.isFinite(Number(value))
+  );
+}
+
+function numberValue(value, fallback = 0) {
+  return hasNumber(value)
+    ? Number(value)
+    : fallback;
+}
+
+function normalizeCookie(value) {
+  return String(value || "")
     .replace(/\r?\n/g, "; ")
     .replace(/;+\s*/g, "; ")
     .replace(/\s*;\s*$/, "")
     .trim();
 }
 
-function getCookieFromHeaders(headers) {
-  const value = getHeader(headers, "Cookie");
+function getCookie(headers) {
+  const value = getHeader(
+    headers,
+    "Cookie"
+  );
 
   if (!value) {
-    return null;
+    return "";
   }
 
-  if (Array.isArray(value)) {
-    return normalizeCookie(value.join("; "));
-  }
-
-  return normalizeCookie(value);
+  return normalizeCookie(
+    Array.isArray(value)
+      ? value.join("; ")
+      : value
+  );
 }
 
-function getArg(key) {
+/**
+ * 兼容：
+ * 1. Loon argument=[{Random}]
+ * 2. Random=true
+ * 3. JSON 参数
+ */
+function getArg(name) {
   try {
-    if (typeof $argument === "string" && $argument.length) {
+    if (
+      typeof $argument === "object" &&
+      $argument !== null &&
+      !Array.isArray($argument)
+    ) {
+      return $argument[name] ?? null;
+    }
+
+    if (
+      typeof $argument === "string" &&
+      $argument.trim()
+    ) {
+      const text = $argument.trim();
+
+      try {
+        const json = JSON.parse(text);
+
+        if (
+          json &&
+          typeof json === "object"
+        ) {
+          return json[name] ?? null;
+        }
+      } catch {}
+
       const params = {};
 
-      $argument.split("&").forEach((part) => {
+      text.split("&").forEach((part) => {
         const index = part.indexOf("=");
 
         if (index < 0) {
           return;
         }
 
-        const argKey = part.slice(0, index);
-        const argValue = part.slice(index + 1);
+        const key = part
+          .slice(0, index)
+          .trim();
+
+        const raw = part.slice(
+          index + 1
+        );
 
         try {
-          params[argKey] = decodeURIComponent(argValue);
+          params[key] =
+            decodeURIComponent(raw);
         } catch {
-          params[argKey] = argValue;
+          params[key] = raw;
         }
       });
 
-      return params[key] ?? null;
+      return params[name] ?? null;
     }
   } catch {}
 
   return null;
 }
 
-function parseBoolean(value, defaultValue = true) {
+function parseBoolean(
+  value,
+  fallback = true
+) {
   if (
     value === null ||
     value === undefined ||
     value === ""
   ) {
-    return defaultValue;
+    return fallback;
   }
 
-  const text = String(value).trim().toLowerCase();
+  const text = String(value)
+    .trim()
+    .toLowerCase();
 
-  if (["false", "0", "no", "off"].includes(text)) {
+  if (
+    [
+      "false",
+      "0",
+      "off",
+      "no",
+      "fixed",
+      "固定",
+      "固定签到"
+    ].includes(text)
+  ) {
     return false;
   }
 
-  if (["true", "1", "yes", "on"].includes(text)) {
+  if (
+    [
+      "true",
+      "1",
+      "on",
+      "yes",
+      "random",
+      "随机",
+      "随机签到"
+    ].includes(text)
+  ) {
     return true;
   }
 
-  return defaultValue;
+  return fallback;
+}
+
+function getSignMode() {
+  const argument =
+    getArg("Random") ??
+    getArg("random");
+
+  const stored = read(KEY_RANDOM);
+
+  const random = parseBoolean(
+    argument !== null
+      ? argument
+      : stored,
+    true
+  );
+
+  write(random, KEY_RANDOM);
+
+  return {
+    random,
+    name: random
+      ? "随机签到"
+      : "固定签到"
+  };
 }
 
 function buildHeaders(
@@ -173,50 +301,75 @@ function buildHeaders(
   referer = `https://${DOMAIN}/board`
 ) {
   return {
-    "Accept": "application/json, text/plain, */*",
+    "Accept":
+      "application/json, text/plain, */*",
+
     "Referer": referer,
-    "X-Requested-With": "XMLHttpRequest",
-    "User-Agent": userAgent || DEFAULT_UA,
+
+    "X-Requested-With":
+      "XMLHttpRequest",
+
+    "User-Agent":
+      userAgent || DEFAULT_UA,
+
     "Cookie": cookie
   };
 }
 
 /**
- * 自动抓取 Cookie 和真实 User-Agent
+ * 自动保存 Cookie 和真实 User-Agent
  */
 async function captureCookie() {
-  const url = String($request?.url || "");
+  const url = String(
+    $request?.url || ""
+  );
 
   if (!url.includes("nodeseek.com")) {
     return;
   }
 
-  const headers = $request?.headers || {};
-  const cookie = getCookieFromHeaders(headers);
+  const headers =
+    $request?.headers || {};
 
-  if (!cookie || cookie.length < 20) {
+  const cookie =
+    getCookie(headers);
+
+  if (
+    !cookie ||
+    cookie.length < 20
+  ) {
     return;
   }
 
   const userAgent = cleanText(
-    getHeader(headers, "User-Agent")
+    getHeader(
+      headers,
+      "User-Agent"
+    )
   );
 
-  const oldCookie = read(KEY_COOKIE);
-  const oldUserAgent = read(KEY_UA);
+  const oldCookie =
+    read(KEY_COOKIE);
 
   if (cookie !== oldCookie) {
-    write(cookie, KEY_COOKIE);
+    write(
+      cookie,
+      KEY_COOKIE
+    );
   }
 
-  if (userAgent && userAgent !== oldUserAgent) {
-    write(userAgent, KEY_UA);
+  if (userAgent) {
+    write(
+      userAgent,
+      KEY_UA
+    );
   }
 
   if (cookie !== oldCookie) {
-    const message = "✅ Cookie 已更新";
+    const message =
+      "✅ Cookie 已更新";
 
-    printResult(message);
+    print(message);
 
     notify(
       SCRIPT_NAME,
@@ -227,151 +380,231 @@ async function captureCookie() {
 }
 
 /**
- * 统一签到结果文本
+ * 解析签到接口返回
  */
-function normalizeSignMessage(message, status) {
-  const text = cleanText(message);
-
-  if (status === "success") {
-    const rewardMatch = text.match(
-      /(?:获得|得到|奖励|增加)\s*[+＋]?\s*(\d+)\s*(?:个|只)?\s*鸡腿/i
-    );
-
-    if (rewardMatch) {
-      return `签到成功，获得 ${rewardMatch[1]} 鸡腿`;
-    }
-
-    return text || "签到成功";
-  }
-
-  if (status === "already") {
-    return text || "今日已经签到";
-  }
-
-  return text || "签到失败，服务器未返回提示";
-}
-
-/**
- * 执行签到
- */
-async function signIn(cookie, randomFlag, userAgent) {
-  const randomValue = randomFlag ? "true" : "false";
-
-  const url =
-    `https://${DOMAIN}/api/attendance` +
-    `?random=${randomValue}`;
-
-  const headers = {
-    ...buildHeaders(cookie, userAgent),
-    "Content-Type": "application/json;charset=utf-8",
-    "Origin": `https://${DOMAIN}`
-  };
-
-  const { resp, data } = await httpPost({
-    url,
-    headers,
-    body: "{}"
-  });
-
-  const code = getStatusCode(resp);
-  const raw = String(data || "");
-
-  let json = null;
-
-  try {
-    json = JSON.parse(raw);
-  } catch {}
-
-  if (!json || typeof json !== "object") {
-    return {
-      status: "fail",
-      code,
-      message:
-        `解析失败（HTTP ${code}）：` +
-        `${cleanText(raw).slice(0, 160) || "（空响应）"}`
-    };
-  }
-
+function parseSignResult(
+  json,
+  httpCode
+) {
   const message = cleanText(
-    json.message || json.msg || ""
+    json?.message ||
+    json?.msg
   );
 
   const already =
-    /已完成签到|今日已签到|已经签到|已签到|重复签到/i
+    /今日已签到|已经签到|已完成签到|重复签到|已签到/i
       .test(message);
 
   if (already) {
     return {
       status: "already",
-      code,
-      message: normalizeSignMessage(
-        message,
-        "already"
-      )
+
+      message:
+        message ||
+        "今日已经签到",
+
+      current:
+        hasNumber(json?.current)
+          ? Number(json.current)
+          : null
     };
   }
 
   const success =
-    json.success === true ||
-    /获得.*鸡腿|签到成功/i.test(message);
+    json?.success === true ||
+    hasNumber(json?.gain) ||
+    /签到成功|获得.*鸡腿|午饭\+?\d+.*鸡腿/i
+      .test(message);
 
   if (success) {
+    let resultMessage =
+      message || "签到成功";
+
+    if (hasNumber(json?.gain)) {
+      resultMessage =
+        `签到成功，获得 ${Number(
+          json.gain
+        )} 鸡腿`;
+    } else {
+      const match = message.match(
+        /(?:获得|得到|奖励|增加|午饭\+?)\s*[+＋]?\s*(\d+)\s*(?:个|只)?\s*鸡腿/i
+      );
+
+      if (match?.[1]) {
+        resultMessage =
+          `签到成功，获得 ${match[1]} 鸡腿`;
+      }
+    }
+
     return {
       status: "success",
-      code,
-      message: normalizeSignMessage(
-        message,
-        "success"
-      )
+
+      message: resultMessage,
+
+      current:
+        hasNumber(json?.current)
+          ? Number(json.current)
+          : null
     };
   }
 
   return {
     status: "fail",
-    code,
+
     message:
       message ||
-      `签到失败（HTTP ${code}）`
+      `签到失败（HTTP ${httpCode}）`,
+
+    current: null
   };
 }
 
 /**
- * 从登录后的网页中识别当前用户 ID
+ * 执行随机签到或固定签到
  */
-function extractCurrentUserId(html) {
-  const source = String(html || "");
+async function signIn(
+  cookie,
+  userAgent,
+  random
+) {
+  const url =
+    `https://${DOMAIN}` +
+    `/api/attendance` +
+    `?random=${random ? "true" : "false"}`;
 
-  const patterns = [
-    /\/userstyle\/(\d+)\.css(?:\?[^"']*)?/i,
-    /["']member_id["']\s*:\s*["']?(\d+)/i,
-    /["']userId["']\s*:\s*["']?(\d+)/i,
-    /["']uid["']\s*:\s*["']?(\d+)/i
-  ];
+  const headers = {
+    ...buildHeaders(
+      cookie,
+      userAgent
+    ),
 
-  for (const pattern of patterns) {
-    const match = source.match(pattern);
+    "Content-Type":
+      "application/json;charset=utf-8",
 
-    if (match && match[1]) {
-      return match[1];
-    }
+    "Origin":
+      `https://${DOMAIN}`
+  };
+
+  const {
+    response,
+    data
+  } = await httpPost({
+    url,
+    headers,
+
+    body: JSON.stringify({
+      content: []
+    })
+  });
+
+  const code =
+    getStatusCode(response);
+
+  const json =
+    parseJson(data);
+
+  if (!json) {
+    return {
+      status: "fail",
+
+      message:
+        `解析失败（HTTP ${code}）：` +
+        (
+          cleanText(data)
+            .slice(0, 160) ||
+          "（空响应）"
+        ),
+
+      current: null
+    };
   }
 
-  return null;
+  return parseSignResult(
+    json,
+    code
+  );
+}
+
+function decodeName(value) {
+  const text =
+    cleanText(value);
+
+  try {
+    return JSON.parse(
+      `"${text.replace(
+        /"/g,
+        '\\"'
+      )}"`
+    );
+  } catch {
+    return text.replace(
+      /\\u([0-9a-fA-F]{4})/g,
+      (_, hex) =>
+        String.fromCharCode(
+          parseInt(hex, 16)
+        )
+    );
+  }
 }
 
 /**
- * 请求 Board 页面获取当前用户 ID
- *
- * 获取失败时使用之前保存的用户 ID 作为兜底
+ * 从 Board 页面中的 meCard 获取当前登录用户
  */
-async function resolveCurrentUserId(
+function parseCurrentUser(html) {
+  const source = String(
+    html || ""
+  )
+    .replace(/&quot;/gi, '"')
+    .replace(/&#34;/gi, '"')
+    .replace(/&amp;/gi, "&");
+
+  const index =
+    source.indexOf("meCard");
+
+  if (index < 0) {
+    return null;
+  }
+
+  const block = source.slice(
+    index,
+    index + 12000
+  );
+
+  const idMatch = block.match(
+    /(?:["']member_id["']|\bmember_id)\s*:\s*["']?(\d+)/i
+  );
+
+  const nameMatch = block.match(
+    /(?:["']member_name["']|\bmember_name)\s*:\s*["']((?:\\.|[^"'])+)["']/i
+  );
+
+  const id =
+    idMatch?.[1] || "";
+
+  const name =
+    nameMatch?.[1]
+      ? decodeName(nameMatch[1])
+      : "";
+
+  return id
+    ? { id, name }
+    : null;
+}
+
+/**
+ * 请求 Board 页面识别当前用户 ID
+ */
+async function getCurrentUser(
   cookie,
   userAgent
 ) {
-  let detectedId = null;
+  let user = null;
 
   try {
-    const { resp, data } = await httpGet({
+    const {
+      response,
+      data
+    } = await httpGet({
       url:
         `https://${DOMAIN}/board` +
         `?_=${Date.now()}`,
@@ -379,39 +612,58 @@ async function resolveCurrentUserId(
       headers: {
         ...buildHeaders(
           cookie,
-          userAgent,
-          `https://${DOMAIN}/board`
+          userAgent
         ),
 
         "Accept":
           "text/html,application/xhtml+xml," +
           "application/xml;q=0.9,*/*;q=0.8",
 
-        "Cache-Control": "no-cache"
+        "Cache-Control":
+          "no-cache"
       }
     });
 
-    const code = getStatusCode(resp);
+    const code =
+      getStatusCode(response);
 
-    if (code >= 200 && code < 400) {
-      detectedId = extractCurrentUserId(data);
+    if (
+      code >= 200 &&
+      code < 400
+    ) {
+      user =
+        parseCurrentUser(data);
     }
   } catch {}
 
-  if (detectedId) {
-    write(detectedId, KEY_USER_ID);
-    return detectedId;
+  const id = cleanText(
+    user?.id ||
+    read(KEY_USER_ID)
+  );
+
+  const name = cleanText(
+    user?.name ||
+    read(KEY_USERNAME)
+  );
+
+  if (id) {
+    write(
+      id,
+      KEY_USER_ID
+    );
   }
 
-  return cleanText(read(KEY_USER_ID)) || null;
-}
+  if (name) {
+    write(
+      name,
+      KEY_USERNAME
+    );
+  }
 
-function normalizeNumber(value, fallback = 0) {
-  const number = Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+  return {
+    id,
+    name
+  };
 }
 
 /**
@@ -419,99 +671,103 @@ function normalizeNumber(value, fallback = 0) {
  */
 async function getAccountInfo(
   cookie,
-  userAgent
+  userAgent,
+  currentCoin
 ) {
-  const userId = await resolveCurrentUserId(
-    cookie,
-    userAgent
-  );
+  const currentUser =
+    await getCurrentUser(
+      cookie,
+      userAgent
+    );
 
-  if (!userId) {
-    throw new Error("未识别到当前用户 ID");
+  if (
+    !/^\d+$/.test(
+      currentUser.id
+    )
+  ) {
+    throw new Error(
+      "未识别到当前用户ID"
+    );
   }
 
-  const { resp, data } = await httpGet({
+  const {
+    response,
+    data
+  } = await httpGet({
     url:
       `https://${DOMAIN}` +
-      `/api/account/getInfo/${userId}` +
+      `/api/account/getInfo/` +
+      `${currentUser.id}` +
       `?_=${Date.now()}`,
 
     headers: {
       ...buildHeaders(
         cookie,
-        userAgent,
-        `https://${DOMAIN}/board`
+        userAgent
       ),
 
-      "Cache-Control": "no-cache"
+      "Cache-Control":
+        "no-cache"
     }
   });
 
-  const code = getStatusCode(resp);
-  const raw = String(data || "");
+  const code =
+    getStatusCode(response);
 
-  let json = null;
+  const json =
+    parseJson(data);
 
-  try {
-    json = JSON.parse(raw);
-  } catch {
-    throw new Error(
-      `用户信息解析失败（HTTP ${code}）`
-    );
-  }
-
-  if (!json?.success || !json?.detail) {
+  if (
+    !json?.success ||
+    !json?.detail
+  ) {
     throw new Error(
       cleanText(
-        json?.message || json?.msg
+        json?.message ||
+        json?.msg
       ) ||
-      `用户信息请求失败（HTTP ${code}）`
+      `用户信息获取失败（HTTP ${code}）`
     );
   }
 
-  const user = json.detail;
+  const user =
+    json.detail;
+
+  const name = cleanText(
+    user.member_name ||
+    user.username ||
+    user.nickname ||
+    currentUser.name ||
+    `用户${currentUser.id}`
+  );
+
+  if (name) {
+    write(
+      name,
+      KEY_USERNAME
+    );
+  }
 
   return {
-    userId: String(
-      user.member_id ?? userId
-    ),
+    name,
 
-    name: cleanText(
-      user.member_name ??
-      user.username ??
-      user.nickname ??
-      user.name ??
-      `用户${userId}`
-    ),
+    coin:
+      hasNumber(currentCoin)
+        ? Number(currentCoin)
+        : numberValue(user.coin),
 
-    coin: normalizeNumber(user.coin),
-    rank: normalizeNumber(user.rank),
-    posts: normalizeNumber(user.nPost),
-    comments: normalizeNumber(user.nComment)
+    rank:
+      numberValue(user.rank),
+
+    posts:
+      numberValue(user.nPost),
+
+    comments:
+      numberValue(user.nComment)
   };
 }
 
-/**
- * 格式化账户信息
- */
-function formatAccountLine(account) {
-  if (!account) {
-    return "⚠️ 用户信息获取失败";
-  }
-
-  return (
-    `👤 ${account.name}` +
-    ` | 🍗 ${account.coin} 鸡腿` +
-    ` | 🏅 Lv.${account.rank}` +
-    ` | 📝 ${account.posts} 帖` +
-    ` | 💬 ${account.comments} 评论`
-  );
-}
-
-/**
- * 根据签到状态生成通知标题
- */
-function getResultTitle(status) {
+function resultTitle(status) {
   if (status === "success") {
     return "✅ NodeSeek 签到成功";
   }
@@ -523,27 +779,57 @@ function getResultTitle(status) {
   return "❌ NodeSeek 签到失败";
 }
 
+function accountLine(
+  account,
+  currentCoin
+) {
+  if (account) {
+    return (
+      `👤 ${account.name}` +
+      ` | 🍗 ${account.coin} 鸡腿` +
+      ` | 🏅 Lv.${account.rank}` +
+      ` | 📝 ${account.posts} 帖` +
+      ` | 💬 ${account.comments} 评论`
+    );
+  }
+
+  if (hasNumber(currentCoin)) {
+    return (
+      `🍗 ${Number(currentCoin)} 鸡腿` +
+      ` | ⚠️ 其他用户信息获取失败`
+    );
+  }
+
+  return "⚠️ 用户信息获取失败";
+}
+
 (async () => {
   try {
     /**
-     * HTTP Request 模式：抓取 Cookie
+     * HTTP Request 模式：
+     * 自动抓取 Cookie
      */
-    if (typeof $request !== "undefined") {
+    if (
+      typeof $request !==
+      "undefined"
+    ) {
       await captureCookie();
       return done();
     }
 
     /**
-     * Cron 模式：执行签到
+     * Cron 模式：
+     * 执行签到
      */
-    const cookie = read(KEY_COOKIE);
+    const cookie =
+      read(KEY_COOKIE);
 
     if (!cookie) {
       const message =
         "❌ 未获取 Cookie" +
-        "（先开启抓Cookie并访问 NodeSeek 登录页面）";
+        "（请开启自动获取Cookie并访问 NodeSeek）";
 
-      printResult(message);
+      print(message);
 
       notify(
         SCRIPT_NAME,
@@ -554,94 +840,77 @@ function getResultTitle(status) {
       return done();
     }
 
-    const argumentRandom = getArg("Random");
-    const storedRandom = read(KEY_RANDOM);
-
-    const randomFlag = parseBoolean(
-      argumentRandom !== null
-        ? argumentRandom
-        : storedRandom,
-      true
-    );
-
-    write(randomFlag, KEY_RANDOM);
-
     const userAgent =
-      cleanText(read(KEY_UA)) ||
+      cleanText(
+        read(KEY_UA)
+      ) ||
       DEFAULT_UA;
 
-    /**
-     * 第一步：签到
-     */
-    const signResult = await signIn(
-      cookie,
-      randomFlag,
-      userAgent
+    const mode =
+      getSignMode();
+
+    console.log(
+      `签到模式：${mode.name}`
     );
 
-    /**
-     * 第二步：签到后查询最新账户数据
-     */
+    const signResult =
+      await signIn(
+        cookie,
+        userAgent,
+        mode.random
+      );
+
     let account = null;
-    let accountError = "";
 
     try {
-      account = await getAccountInfo(
-        cookie,
-        userAgent
-      );
+      account =
+        await getAccountInfo(
+          cookie,
+          userAgent,
+          signResult.current
+        );
     } catch (error) {
-      accountError = cleanText(
-        error?.message || error
+      console.log(
+        `用户信息：${cleanText(
+          error?.message ||
+          error
+        )}`
       );
     }
 
-    const title = getResultTitle(
-      signResult.status
-    );
+    const title =
+      resultTitle(
+        signResult.status
+      );
 
-    const accountLine =
-      formatAccountLine(account);
+    const userLine =
+      accountLine(
+        account,
+        signResult.current
+      );
 
     const output =
       `${title}\n` +
       `${signResult.message}\n` +
-      `${accountLine}`;
+      `${userLine}`;
 
-    /**
-     * Loon/Surge 日志
-     */
-    printResult(output);
+    print(output);
 
-    if (accountError) {
-      console.log(
-        `用户信息：${accountError}`
-      );
-    }
-
-    /**
-     * 系统通知
-     *
-     * 标题：✅ NodeSeek 签到成功
-     * 副标题：签到成功，获得 5 鸡腿
-     * 正文：账户详细信息
-     */
     notify(
       title,
       signResult.message,
-      accountLine
+      userLine
     );
 
     return done();
   } catch (error) {
     const message =
-      `❌ 脚本异常：${String(
-        error?.message
-          ? error.message
-          : error
+      `❌ 脚本异常：${cleanText(
+        error?.message ||
+        error
       )}`;
 
-    printResult(message);
+    print(message);
 
     notify(
       SCRIPT_NAME,
