@@ -890,7 +890,7 @@ function render(result, mode, points) {
     result.kind === "success"
       ? "✅ 签到成功"
       : result.kind === "already"
-      ? "ℹ️ 今天已经签到"
+      ? "🎁 今天已经签到"
       : "❌ 签到失败";
   const lines = [
     "===HDHive===",
