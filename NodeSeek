@@ -4,11 +4,13 @@
 #!icon=https://cdn.nodeimage.com/i/jQkBni6VOwjCQ8zOaWzlhbDPAoHE3Svz.jpeg
 #!homepage=https://www.nodeseek.com/
 #!system=iOS,iPadOS
+#!loon_version=3.5.0(975)
 #!date=2026-07-25
+#!tag=NodeSeek,签到
 
 [Argument]
 
-RunTime = input,"0 0 * * *",tag=每日签到时间,desc=默认每天早上 06:00 执行签到
+RunTime = input,"0 0 * * *",tag=每日签到时间,desc=默认每天凌晨 00:00 执行签到
 
 CaptureCookie = switch,true,tag=自动获取 Cookie,desc=开启后访问 NodeSeek 自动更新 Cookie 和 User-Agent
 
@@ -16,7 +18,7 @@ Random = switch,true,tag=随机签到,desc=开启为随机签到，关闭为固�
 
 [Script]
 
-cron {RunTime} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/NodeSeek.js,tag=NodeSeek签到,timeout=60,argument=[{Random}]
+cron {RunTime} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/NodeSeek.js,tag=NodeSeek签到,timeout=60,argument=[{Random}],enable=true
 
 http-request ^https?:\/\/(?:www\.)?nodeseek\.com\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/NodeSeek.js,tag=NodeSeek抓Cookie,timeout=10,requires-body=false,enable={CaptureCookie}
 
