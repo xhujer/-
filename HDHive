@@ -15,13 +15,11 @@ gamble = switch,false,tag=赌狗签到,desc=关闭时为普通签到；开启后
 
 cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录或访问 hdhive.com 时自动保存长期登录 Cookie
 
-checkinEnable = switch,true,tag=启用自动签到,desc=按照上面的时间运行签到任务
-
 [Script]
 
 http-request ^https:\/\/hdhive\.com\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/hdhive_checkin.js,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
 
-cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/hdhive_checkin.js,timeout=120,tag=HDHive每日签到,argument=gamble={gamble},enable={checkinEnable}
+cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/hdhive_checkin.js,timeout=120,tag=HDHive每日签到,argument=gamble={gamble}
 
 [MITM]
 
