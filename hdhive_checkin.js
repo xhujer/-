@@ -586,7 +586,23 @@ async function renewToken(
   );
 
   saveSession(jar);
-  
+
+  console.log(
+    `[${NAME}] ${label}: ` +
+      `HTTP ${response.status}; ` +
+      `移除旧Token=${
+        removed ? "是" : "否"
+      }; ` +
+      `Set-Cookie=[${
+        changed.join(", ") || "无"
+      }]; ` +
+      `新Token=${
+        jar.has("hdh_sa_token")
+          ? "有"
+          : "无"
+      }`
+  );
+
   if (
     isChallenge(
       response.status,
@@ -720,7 +736,12 @@ async function getAction() {
         ? error.message
         : String(error);
 
-      }
+    console.log(
+      `[${NAME}] ` +
+        `动态 Action 获取失败: ` +
+        errorMessage
+    );
+  }
 
   const cached =
     $persistentStore.read(
@@ -728,7 +749,10 @@ async function getAction() {
     ) || "";
 
   if (validAction(cached)) {
-    
+    console.log(
+      `[${NAME}] 使用缓存的 Action ID`
+    );
+
     return {
       id: cached,
       source: "cache",
@@ -786,7 +810,15 @@ async function submitCheckin(
   );
 
   saveSession(jar);
-  
+
+  console.log(
+    `[${NAME}] 签到 POST: ` +
+      `HTTP ${response.status}; ` +
+      `Set-Cookie=[${
+        changed.join(", ") || "无"
+      }]`
+  );
+
   return response;
 }
 
@@ -1133,7 +1165,15 @@ async function queryAccount(
 
     return userFrom(response.body);
   } catch (error) {
-    
+    console.log(
+      `[${NAME}] 账户积分查询失败: ` +
+        `${
+          error && error.message
+            ? error.message
+            : String(error)
+        }`
+    );
+
     return null;
   }
 }
@@ -1377,7 +1417,12 @@ async function queryPointLogs(
         response.body
       )
     ) {
-      
+      console.log(
+        `[${NAME}] ` +
+          "服务器积分日志不可用: " +
+          `HTTP ${response.status}`
+      );
+
       return [];
     }
 
@@ -1385,10 +1430,26 @@ async function queryPointLogs(
       parsePointLogs(
         response.body
       );
-    
+
+    console.log(
+      `[${NAME}] ` +
+        `积分日志解析记录=` +
+        records.length
+    );
+
     return records;
   } catch (error) {
-    
+    console.log(
+      `[${NAME}] ` +
+        "积分日志查询失败，" +
+        "使用本地历史: " +
+        `${
+          error && error.message
+            ? error.message
+            : String(error)
+        }`
+    );
+
     return [];
   }
 }
@@ -1855,6 +1916,16 @@ async function main() {
     result =
       analyze(response);
 
+    console.log(
+      `[${NAME}] ` +
+        `第 ${attempt} 次结果=` +
+        `${result.kind}; ` +
+        `HTTP=${result.status}; ` +
+        `可重试=${
+          result.retry ? "是" : "否"
+        }`
+    );
+
     if (
       result.retry &&
       attempt === 1
@@ -1947,9 +2018,20 @@ function captureCookie() {
     );
 
   if (!cookie || !loggedIn) {
+    console.log(
+      `[${NAME}] ` +
+        "当前请求没有登录 Cookie，" +
+        "跳过保存"
+    );
+
     $done({});
     return;
   }
+
+  const first =
+    !$persistentStore.read(
+      KEY.cookie
+    );
 
   $persistentStore.write(
     cookie,
@@ -1960,6 +2042,26 @@ function captureCookie() {
     $persistentStore.write(
       ua,
       KEY.ua
+    );
+  }
+
+  console.log(
+    `[${NAME}] ` +
+      "登录 Cookie 已保存；" +
+      `字段数=${
+        cookie
+          .split(/;\s*/)
+          .filter(Boolean)
+          .length
+      }`
+  );
+
+  if (first) {
+    $notification.post(
+      NAME,
+      "✅ 登录信息获取成功",
+      "签到前会自动续签 Token，" +
+        "无需每天手动打开网页。"
     );
   }
 
@@ -1974,6 +2076,8 @@ if (
 } else {
   main()
     .then((result) => {
+      console.log(result.log);
+
       $notification.post(
         NAME,
         result.title,
@@ -1985,6 +2089,11 @@ if (
         error && error.message
           ? error.message
           : String(error);
+
+      console.log(
+        `[${NAME}] 执行失败: ` +
+          message
+      );
 
       saveReport(
         {
