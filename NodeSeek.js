@@ -5,7 +5,7 @@ const KEY_COOKIE = "nodeseek_cookie";
 const KEY_USER_AGENT = "nodeseek_user_agent";
 const KEY_RANDOM = "nodeseek_random";
 const KEY_MEMBER_ID = "nodeseek_verified_member_id";
-const KEY_AUTH_SIGNATURE = "nodeseek_auth_signature";
+const KEY_AUTH_SIGNATURE = "nodeseek_identity_signature_v2";
 const KEY_CAPTURE_NOTIFY_TIME = "nodeseek_capture_notify_time";
 
 const DEFAULT_USER_AGENT =
@@ -460,34 +460,24 @@ function parseCookie(cookie) {
   return map;
 }
 
-function hasAuthCookie(cookieMap) {
-  return Boolean(
-    cookieMap.session ||
-    cookieMap.pjwt ||
-    cookieMap.fog ||
-    cookieMap.cf_clearance
-  );
-}
-
-function buildAuthSignature(
+function buildIdentitySignature(
   cookieMap
 ) {
-  return [
-    "session",
-    "pjwt",
-    "fog",
-    "cf_clearance"
-  ]
-    .map((name) => {
-      return (
-        `${name}=` +
-        (
-          cookieMap[name] ||
-          ""
-        )
-      );
-    })
-    .join("|");
+  if (cookieMap.session) {
+    return (
+      `session=` +
+      cookieMap.session
+    );
+  }
+
+  if (cookieMap.pjwt) {
+    return (
+      `pjwt=` +
+      cookieMap.pjwt
+    );
+  }
+
+  return "";
 }
 
 function isNodeSeekUrl(url) {
@@ -517,6 +507,32 @@ function isBrowserUserAgent(
       .test(value) &&
     !/Loon|Quantumult|Surge|Shadowrocket|Stash/i
       .test(value)
+  );
+}
+
+function isDocumentRequest(headers) {
+  const destination =
+    cleanText(
+      getHeader(
+        headers,
+        "Sec-Fetch-Dest"
+      )
+    ).toLowerCase();
+
+  const accept =
+    cleanText(
+      getHeader(
+        headers,
+        "Accept"
+      )
+    ).toLowerCase();
+
+  return (
+    destination ===
+      "document" ||
+    accept.includes(
+      "text/html"
+    )
   );
 }
 
@@ -611,31 +627,24 @@ async function captureRequest() {
   const cookieMap =
     parseCookie(cookie);
 
-  if (
-    !hasAuthCookie(
-      cookieMap
-    )
-  ) {
-    return;
-  }
-
-  const newSignature =
-    buildAuthSignature(
+  const newIdentitySignature =
+    buildIdentitySignature(
       cookieMap
     );
 
-  const oldSignature =
+  if (!newIdentitySignature) {
+    return;
+  }
+
+  const oldCookieMap =
+    parseCookie(oldCookie);
+
+  const oldIdentitySignature =
     read(
       KEY_AUTH_SIGNATURE
     ) ||
-    (
-      oldCookie
-        ? buildAuthSignature(
-            parseCookie(
-              oldCookie
-            )
-          )
-        : ""
+    buildIdentitySignature(
+      oldCookieMap
     );
 
   if (
@@ -649,13 +658,16 @@ async function captureRequest() {
   }
 
   write(
-    newSignature,
+    newIdentitySignature,
     KEY_AUTH_SIGNATURE
   );
 
   if (
-    newSignature !==
-      oldSignature &&
+    isDocumentRequest(
+      headers
+    ) &&
+    newIdentitySignature !==
+      oldIdentitySignature &&
     canSendCaptureNotice()
   ) {
     notify(
