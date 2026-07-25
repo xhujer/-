@@ -18,7 +18,10 @@ function read(key) {
 }
 
 function write(value, key) {
-  return $persistentStore.write(String(value), key);
+  return $persistentStore.write(
+    String(value),
+    key
+  );
 }
 
 function done(value = {}) {
@@ -40,25 +43,41 @@ function print(text) {
   }
 }
 
-function notify(title, subtitle = "", body = "") {
+function notify(
+  title,
+  subtitle = "",
+  body = ""
+) {
   let content = cleanText(body);
 
   if (content.length > 1000) {
-    content = content.slice(0, 1000) + "…";
+    content =
+      content.slice(0, 1000) +
+      "…";
   }
 
   $notification.post(
-    cleanText(title) || SCRIPT_NAME,
+    cleanText(title) ||
+      SCRIPT_NAME,
     cleanText(subtitle),
     content
   );
 }
 
-function getHeader(headers, name) {
-  const target = String(name).toLowerCase();
+function getHeader(
+  headers,
+  name
+) {
+  const target =
+    String(name)
+      .toLowerCase();
 
   for (const key in headers || {}) {
-    if (String(key).toLowerCase() === target) {
+    if (
+      String(key)
+        .toLowerCase() ===
+      target
+    ) {
       return headers[key];
     }
   }
@@ -75,17 +94,24 @@ function getStatusCode(response) {
 }
 
 function parseJson(value) {
-  const text = String(value ?? "").trim();
+  const text =
+    String(value ?? "")
+      .trim();
 
   if (!text) {
     return null;
   }
 
   try {
-    let result = JSON.parse(text);
+    let result =
+      JSON.parse(text);
 
-    if (typeof result === "string") {
-      result = JSON.parse(result);
+    if (
+      typeof result ===
+      "string"
+    ) {
+      result =
+        JSON.parse(result);
     }
 
     return result;
@@ -99,7 +125,9 @@ function isNumber(value) {
     value !== null &&
     value !== undefined &&
     value !== "" &&
-    Number.isFinite(Number(value))
+    Number.isFinite(
+      Number(value)
+    )
   );
 }
 
@@ -110,119 +138,188 @@ function numberOrZero(value) {
 }
 
 function httpGet(options) {
-  return new Promise((resolve, reject) => {
-    $httpClient.get(
-      options,
-      (error, response, data) => {
-        if (error) {
-          reject(error);
-          return;
-        }
+  return new Promise(
+    (
+      resolve,
+      reject
+    ) => {
+      $httpClient.get(
+        options,
+        (
+          error,
+          response,
+          data
+        ) => {
+          if (error) {
+            reject(error);
+            return;
+          }
 
-        resolve({
-          response: response || {},
-          data: data ?? ""
-        });
-      }
-    );
-  });
+          resolve({
+            response:
+              response || {},
+            data:
+              data ?? ""
+          });
+        }
+      );
+    }
+  );
 }
 
 function httpPost(options) {
-  return new Promise((resolve, reject) => {
-    $httpClient.post(
-      options,
-      (error, response, data) => {
-        if (error) {
-          reject(error);
-          return;
-        }
+  return new Promise(
+    (
+      resolve,
+      reject
+    ) => {
+      $httpClient.post(
+        options,
+        (
+          error,
+          response,
+          data
+        ) => {
+          if (error) {
+            reject(error);
+            return;
+          }
 
-        resolve({
-          response: response || {},
-          data: data ?? ""
-        });
-      }
-    );
-  });
+          resolve({
+            response:
+              response || {},
+            data:
+              data ?? ""
+          });
+        }
+      );
+    }
+  );
 }
 
-function isCloudflarePage(response, data) {
-  const code = getStatusCode(response);
-  const text = String(data || "").toLowerCase();
+function isCloudflarePage(
+  response,
+  data
+) {
+  const code =
+    getStatusCode(response);
+
+  const text =
+    String(data || "")
+      .toLowerCase();
 
   return (
     code === 403 ||
     code === 429 ||
-    text.includes("just a moment") ||
-    text.includes("cf-chl-") ||
-    text.includes("challenge-platform") ||
-    text.includes("cloudflare ray id") ||
-    text.includes("attention required")
+    text.includes(
+      "just a moment"
+    ) ||
+    text.includes(
+      "cf-chl-"
+    ) ||
+    text.includes(
+      "challenge-platform"
+    ) ||
+    text.includes(
+      "cloudflare ray id"
+    ) ||
+    text.includes(
+      "attention required"
+    )
   );
 }
 
 function getArg(name) {
   try {
     if (
-      typeof $argument === "object" &&
+      typeof $argument ===
+        "object" &&
       $argument !== null &&
-      !Array.isArray($argument)
+      !Array.isArray(
+        $argument
+      )
     ) {
-      return $argument[name] ?? null;
+      return (
+        $argument[name] ??
+        null
+      );
     }
 
     if (
-      typeof $argument !== "string" ||
+      typeof $argument !==
+        "string" ||
       !$argument.trim()
     ) {
       return null;
     }
 
-    const text = $argument.trim();
+    const text =
+      $argument.trim();
 
     try {
-      const json = JSON.parse(text);
+      const json =
+        JSON.parse(text);
 
       if (
         json &&
-        typeof json === "object"
+        typeof json ===
+          "object"
       ) {
-        return json[name] ?? null;
+        return (
+          json[name] ??
+          null
+        );
       }
     } catch {}
 
     const params = {};
 
-    text.split("&").forEach((part) => {
-      const index = part.indexOf("=");
+    text
+      .split("&")
+      .forEach(
+        (part) => {
+          const index =
+            part.indexOf("=");
 
-      if (index < 0) {
-        return;
-      }
+          if (index < 0) {
+            return;
+          }
 
-      const key = part
-        .slice(0, index)
-        .trim();
+          const key =
+            part
+              .slice(0, index)
+              .trim();
 
-      const rawValue =
-        part.slice(index + 1);
+          const rawValue =
+            part.slice(
+              index + 1
+            );
 
-      try {
-        params[key] =
-          decodeURIComponent(rawValue);
-      } catch {
-        params[key] = rawValue;
-      }
-    });
+          try {
+            params[key] =
+              decodeURIComponent(
+                rawValue
+              );
+          } catch {
+            params[key] =
+              rawValue;
+          }
+        }
+      );
 
-    return params[name] ?? null;
+    return (
+      params[name] ??
+      null
+    );
   } catch {
     return null;
   }
 }
 
-function parseBoolean(value, fallback = true) {
+function parseBoolean(
+  value,
+  fallback = true
+) {
   if (
     value === null ||
     value === undefined ||
@@ -231,9 +328,10 @@ function parseBoolean(value, fallback = true) {
     return fallback;
   }
 
-  const text = String(value)
-    .trim()
-    .toLowerCase();
+  const text =
+    String(value)
+      .trim()
+      .toLowerCase();
 
   if (
     [
@@ -271,31 +369,51 @@ function getSignMode() {
     getArg("Random") ??
     getArg("random");
 
-  const random = parseBoolean(
-    argument ?? read(KEY_RANDOM),
-    true
-  );
+  const random =
+    parseBoolean(
+      argument ??
+        read(KEY_RANDOM),
+      true
+    );
 
-  write(random, KEY_RANDOM);
+  write(
+    random,
+    KEY_RANDOM
+  );
 
   return {
     random,
-    name: random
-      ? "随机签到"
-      : "固定签到"
+
+    name:
+      random
+        ? "随机签到"
+        : "固定签到"
   };
 }
 
 function normalizeCookie(value) {
   return String(value || "")
-    .replace(/\r?\n/g, "; ")
-    .replace(/;+\s*/g, "; ")
-    .replace(/\s*;\s*$/, "")
+    .replace(
+      /\r?\n/g,
+      "; "
+    )
+    .replace(
+      /;+\s*/g,
+      "; "
+    )
+    .replace(
+      /\s*;\s*$/,
+      ""
+    )
     .trim();
 }
 
 function getCookieFromHeaders(headers) {
-  const value = getHeader(headers, "Cookie");
+  const value =
+    getHeader(
+      headers,
+      "Cookie"
+    );
 
   if (!value) {
     return "";
@@ -313,26 +431,31 @@ function parseCookie(cookie) {
 
   String(cookie || "")
     .split(";")
-    .forEach((part) => {
-      const index = part.indexOf("=");
+    .forEach(
+      (part) => {
+        const index =
+          part.indexOf("=");
 
-      if (index <= 0) {
-        return;
+        if (index <= 0) {
+          return;
+        }
+
+        const key =
+          part
+            .slice(0, index)
+            .trim()
+            .toLowerCase();
+
+        const value =
+          part
+            .slice(index + 1)
+            .trim();
+
+        if (key) {
+          map[key] = value;
+        }
       }
-
-      const key = part
-        .slice(0, index)
-        .trim()
-        .toLowerCase();
-
-      const value = part
-        .slice(index + 1)
-        .trim();
-
-      if (key) {
-        map[key] = value;
-      }
-    });
+    );
 
   return map;
 }
@@ -346,7 +469,9 @@ function hasAuthCookie(cookieMap) {
   );
 }
 
-function buildAuthSignature(cookieMap) {
+function buildAuthSignature(
+  cookieMap
+) {
   return [
     "session",
     "pjwt",
@@ -354,50 +479,79 @@ function buildAuthSignature(cookieMap) {
     "cf_clearance"
   ]
     .map((name) => {
-      return `${name}=${cookieMap[name] || ""}`;
+      return (
+        `${name}=` +
+        (
+          cookieMap[name] ||
+          ""
+        )
+      );
     })
     .join("|");
 }
 
 function isNodeSeekUrl(url) {
   return /^https?:\/\/(?:www\.)?nodeseek\.com\//i
-    .test(String(url || ""));
+    .test(
+      String(url || "")
+    );
 }
 
 function isFogUrl(url) {
   return /\/edge-cgi\/fog(?:[?#]|$)/i
-    .test(String(url || ""));
+    .test(
+      String(url || "")
+    );
 }
 
-function isBrowserUserAgent(userAgent) {
-  const value = String(userAgent || "");
+function isBrowserUserAgent(
+  userAgent
+) {
+  const value =
+    String(userAgent || "");
 
   return (
-    /Mozilla\/5\.0/i.test(value) &&
-    /Safari/i.test(value) &&
+    /Mozilla\/5\.0/i
+      .test(value) &&
+    /Safari/i
+      .test(value) &&
     !/Loon|Quantumult|Surge|Shadowrocket|Stash/i
       .test(value)
   );
 }
 
 function canSendCaptureNotice() {
-  const now = Date.now();
+  const now =
+    Date.now();
 
-  const last = Number(
-    read(KEY_CAPTURE_NOTIFY_TIME) || 0
-  );
+  const last =
+    Number(
+      read(
+        KEY_CAPTURE_NOTIFY_TIME
+      ) || 0
+    );
 
-  if (now - last < 10000) {
+  if (
+    now - last <
+    10000
+  ) {
     return false;
   }
 
-  write(now, KEY_CAPTURE_NOTIFY_TIME);
+  write(
+    now,
+    KEY_CAPTURE_NOTIFY_TIME
+  );
 
   return true;
 }
 
 async function captureRequest() {
-  const url = String($request?.url || "");
+  const url =
+    String(
+      $request?.url ||
+      ""
+    );
 
   if (
     !isNodeSeekUrl(url) ||
@@ -406,27 +560,40 @@ async function captureRequest() {
     return;
   }
 
-  const headers = $request?.headers || {};
+  const headers =
+    $request?.headers ||
+    {};
 
   const cookie =
-    getCookieFromHeaders(headers);
+    getCookieFromHeaders(
+      headers
+    );
 
   const userAgent =
     cleanText(
-      getHeader(headers, "User-Agent")
+      getHeader(
+        headers,
+        "User-Agent"
+      )
     );
 
   const oldCookie =
-    read(KEY_COOKIE) || "";
+    read(KEY_COOKIE) ||
+    "";
 
   const oldUserAgent =
     cleanText(
-      read(KEY_USER_AGENT)
+      read(
+        KEY_USER_AGENT
+      )
     );
 
   if (
-    isBrowserUserAgent(userAgent) &&
-    userAgent !== oldUserAgent
+    isBrowserUserAgent(
+      userAgent
+    ) &&
+    userAgent !==
+      oldUserAgent
   ) {
     write(
       userAgent,
@@ -434,31 +601,47 @@ async function captureRequest() {
     );
   }
 
-  if (cookie.length < 20) {
+  if (
+    cookie.length <
+    20
+  ) {
     return;
   }
 
   const cookieMap =
     parseCookie(cookie);
 
-  if (!hasAuthCookie(cookieMap)) {
+  if (
+    !hasAuthCookie(
+      cookieMap
+    )
+  ) {
     return;
   }
 
   const newSignature =
-    buildAuthSignature(cookieMap);
+    buildAuthSignature(
+      cookieMap
+    );
 
   const oldSignature =
-    read(KEY_AUTH_SIGNATURE) ||
+    read(
+      KEY_AUTH_SIGNATURE
+    ) ||
     (
       oldCookie
         ? buildAuthSignature(
-            parseCookie(oldCookie)
+            parseCookie(
+              oldCookie
+            )
           )
         : ""
     );
 
-  if (cookie !== oldCookie) {
+  if (
+    cookie !==
+    oldCookie
+  ) {
     write(
       cookie,
       KEY_COOKIE
@@ -471,13 +654,14 @@ async function captureRequest() {
   );
 
   if (
-    newSignature !== oldSignature &&
+    newSignature !==
+      oldSignature &&
     canSendCaptureNotice()
   ) {
     notify(
       "NodeSeek",
       "✅ 身份信息已更新",
-      "Cookie：已更新\n" +
+      "Cookie：已更新\n\n" +
       `User-Agent：${
         read(KEY_USER_AGENT)
           ? "已获取"
@@ -524,11 +708,15 @@ function buildCommonHeaders(
   };
 }
 
-function parseSignResult(json, httpCode) {
+function parseSignResult(
+  json,
+  httpCode
+) {
   const payload =
     (
       json?.data &&
-      typeof json.data === "object"
+      typeof json.data ===
+        "object"
     )
       ? {
           ...json,
@@ -543,8 +731,12 @@ function parseSignResult(json, httpCode) {
     );
 
   const gain =
-    isNumber(payload?.gain)
-      ? Number(payload.gain)
+    isNumber(
+      payload?.gain
+    )
+      ? Number(
+          payload.gain
+        )
       : null;
 
   if (
@@ -552,33 +744,45 @@ function parseSignResult(json, httpCode) {
       .test(message)
   ) {
     return {
-      status: "already",
+      status:
+        "already",
+
       message:
         message ||
         "今天已完成签到",
+
       gain
     };
   }
 
   if (
-    payload?.success === true ||
-    /签到成功/i.test(message)
+    payload?.success ===
+      true ||
+    /签到成功/i
+      .test(message)
   ) {
     return {
-      status: "success",
+      status:
+        "success",
+
       message:
         message ||
         "签到成功",
+
       gain
     };
   }
 
   return {
-    status: "fail",
+    status:
+      "fail",
+
     message:
       message ||
       `签到失败（HTTP ${httpCode}）`,
-    gain: null
+
+    gain:
+      null
   };
 }
 
@@ -616,7 +820,8 @@ async function signIn(
         `https://${DOMAIN}`
     },
 
-    body: "{}"
+    body:
+      "{}"
   });
 
   const code =
@@ -629,12 +834,14 @@ async function signIn(
     )
   ) {
     return {
-      status: "cloudflare",
+      status:
+        "cloudflare",
 
       message:
         `签到接口被 Cloudflare 拦截（HTTP ${code}）`,
 
-      gain: null
+      gain:
+        null
     };
   }
 
@@ -643,17 +850,22 @@ async function signIn(
 
   if (!json) {
     return {
-      status: "fail",
+      status:
+        "fail",
 
       message:
         `签到结果解析失败（HTTP ${code}）：` +
         (
           cleanText(data)
-            .slice(0, 120) ||
+            .slice(
+              0,
+              120
+            ) ||
           "空响应"
         ),
 
-      gain: null
+      gain:
+        null
     };
   }
 
@@ -666,7 +878,8 @@ async function signIn(
 function parseBoardData(json) {
   if (
     !json ||
-    typeof json !== "object"
+    typeof json !==
+      "object"
   ) {
     throw new Error(
       "签到排行榜返回格式无效"
@@ -676,31 +889,43 @@ function parseBoardData(json) {
   const source =
     (
       json.data &&
-      typeof json.data === "object"
+      typeof json.data ===
+        "object"
     )
       ? json.data
       : json;
 
   const record =
     source.record &&
-    typeof source.record === "object"
+    typeof source.record ===
+      "object"
       ? source.record
       : null;
 
   return {
     memberId:
       record?.member_id
-        ? String(record.member_id)
+        ? String(
+            record.member_id
+          )
         : "",
 
     gain:
-      isNumber(record?.gain)
-        ? Number(record.gain)
+      isNumber(
+        record?.gain
+      )
+        ? Number(
+            record.gain
+          )
         : null,
 
     rank:
-      isNumber(source.order)
-        ? Number(source.order)
+      isNumber(
+        source.order
+      )
+        ? Number(
+            source.order
+          )
         : null
   };
 }
@@ -759,7 +984,9 @@ async function getBoardData(
   const board =
     parseBoardData(json);
 
-  if (board.memberId) {
+  if (
+    board.memberId
+  ) {
     write(
       board.memberId,
       KEY_MEMBER_ID
@@ -797,7 +1024,10 @@ async function getAccountInfo(
 ) {
   if (
     !/^\d+$/.test(
-      String(memberId || "")
+      String(
+        memberId ||
+        ""
+      )
     )
   ) {
     throw new Error(
@@ -855,7 +1085,8 @@ async function getAccountInfo(
 
   if (
     !user ||
-    typeof user !== "object"
+    typeof user !==
+      "object"
   ) {
     throw new Error(
       cleanText(
@@ -906,15 +1137,24 @@ async function getAccountInfo(
 }
 
 function getResultTitle(status) {
-  if (status === "success") {
+  if (
+    status ===
+    "success"
+  ) {
     return "✅ NodeSeek 签到成功";
   }
 
-  if (status === "already") {
+  if (
+    status ===
+    "already"
+  ) {
     return "🎁 NodeSeek 今日已签到";
   }
 
-  if (status === "cloudflare") {
+  if (
+    status ===
+    "cloudflare"
+  ) {
     return "❌ NodeSeek 签到被 Cloudflare 拦截";
   }
 
@@ -926,17 +1166,29 @@ function formatBoardLine(
   signResult
 ) {
   const gain =
-    isNumber(board?.gain)
-      ? Number(board.gain)
+    isNumber(
+      board?.gain
+    )
+      ? Number(
+          board.gain
+        )
       : (
-          isNumber(signResult?.gain)
-            ? Number(signResult.gain)
+          isNumber(
+            signResult?.gain
+          )
+            ? Number(
+                signResult.gain
+              )
             : null
         );
 
   const rank =
-    isNumber(board?.rank)
-      ? Number(board.rank)
+    isNumber(
+      board?.rank
+    )
+      ? Number(
+          board.rank
+        )
       : null;
 
   if (
@@ -949,14 +1201,18 @@ function formatBoardLine(
     );
   }
 
-  if (gain !== null) {
+  if (
+    gain !== null
+  ) {
     return (
       `🎖️ 今日签到获得鸡腿 ${gain} 个` +
       " | 当前排名暂未获取"
     );
   }
 
-  if (rank !== null) {
+  if (
+    rank !== null
+  ) {
     return (
       `🎖️ 当前排名第 ${rank}`
     );
@@ -982,9 +1238,11 @@ function formatAccountLine(account) {
 (async () => {
   try {
     if (
-      typeof $request !== "undefined"
+      typeof $request !==
+      "undefined"
     ) {
       await captureRequest();
+
       return done({});
     }
 
@@ -996,7 +1254,8 @@ function formatAccountLine(account) {
         "请开启自动获取 Cookie，然后在 Safari 登录并刷新 NodeSeek";
 
       print(
-        `❌ NodeSeek 签到失败\n${message}`
+        "❌ NodeSeek 签到失败\n\n" +
+        message
       );
 
       notify(
@@ -1010,16 +1269,14 @@ function formatAccountLine(account) {
 
     const userAgent =
       cleanText(
-        read(KEY_USER_AGENT)
+        read(
+          KEY_USER_AGENT
+        )
       ) ||
       DEFAULT_USER_AGENT;
 
     const signMode =
       getSignMode();
-
-    print(
-      `签到模式：${signMode.name}`
-    );
 
     const signResult =
       await signIn(
@@ -1041,15 +1298,17 @@ function formatAccountLine(account) {
         "Cookie 或 Cloudflare 验证已失效，请在 Safari 刷新一次 NodeSeek";
 
       print(
-        `${title}\n` +
-        `${signResult.message}\n` +
-        `${extra}`
+        `签到模式：${signMode.name}\n\n` +
+        `${title}\n\n` +
+        `${signResult.message}\n\n` +
+        extra
       );
 
       notify(
         title,
         signMode.name,
-        `${signResult.message}\n${extra}`
+        `${signResult.message}\n\n` +
+        extra
       );
 
       return done();
@@ -1065,8 +1324,9 @@ function formatAccountLine(account) {
         );
 
       print(
-        `${title}\n` +
-        `${signResult.message}`
+        `签到模式：${signMode.name}\n\n` +
+        `${title}\n\n` +
+        signResult.message
       );
 
       notify(
@@ -1087,10 +1347,13 @@ function formatAccountLine(account) {
     const memberId =
       board?.memberId ||
       cleanText(
-        read(KEY_MEMBER_ID)
+        read(
+          KEY_MEMBER_ID
+        )
       );
 
-    let account = null;
+    let account =
+      null;
 
     if (memberId) {
       try {
@@ -1111,10 +1374,14 @@ function formatAccountLine(account) {
     }
 
     if (
-      isNumber(board?.gain)
+      isNumber(
+        board?.gain
+      )
     ) {
       signResult.gain =
-        Number(board.gain);
+        Number(
+          board.gain
+        );
     }
 
     const title =
@@ -1134,15 +1401,16 @@ function formatAccountLine(account) {
       );
 
     print(
-      `${title}\n` +
-      `${boardLine}\n` +
+      `签到模式：${signMode.name}\n\n` +
+      `${title}\n\n` +
+      `${boardLine}\n\n` +
       `${accountLine}`
     );
 
     notify(
       title,
       signMode.name,
-      `${boardLine}\n` +
+      `${boardLine}\n\n` +
       `${accountLine}`
     );
 
