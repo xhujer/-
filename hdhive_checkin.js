@@ -1,521 +1,303 @@
 /**
  * HDHive / 影巢自动签到（Loon）
- *
- * 适配 2026 年 6 月 HDHive 重构后的 Next.js Server Action 签到。
- *
- * 工作流程：
- * 1. http-request 模式保存浏览器中的长期登录 Cookie 与 User-Agent。
- * 2. cron 模式主动删除已过期的 hdh_sa_token。
- * 3. 使用长期登录 Cookie GET 首页，让服务器签发新的 hdh_sa_token。
- * 4. 动态获取当前部署的 checkIn Server Action ID。
- * 5. POST [false]（普通签到）或 [true]（赌狗签到）。
- * 6. 保存响应中轮换后的 Cookie；Token 失效或 Action 更新时自动重试一次。
- *
- * 安全说明：
- * - 登录 Cookie、Token 只保存在 Loon 本地。
- * - Action ID 解析服务只收到 domain/path/actionName，不会收到 Cookie。
- * - 日志和通知不会输出 Cookie、Token 或完整响应正文。
+ * 适配 2026 年 6 月重构后的 Next.js Server Action。
+ * 支持 Token 自动续签、动态 Action、积分资料和最近三条积分记录。
  */
 
 const NAME = "HDHive 自动签到";
-const BASE_URL = "https://hdhive.com";
-const ACTION_RESOLVER_URL = "https://hdhive.ckid.workers.dev/";
+const BASE = "https://hdhive.com";
+const HOME = `${BASE}/`;
+const ACTION_API = "https://hdhive.ckid.workers.dev/";
 const DEFAULT_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) " +
   "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 " +
   "Mobile/15E148 Safari/604.1";
-
-// 取自重构后首页真实签到请求。该值描述当前首页的 Next.js 路由树。
-const ROUTER_STATE_TREE =
+const CHECKIN_TREE =
   "%5B%22%22%2C%7B%22children%22%3A%5B%22(app)%22%2C%7B%22children%22%3A" +
   "%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue" +
   "%5D%7D%2Cnull%2Cnull%2Ctrue%5D";
+const POINTS_TREE = routeTree(["manager", "points-logs"]);
 
 const KEY = {
   cookie: "hdhive_cookie_v15",
   ua: "hdhive_ua_v15",
-  saToken: "hdhive_sa_token_v1",
   action: "hdhive_action_v1",
+  user: "hdhive_last_user_v2",
+  points: "hdhive_last_points_v2",
+  history: "hdhive_sign_history_v2",
+  flow: "hdhive_points_flow_v4",
   report: "hdhive_checkin_report_v1",
 };
 
 class CookieJar {
-  constructor(cookieHeader) {
-    this.cookies = {};
-    this.importCookieHeader(cookieHeader || "");
-  }
-
-  importCookieHeader(cookieHeader) {
-    const ignored = {
-      path: true,
-      domain: true,
-      expires: true,
-      "max-age": true,
-      secure: true,
-      httponly: true,
-      samesite: true,
-    };
-
-    String(cookieHeader)
+  constructor(cookie) {
+    this.data = {};
+    String(cookie || "")
       .split(/;\s*/)
-      .forEach((item) => {
-        const index = item.indexOf("=");
+      .forEach((part) => {
+        const index = part.indexOf("=");
         if (index <= 0) return;
 
-        const name = item.slice(0, index).trim();
-        const value = item.slice(index + 1).trim();
-        if (!name || ignored[name.toLowerCase()]) return;
-        this.cookies[name] = value;
+        const name = part.slice(0, index).trim();
+        const value = part.slice(index + 1).trim();
+
+        if (name) {
+          this.data[name] = value;
+        }
       });
   }
 
-  remove(name) {
-    delete this.cookies[name];
-  }
-
   get(name) {
-    return this.cookies[name] || "";
+    return this.data[name] || "";
   }
 
   has(name) {
-    return Object.prototype.hasOwnProperty.call(this.cookies, name);
+    return Object.prototype.hasOwnProperty.call(this.data, name);
   }
 
-  toHeader() {
-    return Object.keys(this.cookies)
-      .map((name) => `${name}=${this.cookies[name]}`)
+  remove(name) {
+    delete this.data[name];
+  }
+
+  header() {
+    return Object.keys(this.data)
+      .map((name) => `${name}=${this.data[name]}`)
       .join("; ");
   }
 
-  absorbResponseHeaders(headers) {
-    const lines = getSetCookieLines(headers);
-    const changedNames = [];
+  absorb(headers) {
+    const changed = [];
 
-    lines.forEach((line) => {
-      const firstPart = line.split(";", 1)[0];
-      const index = firstPart.indexOf("=");
-      if (index <= 0) return;
+    setCookieLines(headers).forEach((line) => {
+      const pair = line.split(";", 1)[0];
+      const index = pair.indexOf("=");
 
-      const name = firstPart.slice(0, index).trim();
-      const value = firstPart.slice(index + 1).trim();
-      const maxAgeMatch = line.match(/;\s*Max-Age=(-?\d+)/i);
-      const expiresMatch = line.match(/;\s*Expires=([^;]+)/i);
-      const deleteByAge = maxAgeMatch && Number(maxAgeMatch[1]) <= 0;
-      const deleteByExpiry =
-        !maxAgeMatch &&
-        expiresMatch &&
-        !Number.isNaN(Date.parse(expiresMatch[1])) &&
-        Date.parse(expiresMatch[1]) <= Date.now();
-
-      if (deleteByAge || deleteByExpiry || value === "") {
-        delete this.cookies[name];
-      } else {
-        this.cookies[name] = value;
+      if (index <= 0) {
+        return;
       }
 
-      if (changedNames.indexOf(name) === -1) {
-        changedNames.push(name);
+      const name = pair.slice(0, index).trim();
+      const value = pair.slice(index + 1).trim();
+      const maxAge = line.match(/;\s*Max-Age=(-?\d+)/i);
+      const expires = line.match(/;\s*Expires=([^;]+)/i);
+      const expired =
+        (maxAge && Number(maxAge[1]) <= 0) ||
+        (!maxAge &&
+          expires &&
+          !Number.isNaN(Date.parse(expires[1])) &&
+          Date.parse(expires[1]) <= Date.now());
+
+      if (!value || expired) {
+        delete this.data[name];
+      } else {
+        this.data[name] = value;
+      }
+
+      if (changed.indexOf(name) === -1) {
+        changed.push(name);
       }
     });
 
-    return changedNames;
+    return changed;
   }
 }
 
-function getHeader(headers, wantedName) {
+function getHeader(headers, name) {
   const source = headers || {};
-  const wanted = String(wantedName).toLowerCase();
+  const target = String(name).toLowerCase();
   const key = Object.keys(source).find(
-    (name) => String(name).toLowerCase() === wanted
+    (item) => String(item).toLowerCase() === target
   );
+
   return key ? source[key] : "";
 }
 
-function getSetCookieLines(headers) {
+function setCookieLines(headers) {
   const raw = getHeader(headers, "set-cookie");
   const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
-  const lines = [];
+  const result = [];
 
   values.forEach((value) => {
     String(value)
       .split(/\r?\n/)
-      .forEach((physicalLine) => {
-        physicalLine
+      .forEach((line) => {
+        line
           .split(/,(?=\s*[A-Za-z0-9_!#$%&'*+\-.^`|~]+=)/)
-          .forEach((cookieLine) => {
-            const trimmed = cookieLine.trim();
-            if (trimmed) lines.push(trimmed);
+          .forEach((item) => {
+            if (item.trim()) {
+              result.push(item.trim());
+            }
           });
       });
   });
 
-  return lines;
-}
-
-function parseArgument(text) {
-  if (text === null || typeof text === "undefined") return {};
-  const trimmed = String(text).trim();
-  if (!trimmed) return {};
-
-  if (trimmed[0] === "{" || trimmed[0] === "[") {
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) {
-        return { gamble: parsed[0] };
-      }
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (_) {
-      // 继续按 query string 解析。
-    }
-  }
-
-  if (trimmed.indexOf("=") === -1) {
-    return { gamble: trimmed };
-  }
-
-  const result = {};
-  trimmed.split("&").forEach((part) => {
-    const index = part.indexOf("=");
-    if (index <= 0) return;
-
-    const key = decodeURIComponent(part.slice(0, index).replace(/\+/g, " "));
-    const value = decodeURIComponent(
-      part.slice(index + 1).replace(/\+/g, " ")
-    );
-    result[key] = value;
-  });
   return result;
 }
 
-function readArguments() {
+function getArgs() {
   if (typeof $argument === "undefined" || $argument === null) {
     return {};
   }
 
-  if (Array.isArray($argument)) {
-    return { gamble: $argument[0] };
-  }
-
   if (typeof $argument === "object") {
-    return $argument;
+    return Array.isArray($argument)
+      ? { gamble: $argument[0] }
+      : $argument;
   }
 
-  return parseArgument($argument);
-}
+  const text = String($argument).trim();
 
-function asBoolean(value, defaultValue) {
-  if (typeof value === "boolean") return value;
+  if (!text) {
+    return {};
+  }
 
-  const normalized = String(value === undefined ? "" : value)
-    .trim()
-    .toLowerCase();
+  if (text[0] === "{" || text[0] === "[") {
+    try {
+      const value = JSON.parse(text);
+      return Array.isArray(value) ? { gamble: value[0] } : value;
+    } catch (_) {}
+  }
 
-  if (/^(1|true|yes|on|开启|是)$/.test(normalized)) return true;
-  if (/^(0|false|no|off|关闭|否)$/.test(normalized)) return false;
+  if (text.indexOf("=") < 0) {
+    return { gamble: text };
+  }
 
-  return Boolean(defaultValue);
-}
+  const result = {};
 
-function request(method, options) {
-  return new Promise((resolve, reject) => {
-    const clientMethod = String(method).toLowerCase();
-    const sender = $httpClient[clientMethod];
+  text.split("&").forEach((part) => {
+    const index = part.indexOf("=");
 
-    if (typeof sender !== "function") {
-      reject(new Error(`Loon 不支持 HTTP ${method}`));
+    if (index <= 0) {
       return;
     }
 
-    sender(options, (error, response, data) => {
-      if (error) {
-        reject(new Error(String(error)));
-        return;
-      }
+    const key = decodeURIComponent(
+      part.slice(0, index).replace(/\+/g, " ")
+    );
+    const value = decodeURIComponent(
+      part.slice(index + 1).replace(/\+/g, " ")
+    );
 
-      const rawStatus =
-        response && (response.status || response.statusCode)
-          ? response.status || response.statusCode
-          : 0;
-
-      resolve({
-        status: Number(rawStatus) || parseInt(String(rawStatus), 10) || 0,
-        headers: (response && response.headers) || {},
-        body: data === undefined || data === null ? "" : String(data),
-      });
-    });
+    result[key] = value;
   });
+
+  return result;
 }
 
-function isChallenge(status, body) {
-  const text = String(body || "").toLowerCase();
+function bool(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return /^(1|true|yes|on|开启|是)$/i.test(
+    String(value || "").trim()
+  );
+}
+
+function clean(value) {
+  return String(
+    value === null || value === undefined ? "" : value
+  )
+    .replace(/\u0000/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function readJSON(key, fallback) {
+  try {
+    const value = $persistentStore.read(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function writeJSON(key, value) {
+  return $persistentStore.write(
+    JSON.stringify(value),
+    key
+  );
+}
+
+function toNumber(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  if (Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+
+  const match = String(value).match(
+    /[+-]?\d+(?:\.\d+)?/
+  );
+
+  return match && Number.isFinite(Number(match[0]))
+    ? Number(match[0])
+    : null;
+}
+
+function formatTime(value) {
+  const original = clean(value);
+
+  let date =
+    value instanceof Date
+      ? value
+      : new Date(
+          original
+            ? original.replace(" ", "T")
+            : Date.now()
+        );
+
+  if (Number.isNaN(date.getTime())) {
+    return original || formatTime(new Date());
+  }
+
+  const pad = (number) =>
+    String(number).padStart(2, "0");
 
   return (
-    status === 503 ||
-    text.includes("正在检测浏览器安全能力") ||
-    text.includes("just a moment") ||
-    text.includes("checking your browser") ||
-    text.includes("/cdn-cgi/challenge-platform") ||
-    text.includes("cf-chl-") ||
-    text.includes("challenge-form")
+    `${date.getFullYear()}-` +
+    `${pad(date.getMonth() + 1)}-` +
+    `${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:` +
+    `${pad(date.getMinutes())}:` +
+    `${pad(date.getSeconds())}`
   );
 }
 
-function isValidActionId(value) {
-  return /^[A-Fa-f0-9]{20,128}$/.test(String(value || ""));
-}
-
-function buildDocumentHeaders(ua, jar) {
-  const headers = {
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9," +
-      "image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
-    "Cache-Control": "no-cache",
-    Pragma: "no-cache",
-    "Upgrade-Insecure-Requests": "1",
-    "User-Agent": ua,
-  };
-
-  const cookie = jar.toHeader();
-  if (cookie) headers.Cookie = cookie;
-
-  return headers;
-}
-
-function saveSession(jar) {
-  const cookie = jar.toHeader();
-
-  if (cookie) {
-    $persistentStore.write(cookie, KEY.cookie);
-  }
-
-  const saToken = jar.get("hdh_sa_token");
-
-  if (saToken) {
-    $persistentStore.write(saToken, KEY.saToken);
-  } else {
-    $persistentStore.write("", KEY.saToken);
-  }
-}
-
-async function refreshSession(jar, ua, reason) {
-  const removedOldToken = jar.has("hdh_sa_token");
-  jar.remove("hdh_sa_token");
-
-  const response = await request("get", {
-    url: `${BASE_URL}/?_loon_refresh=${Date.now()}`,
-    timeout: 25000,
-    alpn: "h2",
-    "auto-cookie": false,
-    "auto-redirect": false,
-    headers: buildDocumentHeaders(ua, jar),
-  });
-
-  const changedNames = jar.absorbResponseHeaders(response.headers);
-  saveSession(jar);
-
-  console.log(
-    `[${NAME}] ${reason || "刷新会话"}: HTTP ${response.status}; ` +
-      `移除旧Token=${removedOldToken ? "是" : "否"}; ` +
-      `Set-Cookie=[${changedNames.join(", ") || "无"}]; ` +
-      `新Token=${jar.has("hdh_sa_token") ? "有" : "无"}`
-  );
-
-  if (isChallenge(response.status, response.body)) {
-    throw new Error("首页触发浏览器安全检测，未能自动续签");
-  }
-
-  const location = String(getHeader(response.headers, "location") || "");
-
-  if (
-    response.status === 401 ||
-    response.status === 403 ||
-    /\/login(?:[/?#]|$)/i.test(location) ||
-    /请先登录|登录已失效|未登录/.test(response.body)
-  ) {
-    throw new Error("长期登录 Cookie 已失效，请在 Loon 下重新登录一次 HDHive");
-  }
-
-  if (!jar.has("hdh_sa_token")) {
-    throw new Error(
-      `首页 HTTP ${response.status}，但没有签发新的 hdh_sa_token`
-    );
-  }
-
-  return response;
-}
-
-function extractActionId(payload, rawBody) {
-  const candidates = [];
-
-  if (typeof payload === "string") {
-    candidates.push(payload);
-  } else if (payload && typeof payload === "object") {
-    candidates.push(payload.actionId);
-
-    if (payload.data) {
-      candidates.push(payload.data.actionId);
-    }
-
-    if (payload.result) {
-      candidates.push(payload.result.actionId);
-    }
-  }
-
-  const regexMatch = String(rawBody || "").match(
-    /"actionId"\s*:\s*"([A-Fa-f0-9]{20,128})"/
-  );
-
-  if (regexMatch) {
-    candidates.push(regexMatch[1]);
-  }
-
-  for (let index = 0; index < candidates.length; index += 1) {
-    if (isValidActionId(candidates[index])) {
-      return String(candidates[index]);
-    }
-  }
-
-  return "";
-}
-
-async function discoverCheckInAction() {
-  let networkError = "";
-
-  try {
-    const response = await request("post", {
-      url: ACTION_RESOLVER_URL,
-      timeout: 18000,
-      "auto-cookie": false,
-      "auto-redirect": false,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        domain: "hdhive.com",
-        path: "/",
-        actionName: "checkIn",
-      }),
-    });
-
-    if (response.status !== 200) {
-      throw new Error(`Action 解析服务 HTTP ${response.status}`);
-    }
-
-    let payload = null;
-
-    try {
-      payload = JSON.parse(response.body);
-    } catch (_) {
-      payload = null;
-    }
-
-    const actionId = extractActionId(payload, response.body);
-
-    if (!actionId) {
-      throw new Error("Action 解析服务未返回有效 ID");
-    }
-
-    $persistentStore.write(actionId, KEY.action);
-
-    console.log(`[${NAME}] 已动态获取当前 checkIn Action ID`);
-
-    return {
-      actionId,
-      source: "dynamic",
-    };
-  } catch (error) {
-    networkError =
-      error && error.message ? error.message : String(error);
-
-    console.log(`[${NAME}] 动态 Action 解析失败: ${networkError}`);
-  }
-
-  const cachedAction = $persistentStore.read(KEY.action) || "";
-
-  if (isValidActionId(cachedAction)) {
-    console.log(`[${NAME}] 临时改用上次缓存的 Action ID`);
-
-    return {
-      actionId: cachedAction,
-      source: "cache",
-    };
-  }
-
-  throw new Error(networkError || "无法获取 checkIn Action ID");
-}
-
-function buildCheckInHeaders(ua, jar, actionId) {
-  const headers = {
-    Accept: "text/x-component",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
-    "Content-Type": "text/plain;charset=UTF-8",
-    Origin: BASE_URL,
-    Referer: `${BASE_URL}/`,
-    "User-Agent": ua,
-    "Next-Action": actionId,
-    "Next-Router-State-Tree": ROUTER_STATE_TREE,
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Dest": "empty",
-  };
-
-  const cookie = jar.toHeader();
-
-  if (cookie) {
-    headers.Cookie = cookie;
-  }
-
-  return headers;
-}
-
-async function postCheckIn(jar, ua, actionId, gamble) {
-  const response = await request("post", {
-    url: `${BASE_URL}/`,
-    timeout: 30000,
-    alpn: "h2",
-    "auto-cookie": false,
-    "auto-redirect": false,
-    headers: buildCheckInHeaders(ua, jar, actionId),
-
-    // 重构后的真实请求体：普通 [false]，赌狗 [true]。
-    body: JSON.stringify([Boolean(gamble)]),
-  });
-
-  const changedNames = jar.absorbResponseHeaders(response.headers);
-  saveSession(jar);
-
-  console.log(
-    `[${NAME}] 签到 POST: HTTP ${response.status}; ` +
-      `Set-Cookie=[${changedNames.join(", ") || "无"}]`
-  );
-
-  return response;
-}
-
-function decodeLooseJsonText(text) {
-  return String(text || "")
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16))
+function decodeText(value) {
+  return String(value || "")
+    .replace(
+      /\\u([0-9a-f]{4})/gi,
+      (_, hex) =>
+        String.fromCharCode(parseInt(hex, 16))
     )
-    .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16))
+    .replace(
+      /\\x([0-9a-f]{2})/gi,
+      (_, hex) =>
+        String.fromCharCode(parseInt(hex, 16))
     )
+    .replace(/&quot;|&#34;/g, '"')
+    .replace(/&amp;/g, "&")
     .replace(/\\"/g, '"');
 }
 
-function readJsonStringField(text, fieldName) {
-  const escapedName = String(fieldName).replace(
+function jsonField(text, name) {
+  const escaped = String(name).replace(
     /[.*+?^${}()|[\]\\]/g,
     "\\$&"
   );
 
-  const regex = new RegExp(
-    `"${escapedName}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`
+  const match = String(text || "").match(
+    new RegExp(
+      `"${escaped}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`
+    )
   );
-
-  const match = String(text || "").match(regex);
 
   if (!match) {
     return "";
@@ -525,304 +307,1731 @@ function readJsonStringField(text, fieldName) {
     return JSON.parse(`"${match[1]}"`);
   } catch (_) {
     return match[1]
-      .replace(/\\n/g, "\n")
-      .replace(/\\r/g, "\r")
-      .replace(/\\t/g, "\t")
       .replace(/\\"/g, '"')
       .replace(/\\\\/g, "\\");
   }
 }
 
-function joinResultText(message, description, fallback) {
-  const parts = [];
+function jsonAfter(body, marker) {
+  const variants = [
+    String(body || ""),
+    decodeText(body),
+  ];
 
-  [message, description].forEach((value) => {
-    const trimmed = String(value || "").trim();
+  for (
+    let variant = 0;
+    variant < variants.length;
+    variant += 1
+  ) {
+    const text = variants[variant];
+    const markerIndex = text.indexOf(marker);
 
-    if (trimmed && parts.indexOf(trimmed) === -1) {
-      parts.push(trimmed);
+    if (markerIndex < 0) {
+      continue;
     }
-  });
 
-  return parts.join("：") || fallback;
+    let start = markerIndex + marker.length;
+
+    while (
+      start < text.length &&
+      text[start] !== "{" &&
+      text[start] !== "["
+    ) {
+      start += 1;
+
+      if (start - markerIndex > 200) {
+        break;
+      }
+    }
+
+    if (
+      start >= text.length ||
+      start - markerIndex > 200
+    ) {
+      continue;
+    }
+
+    const open = text[start];
+    const close = open === "{" ? "}" : "]";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (
+      let index = start;
+      index < text.length;
+      index += 1
+    ) {
+      const character = text[index];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (character === "\\") {
+          escaped = true;
+        } else if (character === '"') {
+          inString = false;
+        }
+
+        continue;
+      }
+
+      if (character === '"') {
+        inString = true;
+      } else if (character === open) {
+        depth += 1;
+      } else if (character === close) {
+        depth -= 1;
+
+        if (depth === 0) {
+          try {
+            return JSON.parse(
+              text.slice(start, index + 1)
+            );
+          } catch (_) {
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
-function analyzeCheckInResponse(response) {
-  const rawBody = String(response.body || "");
-  const text = decodeLooseJsonText(rawBody);
-  const lower = text.toLowerCase();
+function routeTree(parts) {
+  let children = [
+    "__PAGE__",
+    {},
+    null,
+    null,
+  ];
 
-  const message = readJsonStringField(text, "message");
-  const description = readJsonStringField(text, "description");
-
-  const tokenInvalid =
-    response.status === 409 ||
-    lower.includes("action_token_invalid") ||
-    lower.includes("action token invalid");
-
-  if (tokenInvalid) {
-    return {
-      ok: false,
-      retryable: true,
-      kind: "token_invalid",
-      httpStatus: response.status,
-      detail: "短期 Action Token 已失效",
-    };
+  for (
+    let index = parts.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    children = [
+      parts[index],
+      { children },
+      null,
+      null,
+      true,
+    ];
   }
 
-  const actionMissing =
-    response.status === 404 ||
-    lower.includes("server action not found") ||
-    lower.includes("failed to find server action");
+  children = [
+    "(app)",
+    { children },
+    null,
+    null,
+    true,
+  ];
 
-  if (actionMissing) {
-    return {
-      ok: false,
-      retryable: true,
-      kind: "action_changed",
-      httpStatus: response.status,
-      detail: "当前部署的 Server Action 已更新",
-    };
+  return encodeURIComponent(
+    JSON.stringify([
+      "",
+      { children },
+      null,
+      null,
+      true,
+    ])
+  );
+}
+
+function request(method, options) {
+  return new Promise((resolve, reject) => {
+    const send =
+      $httpClient[String(method).toLowerCase()];
+
+    if (typeof send !== "function") {
+      reject(
+        new Error(
+          `Loon 不支持 HTTP ${method}`
+        )
+      );
+      return;
+    }
+
+    send(
+      options,
+      (error, response, data) => {
+        if (error) {
+          reject(new Error(String(error)));
+          return;
+        }
+
+        const rawStatus =
+          response &&
+          (response.status ||
+            response.statusCode)
+            ? response.status ||
+              response.statusCode
+            : 0;
+
+        resolve({
+          status:
+            Number(rawStatus) ||
+            parseInt(
+              String(rawStatus),
+              10
+            ) ||
+            0,
+          headers:
+            (response &&
+              response.headers) ||
+            {},
+          body:
+            data === undefined ||
+            data === null
+              ? ""
+              : String(data),
+        });
+      }
+    );
+  });
+}
+
+function isChallenge(status, body) {
+  const text = String(
+    body || ""
+  ).toLowerCase();
+
+  return (
+    status === 503 ||
+    text.includes(
+      "正在检测浏览器安全能力"
+    ) ||
+    text.includes("just a moment") ||
+    text.includes(
+      "checking your browser"
+    ) ||
+    text.includes(
+      "/cdn-cgi/challenge-platform"
+    ) ||
+    text.includes("cf-chl-") ||
+    text.includes("challenge-form")
+  );
+}
+
+function documentHeaders(
+  ua,
+  jar,
+  referer
+) {
+  const headers = {
+    Accept:
+      "text/html,application/xhtml+xml," +
+      "application/xml;q=0.9," +
+      "image/avif,image/webp," +
+      "image/apng,*/*;q=0.8",
+    "Accept-Language":
+      "zh-CN,zh;q=0.9,en;q=0.7",
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": ua,
+  };
+
+  if (jar.header()) {
+    headers.Cookie = jar.header();
   }
 
-  if (isChallenge(response.status, text)) {
-    return {
-      ok: false,
-      retryable: false,
-      kind: "challenge",
-      httpStatus: response.status,
-      detail: "签到请求触发浏览器安全检测",
-    };
+  if (referer) {
+    headers.Referer = referer;
   }
 
-  const alreadySigned =
-    /你已经签到过了|明天再来吧|今日已签到|已经签到/.test(text);
+  return headers;
+}
 
-  if (alreadySigned) {
-    return {
-      ok: true,
-      retryable: false,
-      kind: "already",
-      httpStatus: response.status,
-      detail: joinResultText(
-        message,
-        description,
-        "今天已经签到过了"
+function saveSession(jar) {
+  if (jar.header()) {
+    $persistentStore.write(
+      jar.header(),
+      KEY.cookie
+    );
+  }
+}
+
+async function renewToken(
+  jar,
+  ua,
+  label
+) {
+  const removed =
+    jar.has("hdh_sa_token");
+
+  jar.remove("hdh_sa_token");
+
+  const response = await request(
+    "get",
+    {
+      url:
+        `${HOME}?_loon_refresh=` +
+        Date.now(),
+      timeout: 25000,
+      alpn: "h2",
+      "auto-cookie": false,
+      "auto-redirect": false,
+      headers: documentHeaders(
+        ua,
+        jar
       ),
-    };
+    }
+  );
+
+  const changed = jar.absorb(
+    response.headers
+  );
+
+  saveSession(jar);
+
+  console.log(
+    `[${NAME}] ${label}: ` +
+      `HTTP ${response.status}; ` +
+      `移除旧Token=${
+        removed ? "是" : "否"
+      }; ` +
+      `Set-Cookie=[${
+        changed.join(", ") || "无"
+      }]; ` +
+      `新Token=${
+        jar.has("hdh_sa_token")
+          ? "有"
+          : "无"
+      }`
+  );
+
+  if (
+    isChallenge(
+      response.status,
+      response.body
+    )
+  ) {
+    throw new Error(
+      "首页触发浏览器安全检测，" +
+        "Token 自动续签失败"
+    );
   }
 
-  const success =
-    /"success"\s*:\s*true/i.test(text) ||
-    /签到成功|签到奖励|获得.{0,20}(积分|蜂蜜)/.test(text);
+  const location = String(
+    getHeader(
+      response.headers,
+      "location"
+    ) || ""
+  );
 
-  if (success) {
-    return {
-      ok: true,
-      retryable: false,
-      kind: "success",
-      httpStatus: response.status,
-      detail: joinResultText(
-        message,
-        description,
-        "签到成功"
-      ),
-    };
-  }
-
-  const loginRequired =
+  if (
     response.status === 401 ||
-    /请先登录|未登录|登录已失效|unauthorized|authentication required/i.test(
-      text
+    response.status === 403 ||
+    /\/login(?:[/?#]|$)/i.test(
+      location
+    ) ||
+    /请先登录|登录已失效|未登录/.test(
+      response.body
+    )
+  ) {
+    throw new Error(
+      "长期登录 Cookie 已失效，" +
+        "请重新登录一次 HDHive"
+    );
+  }
+
+  if (!jar.has("hdh_sa_token")) {
+    throw new Error(
+      `首页 HTTP ${response.status}，` +
+        "但没有签发新 Token"
+    );
+  }
+
+  return response;
+}
+
+function validAction(value) {
+  return /^[a-f0-9]{20,128}$/i.test(
+    String(value || "")
+  );
+}
+
+async function getAction() {
+  let errorMessage = "";
+
+  try {
+    const response = await request(
+      "post",
+      {
+        url: ACTION_API,
+        timeout: 18000,
+        "auto-cookie": false,
+        "auto-redirect": false,
+        headers: {
+          Accept:
+            "application/json",
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          domain: "hdhive.com",
+          path: "/",
+          actionName: "checkIn",
+        }),
+      }
     );
 
-  if (loginRequired) {
+    if (response.status !== 200) {
+      throw new Error(
+        `Action 解析服务 HTTP ` +
+          response.status
+      );
+    }
+
+    let value = null;
+
+    try {
+      value = JSON.parse(
+        response.body
+      );
+    } catch (_) {}
+
+    const candidates = [
+      typeof value === "string"
+        ? value
+        : "",
+      value && value.actionId,
+      value &&
+        value.data &&
+        value.data.actionId,
+      value &&
+        value.result &&
+        value.result.actionId,
+      (
+        response.body.match(
+          /"actionId"\s*:\s*"([a-f0-9]{20,128})"/i
+        ) || []
+      )[1],
+    ];
+
+    const action =
+      candidates.find(validAction);
+
+    if (!action) {
+      throw new Error(
+        "Action 解析服务未返回有效 ID"
+      );
+    }
+
+    $persistentStore.write(
+      String(action),
+      KEY.action
+    );
+
+    return {
+      id: String(action),
+      source: "dynamic",
+    };
+  } catch (error) {
+    errorMessage =
+      error && error.message
+        ? error.message
+        : String(error);
+
+    console.log(
+      `[${NAME}] ` +
+        `动态 Action 获取失败: ` +
+        errorMessage
+    );
+  }
+
+  const cached =
+    $persistentStore.read(
+      KEY.action
+    ) || "";
+
+  if (validAction(cached)) {
+    console.log(
+      `[${NAME}] 使用缓存的 Action ID`
+    );
+
+    return {
+      id: cached,
+      source: "cache",
+    };
+  }
+
+  throw new Error(
+    errorMessage ||
+      "无法获取 checkIn Action ID"
+  );
+}
+
+async function submitCheckin(
+  jar,
+  ua,
+  action,
+  gamble
+) {
+  const headers = {
+    Accept: "text/x-component",
+    "Accept-Language":
+      "zh-CN,zh;q=0.9,en;q=0.7",
+    "Content-Type":
+      "text/plain;charset=UTF-8",
+    Origin: BASE,
+    Referer: HOME,
+    "User-Agent": ua,
+    "Next-Action": action,
+    "Next-Router-State-Tree":
+      CHECKIN_TREE,
+    "Sec-Fetch-Site":
+      "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
+    Cookie: jar.header(),
+  };
+
+  const response = await request(
+    "post",
+    {
+      url: HOME,
+      timeout: 30000,
+      alpn: "h2",
+      "auto-cookie": false,
+      "auto-redirect": false,
+      headers,
+      body: JSON.stringify([
+        Boolean(gamble),
+      ]),
+    }
+  );
+
+  const changed = jar.absorb(
+    response.headers
+  );
+
+  saveSession(jar);
+
+  console.log(
+    `[${NAME}] 签到 POST: ` +
+      `HTTP ${response.status}; ` +
+      `Set-Cookie=[${
+        changed.join(", ") || "无"
+      }]`
+  );
+
+  return response;
+}
+
+function analyze(response) {
+  const text = decodeText(
+    response.body
+  );
+  const lower =
+    text.toLowerCase();
+  const message = jsonField(
+    text,
+    "message"
+  );
+  const description = jsonField(
+    text,
+    "description"
+  );
+
+  const detail = [
+    message,
+    description,
+  ]
+    .map(clean)
+    .filter(
+      (value, index, array) =>
+        value &&
+        array.indexOf(value) ===
+          index
+    )
+    .join("：");
+
+  if (
+    response.status === 409 ||
+    lower.includes(
+      "action_token_invalid"
+    ) ||
+    lower.includes(
+      "action token invalid"
+    )
+  ) {
     return {
       ok: false,
-      retryable: false,
-      kind: "login_required",
-      httpStatus: response.status,
-      detail: "登录状态已失效，请在 Loon 下重新登录一次 HDHive",
+      retry: true,
+      kind: "token",
+      status: response.status,
+      detail:
+        "短期 Action Token 已失效",
+    };
+  }
+
+  if (
+    response.status === 404 ||
+    lower.includes(
+      "server action not found"
+    ) ||
+    lower.includes(
+      "failed to find server action"
+    )
+  ) {
+    return {
+      ok: false,
+      retry: true,
+      kind: "action",
+      status: response.status,
+      detail:
+        "当前 Server Action 已更新",
+    };
+  }
+
+  if (
+    isChallenge(
+      response.status,
+      text
+    )
+  ) {
+    return {
+      ok: false,
+      retry: false,
+      kind: "challenge",
+      status: response.status,
+      detail:
+        "签到请求触发浏览器安全检测",
+    };
+  }
+
+  if (
+    /你已经签到过了|明天再来吧|今日已签到|已经签到/.test(
+      text
+    )
+  ) {
+    return {
+      ok: true,
+      retry: false,
+      kind: "already",
+      status: response.status,
+      detail:
+        detail ||
+        "今天已经签到过了",
+    };
+  }
+
+  if (
+    /"success"\s*:\s*true/i.test(
+      text
+    ) ||
+    /签到成功|签到奖励|获得.{0,20}(积分|蜂蜜)/.test(
+      text
+    )
+  ) {
+    return {
+      ok: true,
+      retry: false,
+      kind: "success",
+      status: response.status,
+      detail:
+        detail || "签到成功",
+    };
+  }
+
+  if (
+    response.status === 401 ||
+    /请先登录|未登录|登录已失效|unauthorized/i.test(
+      text
+    )
+  ) {
+    return {
+      ok: false,
+      retry: false,
+      kind: "login",
+      status: response.status,
+      detail:
+        "登录状态已失效，" +
+        "请重新登录一次 HDHive",
     };
   }
 
   return {
     ok: false,
-    retryable: false,
+    retry: false,
     kind: "unknown",
-    httpStatus: response.status,
-    detail: joinResultText(
-      message,
-      description,
-      `服务返回了无法识别的结果（HTTP ${
-        response.status || "未知"
-      }）`
-    ),
+    status: response.status,
+    detail:
+      detail ||
+      `服务返回了无法识别的结果` +
+        `（HTTP ${
+          response.status || "未知"
+        }）`,
   };
 }
 
-function saveReport(result, gamble, attempts, actionSource) {
-  const report = {
-    success: Boolean(result && result.ok),
-    result: (result && result.kind) || "error",
-    detail: (result && result.detail) || "",
-    httpStatus: (result && result.httpStatus) || 0,
-    mode: gamble ? "gamble" : "normal",
-    attempts,
-    actionSource: actionSource || "",
-    executedAt: new Date().toISOString(),
+function normalizeUser(value) {
+  const user =
+    value &&
+    typeof value === "object"
+      ? value
+      : {};
+
+  const meta =
+    user.user_meta ||
+    user.userMeta ||
+    {};
+
+  const points = [
+    meta.points,
+    user.points,
+    user.current_points,
+  ]
+    .map(toNumber)
+    .find(
+      (item) => item !== null
+    );
+
+  const days = [
+    meta.signin_days_total,
+    meta.signinDaysTotal,
+    user.signin_days_total,
+    user.signinDaysTotal,
+  ]
+    .map(toNumber)
+    .find(
+      (item) => item !== null
+    );
+
+  return {
+    id:
+      user.id !== undefined &&
+      user.id !== null
+        ? String(user.id)
+        : user.user_id !==
+              undefined &&
+            user.user_id !== null
+        ? String(user.user_id)
+        : "",
+    nickname: clean(
+      user.nickname ||
+        user.username ||
+        user.name
+    ),
+    points:
+      points === undefined
+        ? null
+        : points,
+    days:
+      days === undefined
+        ? null
+        : days,
+  };
+}
+
+function userFrom(body) {
+  const object = jsonAfter(
+    body,
+    '"currentUser":'
+  );
+
+  if (object) {
+    return normalizeUser(object);
+  }
+
+  const text = decodeText(body);
+
+  const id = text.match(
+    /"currentUser"\s*:\s*\{[\s\S]{0,8000}?"id"\s*:\s*"?(\d+)"?/
+  );
+
+  const nickname = text.match(
+    /"currentUser"\s*:\s*\{[\s\S]{0,8000}?"nickname"\s*:\s*"((?:\\.|[^"\\])*)"/
+  );
+
+  const points = text.match(
+    /"user_meta"\s*:\s*\{[\s\S]{0,2000}?"points"\s*:\s*(-?\d+)/
+  );
+
+  const days = text.match(
+    /"signin_days_total"\s*:\s*(\d+)/
+  );
+
+  if (
+    !id &&
+    !nickname &&
+    !points &&
+    !days
+  ) {
+    return null;
+  }
+
+  return {
+    id: id ? id[1] : "",
+    nickname: nickname
+      ? clean(nickname[1])
+      : "",
+    points: points
+      ? Number(points[1])
+      : null,
+    days: days
+      ? Number(days[1])
+      : null,
+  };
+}
+
+function mergeUsers() {
+  const sources =
+    Array.prototype.slice
+      .call(arguments)
+      .filter(Boolean);
+
+  const result = {
+    id: "",
+    nickname: "",
+    points: null,
+    days: null,
   };
 
-  $persistentStore.write(
-    JSON.stringify(report),
-    KEY.report
+  sources.forEach((user) => {
+    if (!result.id && user.id) {
+      result.id = String(user.id);
+    }
+
+    if (
+      !result.nickname &&
+      user.nickname
+    ) {
+      result.nickname =
+        clean(user.nickname);
+    }
+
+    if (
+      result.points === null &&
+      user.points !== null &&
+      user.points !== undefined
+    ) {
+      result.points =
+        Number(user.points);
+    }
+
+    if (
+      result.days === null &&
+      user.days !== null &&
+      user.days !== undefined
+    ) {
+      result.days =
+        Number(user.days);
+    }
+  });
+
+  return result;
+}
+
+async function queryAccount(
+  jar,
+  ua
+) {
+  try {
+    const response = await request(
+      "get",
+      {
+        url:
+          `${BASE}/manager/account` +
+          `?_loon_points=${Date.now()}`,
+        timeout: 25000,
+        alpn: "h2",
+        "auto-cookie": false,
+        "auto-redirect": false,
+        headers: documentHeaders(
+          ua,
+          jar,
+          HOME
+        ),
+      }
+    );
+
+    jar.absorb(response.headers);
+    saveSession(jar);
+
+    if (
+      response.status !== 200 ||
+      isChallenge(
+        response.status,
+        response.body
+      )
+    ) {
+      return null;
+    }
+
+    return userFrom(response.body);
+  } catch (error) {
+    console.log(
+      `[${NAME}] 账户积分查询失败: ` +
+        `${
+          error && error.message
+            ? error.message
+            : String(error)
+        }`
+    );
+
+    return null;
+  }
+}
+
+function normalizeRecord(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return null;
+  }
+
+  const description = clean(
+    value.description ||
+      value.reason ||
+      value.remark ||
+      value.content ||
+      value.message ||
+      value.title ||
+      value.type
+  );
+
+  const time =
+    value.created_at ||
+    value.createdAt ||
+    value.updated_at ||
+    value.updatedAt ||
+    value.time ||
+    value.date ||
+    value.occurred_at;
+
+  const change = [
+    value.change,
+    value.points_change,
+    value.pointsChange,
+    value.change_value,
+    value.points_delta,
+    value.pointsDelta,
+    value.delta,
+    value.amount,
+    value.value,
+    value.points,
+  ]
+    .map(toNumber)
+    .find(
+      (item) => item !== null
+    );
+
+  if (!description && !time) {
+    return null;
+  }
+
+  return {
+    time: formatTime(
+      time || new Date()
+    ),
+    change:
+      change === undefined
+        ? null
+        : change,
+    description:
+      description ||
+      "积分变动",
+  };
+}
+
+function collectRecords(
+  value,
+  result,
+  depth
+) {
+  if (
+    depth > 8 ||
+    value === null ||
+    value === undefined
+  ) {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => {
+      const record =
+        normalizeRecord(item);
+
+      if (record) {
+        result.push(record);
+      }
+
+      collectRecords(
+        item,
+        result,
+        depth + 1
+      );
+    });
+
+    return;
+  }
+
+  if (typeof value === "object") {
+    Object.keys(value).forEach(
+      (key) => {
+        if (
+          value[key] &&
+          typeof value[key] ===
+            "object"
+        ) {
+          collectRecords(
+            value[key],
+            result,
+            depth + 1
+          );
+        }
+      }
+    );
+  }
+}
+
+function uniqueRecords(values) {
+  const seen = {};
+  const result = [];
+
+  (
+    Array.isArray(values)
+      ? values
+      : []
+  ).forEach((value) => {
+    const record =
+      normalizeRecord(value);
+
+    if (!record) {
+      return;
+    }
+
+    const key =
+      `${record.time.slice(0, 10)}|` +
+      `${record.change}|` +
+      record.description;
+
+    if (seen[key]) {
+      return;
+    }
+
+    seen[key] = true;
+    result.push(record);
+  });
+
+  return result.sort(
+    (first, second) => {
+      const a =
+        Date.parse(
+          first.time.replace(
+            " ",
+            "T"
+          )
+        ) || 0;
+
+      const b =
+        Date.parse(
+          second.time.replace(
+            " ",
+            "T"
+          )
+        ) || 0;
+
+      return b - a;
+    }
+  );
+}
+
+function parsePointLogs(body) {
+  const result = [];
+
+  [
+    '"initialData":',
+    '"pointsLogs":',
+    '"pointLogs":',
+  ].forEach((marker) => {
+    const value = jsonAfter(
+      body,
+      marker
+    );
+
+    if (value !== null) {
+      collectRecords(
+        value,
+        result,
+        0
+      );
+    }
+  });
+
+  return uniqueRecords(
+    result
+  ).slice(0, 10);
+}
+
+async function queryPointLogs(
+  jar,
+  ua
+) {
+  try {
+    const headers = {
+      Accept: "text/x-component",
+      "Accept-Language":
+        "zh-CN,zh;q=0.9,en;q=0.7",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+      Referer:
+        `${BASE}/manager/account`,
+      RSC: "1",
+      "Next-Router-State-Tree":
+        POINTS_TREE,
+      "User-Agent": ua,
+      Cookie: jar.header(),
+    };
+
+    const response = await request(
+      "get",
+      {
+        url:
+          `${BASE}/manager/points-logs` +
+          "?page=1&page_size=10" +
+          "&_rsc=1" +
+          `&_loon_points=${Date.now()}`,
+        timeout: 25000,
+        alpn: "h2",
+        "auto-cookie": false,
+        "auto-redirect": false,
+        headers,
+      }
+    );
+
+    jar.absorb(response.headers);
+    saveSession(jar);
+
+    if (
+      response.status !== 200 ||
+      isChallenge(
+        response.status,
+        response.body
+      )
+    ) {
+      console.log(
+        `[${NAME}] ` +
+          "服务器积分日志不可用: " +
+          `HTTP ${response.status}`
+      );
+
+      return [];
+    }
+
+    const records =
+      parsePointLogs(
+        response.body
+      );
+
+    console.log(
+      `[${NAME}] ` +
+        `积分日志解析记录=` +
+        records.length
+    );
+
+    return records;
+  } catch (error) {
+    console.log(
+      `[${NAME}] ` +
+        "积分日志查询失败，" +
+        "使用本地历史: " +
+        `${
+          error && error.message
+            ? error.message
+            : String(error)
+        }`
+    );
+
+    return [];
+  }
+}
+
+function rewardFrom(
+  result,
+  body,
+  before,
+  after
+) {
+  const patterns = [
+    /获得\s*([+-]?\d+)\s*积分/,
+    /奖励\s*([+-]?\d+)\s*积分/,
+    /积分\s*([+-]\d+)/,
+  ];
+
+  for (
+    let index = 0;
+    index < patterns.length;
+    index += 1
+  ) {
+    const match =
+      clean(result.detail).match(
+        patterns[index]
+      );
+
+    if (match) {
+      return Number(match[1]);
+    }
+  }
+
+  const explicit =
+    String(body || "").match(
+      /"(?:reward|points_earned|earned_points|points_delta)"\s*:\s*([+-]?\d+)/
+    );
+
+  if (explicit) {
+    return Number(explicit[1]);
+  }
+
+  if (
+    result.kind !== "already" &&
+    before.points !== null &&
+    after.points !== null
+  ) {
+    const difference =
+      Number(after.points) -
+      Number(before.points);
+
+    if (
+      Number.isFinite(difference) &&
+      difference >= 0 &&
+      difference <= 1000
+    ) {
+      return difference;
+    }
+  }
+
+  return null;
+}
+
+function saveHistory(
+  server,
+  current,
+  already
+) {
+  const stored = readJSON(
+    KEY.history,
+    []
+  );
+
+  let values = [];
+
+  if (Array.isArray(server)) {
+    values =
+      values.concat(server);
+  }
+
+  if (
+    current &&
+    (!already || values.length === 0)
+  ) {
+    values.push(current);
+  }
+
+  if (Array.isArray(stored)) {
+    values =
+      values.concat(stored);
+  }
+
+  let history =
+    uniqueRecords(values);
+
+  if (history.length === 0) {
+    history.push({
+      time: formatTime(
+        new Date()
+      ),
+      change: null,
+      description: already
+        ? "今日已签到"
+        : "签到成功",
+    });
+  }
+
+  writeJSON(
+    KEY.history,
+    history.slice(0, 30)
+  );
+
+  return history.slice(0, 3);
+}
+
+async function loadPoints(
+  result,
+  response,
+  before,
+  jar,
+  ua
+) {
+  const saved = readJSON(
+    KEY.user,
+    null
+  );
+
+  let user = mergeUsers(
+    userFrom(response.body),
+    before,
+    saved
+  );
+
+  if (
+    !user.id ||
+    !user.nickname ||
+    user.points === null ||
+    user.days === null
+  ) {
+    user = mergeUsers(
+      await queryAccount(
+        jar,
+        ua
+      ),
+      user
+    );
+  }
+
+  const oldPoints =
+    $persistentStore.read(
+      KEY.points
+    );
+
+  if (
+    user.points === null &&
+    oldPoints !== null &&
+    oldPoints !== ""
+  ) {
+    user.points =
+      toNumber(oldPoints);
+  }
+
+  const reward = rewardFrom(
+    result,
+    response.body,
+    before,
+    user
+  );
+
+  const server =
+    await queryPointLogs(
+      jar,
+      ua
+    );
+
+  const current =
+    result.kind === "success"
+      ? {
+          time: formatTime(
+            new Date()
+          ),
+          change: reward,
+          description:
+            reward === null
+              ? result.detail ||
+                "签到成功"
+              : `签到成功，` +
+                `获得 ${reward} 积分`,
+        }
+      : null;
+
+  const history = saveHistory(
+    server,
+    current,
+    result.kind === "already"
+  );
+
+  writeJSON(
+    KEY.user,
+    user
+  );
+
+  if (user.points !== null) {
+    $persistentStore.write(
+      String(user.points),
+      KEY.points
+    );
+  }
+
+  const info = {
+    user,
+    reward,
+    latest:
+      history[0] || null,
+    history,
+    source:
+      server.length
+        ? "server"
+        : "local",
+    queriedAt:
+      new Date().toISOString(),
+  };
+
+  writeJSON(
+    KEY.flow,
+    info
+  );
+
+  return info;
+}
+
+function render(
+  result,
+  mode,
+  points
+) {
+  const status =
+    result.kind === "success"
+      ? "✅ 签到成功"
+      : result.kind === "already"
+      ? "ℹ️ 今天已经签到"
+      : "❌ 签到失败";
+
+  const lines = [
+    "===HDHive===",
+    "📌 签到结果",
+    status,
+    `签到模式：${mode}`,
+  ];
+
+  if (!points) {
+    if (result.detail) {
+      lines.push(result.detail);
+    }
+  } else {
+    const user = points.user;
+    const latest = points.latest;
+
+    if (user.nickname) {
+      lines.push(
+        `用户昵称：${user.nickname}`
+      );
+    }
+
+    if (user.id) {
+      lines.push(
+        `用户ID：${user.id}`
+      );
+    }
+
+    if (user.points !== null) {
+      lines.push(
+        `当前积分：${user.points}`
+      );
+    }
+
+    if (user.days !== null) {
+      lines.push(
+        `累计签到：${user.days} 天`
+      );
+    }
+
+    if (latest) {
+      lines.push(
+        "",
+        `最新变动：${latest.time}`
+      );
+
+      if (
+        latest.change !== null
+      ) {
+        lines.push(
+          `变动数值：${
+            latest.change >= 0
+              ? "+"
+              : ""
+          }${latest.change} 积分`
+        );
+      }
+
+      lines.push(
+        `内容描述：` +
+          latest.description
+      );
+    }
+
+    lines.push(
+      "",
+      "📝 积分日志："
+    );
+
+    points.history
+      .slice(0, 3)
+      .forEach((item) => {
+        const change =
+          item.change === null
+            ? ""
+            : `${
+                item.change >= 0
+                  ? "+"
+                  : ""
+              }${item.change} 积分 `;
+
+        lines.push(
+          `- ${item.time}：` +
+            change +
+            item.description
+        );
+      });
+  }
+
+  return {
+    title: status,
+    message:
+      lines.slice(3).join("\n"),
+    log: lines.join("\n"),
+  };
+}
+
+function saveReport(
+  result,
+  gamble,
+  attempts,
+  source,
+  points
+) {
+  const report = {
+    success:
+      Boolean(result.ok),
+    result: result.kind,
+    detail: result.detail,
+    httpStatus:
+      result.status || 0,
+    mode: gamble
+      ? "gamble"
+      : "normal",
+    attempts,
+    actionSource:
+      source || "",
+    executedAt:
+      new Date().toISOString(),
+  };
+
+  if (points) {
+    report.user = points.user;
+    report.reward =
+      points.reward;
+    report.latest =
+      points.latest;
+    report.pointsSource =
+      points.source;
+  }
+
+  writeJSON(
+    KEY.report,
+    report
   );
 }
 
 async function main() {
-  const argument = readArguments();
-  const gamble = asBoolean(argument.gamble, false);
-  const modeName = gamble ? "赌狗签到" : "普通签到";
+  const gamble = bool(
+    getArgs().gamble
+  );
 
-  const storedCookie =
-    $persistentStore.read(KEY.cookie) || "";
+  const mode = gamble
+    ? "赌狗签到"
+    : "普通签到";
+
+  const cookie =
+    $persistentStore.read(
+      KEY.cookie
+    ) || "";
 
   const ua =
-    $persistentStore.read(KEY.ua) || DEFAULT_UA;
+    $persistentStore.read(
+      KEY.ua
+    ) || DEFAULT_UA;
 
-  if (!storedCookie) {
+  if (!cookie) {
     throw new Error(
-      "尚未获取登录 Cookie；请先启用插件并在 Loon 下登录一次 hdhive.com"
+      "尚未获取登录 Cookie；" +
+        "请启用插件并登录一次 " +
+        "hdhive.com"
     );
   }
 
-  const jar = new CookieJar(storedCookie);
+  const jar =
+    new CookieJar(cookie);
 
-  console.log(
-    `[${NAME}] 开始执行；模式=${modeName}；` +
-      `已有长期会话=${
-        jar.has("token") || jar.has("refresh_token")
-          ? "是"
-          : "未知"
-      }`
-  );
-
-  await refreshSession(
-    jar,
-    ua,
-    "签到前自动续签"
-  );
-
-  let lastResult = null;
-  let actionSource = "";
-
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const action = await discoverCheckInAction();
-    actionSource = action.source;
-
-    const response = await postCheckIn(
+  const firstSession =
+    await renewToken(
       jar,
       ua,
-      action.actionId,
-      gamble
+      "签到前自动续签"
     );
 
-    const result = analyzeCheckInResponse(response);
-    lastResult = result;
+  let before = mergeUsers(
+    userFrom(
+      firstSession.body
+    ),
+    readJSON(
+      KEY.user,
+      null
+    )
+  );
 
-    console.log(
-      `[${NAME}] 第 ${attempt} 次结果: ${result.kind}; ` +
-        `HTTP=${result.httpStatus}; ` +
-        `可重试=${result.retryable ? "是" : "否"}`
+  const savedPoints =
+    $persistentStore.read(
+      KEY.points
     );
 
-    if (result.retryable && attempt === 1) {
-      console.log(
-        `[${NAME}] ${result.detail}，` +
-          "自动刷新 Token 与 Action 后重试"
-      );
+  if (
+    before.points === null &&
+    savedPoints !== null &&
+    savedPoints !== ""
+  ) {
+    before.points =
+      toNumber(savedPoints);
+  }
 
-      await refreshSession(
+  let result = null;
+  let response = null;
+  let source = "";
+  let attempts = 0;
+
+  for (
+    let attempt = 1;
+    attempt <= 2;
+    attempt += 1
+  ) {
+    attempts = attempt;
+
+    const action =
+      await getAction();
+
+    source = action.source;
+
+    response =
+      await submitCheckin(
         jar,
         ua,
-        "重试前自动续签"
+        action.id,
+        gamble
+      );
+
+    result =
+      analyze(response);
+
+    console.log(
+      `[${NAME}] ` +
+        `第 ${attempt} 次结果=` +
+        `${result.kind}; ` +
+        `HTTP=${result.status}; ` +
+        `可重试=${
+          result.retry ? "是" : "否"
+        }`
+    );
+
+    if (
+      result.retry &&
+      attempt === 1
+    ) {
+      const session =
+        await renewToken(
+          jar,
+          ua,
+          "重试前自动续签"
+        );
+
+      before = mergeUsers(
+        userFrom(session.body),
+        before
       );
 
       continue;
     }
 
-    saveReport(
-      result,
-      gamble,
-      attempt,
-      actionSource
-    );
+    break;
+  }
 
-    return {
-      ok: result.ok,
-      kind: result.kind,
-      title:
-        result.kind === "success"
-          ? "✅ 签到成功"
-          : result.kind === "already"
-          ? "ℹ️ 今日已签到"
-          : "❌ 签到失败",
-      message: `${modeName}\n${result.detail}`,
+  if (!result) {
+    result = {
+      ok: false,
+      kind: "unknown",
+      status: 0,
+      detail:
+        "签到流程没有返回结果",
     };
   }
 
-  const fallback = lastResult || {
-    ok: false,
-    kind: "unknown",
-    httpStatus: 0,
-    detail: "签到流程未返回结果",
-  };
+  const points = result.ok
+    ? await loadPoints(
+        result,
+        response,
+        before,
+        jar,
+        ua
+      )
+    : null;
 
   saveReport(
-    fallback,
+    result,
     gamble,
-    2,
-    actionSource
+    attempts,
+    source,
+    points
+  );
+
+  const output = render(
+    result,
+    mode,
+    points
   );
 
   return {
-    ok: false,
-    kind: fallback.kind,
-    title: "❌ 签到失败",
-    message: `${modeName}\n${fallback.detail}`,
+    title: output.title,
+    message: output.message,
+    log: output.log,
   };
 }
 
-function captureRequestCookie() {
+function captureCookie() {
   const headers =
-    ($request && $request.headers) || {};
+    ($request &&
+      $request.headers) ||
+    {};
 
-  const cookie = String(
-    getHeader(headers, "cookie") || ""
-  ).trim();
+  const cookie = clean(
+    getHeader(
+      headers,
+      "cookie"
+    )
+  );
 
-  const ua = String(
-    getHeader(headers, "user-agent") || ""
-  ).trim();
+  const ua = clean(
+    getHeader(
+      headers,
+      "user-agent"
+    )
+  );
 
-  const hasLoginCookie =
-    /(?:^|;\s*)token=/.test(cookie) ||
-    /(?:^|;\s*)refresh_token=/.test(cookie);
+  const loggedIn =
+    /(?:^|;\s*)token=/.test(
+      cookie
+    ) ||
+    /(?:^|;\s*)refresh_token=/.test(
+      cookie
+    );
 
-  if (!cookie || !hasLoginCookie) {
+  if (!cookie || !loggedIn) {
     console.log(
-      `[${NAME}] 当前请求没有登录 Cookie，跳过保存`
+      `[${NAME}] ` +
+        "当前请求没有登录 Cookie，" +
+        "跳过保存"
     );
 
     $done({});
     return;
   }
 
-  const oldCookie =
-    $persistentStore.read(KEY.cookie) || "";
-
-  const firstCapture = !oldCookie;
-  const changed = oldCookie !== cookie;
+  const first =
+    !$persistentStore.read(
+      KEY.cookie
+    );
 
   $persistentStore.write(
     cookie,
@@ -837,33 +2046,37 @@ function captureRequestCookie() {
   }
 
   console.log(
-    `[${NAME}] 登录 Cookie 已${
-      changed ? "更新" : "存在"
-    }；字段数=${
-      cookie.split(/;\s*/).filter(Boolean).length
-    }`
+    `[${NAME}] ` +
+      "登录 Cookie 已保存；" +
+      `字段数=${
+        cookie
+          .split(/;\s*/)
+          .filter(Boolean)
+          .length
+      }`
   );
 
-  if (firstCapture) {
+  if (first) {
     $notification.post(
       NAME,
       "✅ 登录信息获取成功",
-      "以后会在签到前自动续签 hdh_sa_token，无需每天手动打开网页。"
+      "签到前会自动续签 Token，" +
+        "无需每天手动打开网页。"
     );
   }
 
   $done({});
 }
 
-if (typeof $request !== "undefined") {
-  captureRequestCookie();
+if (
+  typeof $request !==
+  "undefined"
+) {
+  captureCookie();
 } else {
   main()
     .then((result) => {
-      console.log(
-        `[${NAME}] ${result.title}: ` +
-          result.message.replace(/\n/g, "；")
-      );
+      console.log(result.log);
 
       $notification.post(
         NAME,
@@ -878,23 +2091,23 @@ if (typeof $request !== "undefined") {
           : String(error);
 
       console.log(
-        `[${NAME}] 执行失败: ${message}`
+        `[${NAME}] 执行失败: ` +
+          message
       );
 
-      const failure = {
-        ok: false,
-        kind: "exception",
-        httpStatus: 0,
-        detail: message,
-      };
-
-      const args = readArguments();
-
       saveReport(
-        failure,
-        asBoolean(args.gamble, false),
+        {
+          ok: false,
+          kind: "exception",
+          status: 0,
+          detail: message,
+        },
+        bool(
+          getArgs().gamble
+        ),
         0,
-        ""
+        "",
+        null
       );
 
       $notification.post(
@@ -903,5 +2116,7 @@ if (typeof $request !== "undefined") {
         message
       );
     })
-    .finally(() => $done());
+    .finally(() => {
+      $done();
+    });
 }
