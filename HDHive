@@ -1,19 +1,20 @@
 #!name = HDHive 自动签到
-#!desc = 适配 2026 年 6 月重构：自动刷新 hdh_sa_token、动态获取 Server Action，并完成每日签到
-#!author = tianbian
+#!desc = 自动获取Cookie 并执行每日签到
+#!author = Ming
 #!date = 2026-07-25
 #!icon = https://hdhive.com/favicon.ico
 #!system = iOS,iPadOS
 #!loon_version = 3.2.1(733)
-#!tag = HDHive,影巢,签到
+#!tag = HDHive
 
 [Argument]
 
-cron = input,"5 0 * * *",tag=签到时间,desc=默认每天 00:05 执行，使用设备当前时区
+cron = input,"0 0 * * *",tag=签到时间,
+
+cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录或访问 hdhive.com 时自动保存长期登录 Cookie
 
 gamble = switch,false,tag=赌狗签到,desc=关闭时为普通签到；开启后请求体使用 [true]
 
-cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录或访问 hdhive.com 时自动保存长期登录 Cookie
 
 [Script]
 
