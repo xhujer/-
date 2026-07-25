@@ -2028,11 +2028,6 @@ function captureCookie() {
     return;
   }
 
-  const first =
-    !$persistentStore.read(
-      KEY.cookie
-    );
-
   $persistentStore.write(
     cookie,
     KEY.cookie
@@ -2056,15 +2051,6 @@ function captureCookie() {
       }`
   );
 
-  if (first) {
-    $notification.post(
-      NAME,
-      "✅ 登录信息获取成功",
-      "签到前会自动续签 Token，" +
-        "无需每天手动打开网页。"
-    );
-  }
-
   $done({});
 }
 
@@ -2077,12 +2063,6 @@ if (
   main()
     .then((result) => {
       console.log(result.log);
-
-      $notification.post(
-        NAME,
-        result.title,
-        result.message
-      );
     })
     .catch((error) => {
       const message =
@@ -2108,12 +2088,6 @@ if (
         0,
         "",
         null
-      );
-
-      $notification.post(
-        NAME,
-        "❌ 签到失败",
-        message
       );
     })
     .finally(() => {
