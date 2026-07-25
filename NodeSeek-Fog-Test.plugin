@@ -1,5 +1,5 @@
 #!name=NodeSeek Fog 握手测试
-#!desc=捕获 NodeSeek Cookie 与 Safari 请求信息，修正 Fog WebSocket 握手，并检测握手响应状态
+#!desc=捕获 NodeSeek Safari 身份并修正 Fog WebSocket 握手
 #!author=tianbian
 #!icon=https://www.nodeseek.com/favicon.ico
 #!homepage=https://www.nodeseek.com/
@@ -11,8 +11,6 @@
 [Script]
 
 http-request ^(?:https?|wss?):\/\/(?:www\.)?nodeseek\.com\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/NodeSeek-Fog-Handshake.js,tag=NodeSeek身份捕获与Fog握手修复,requires-body=false,timeout=10,enable=true
-
-http-response ^https:\/\/www\.nodeseek\.com\/edge-cgi\/fog(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/NodeSeek-Fog-Response.js,tag=NodeSeek Fog握手响应检测,requires-body=false,timeout=10,enable=true
 
 generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/Loon-WebSocket-Test.js,tag=NodeSeek Fog连接测试,timeout=40,enable=true
 
