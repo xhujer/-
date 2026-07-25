@@ -1,17 +1,30 @@
-#!name=HDHive 自动签到
-#!desc=自动抓取Cookie并每日签到
-#!author=ming
-#!icon=https://hdhive.com/favicon.ico
-#!homepage=https://hdhive.com/
+#!name = HDHive Token 逆向探针
+#!desc = 自动保存 HDHive 登录 Cookie，并探测 hdh_sa_token 能否通过纯 HTTP 或登录流程自动签发；本插件不会执行签到
+#!author = tianbian
+#!date = 2026-07-25
+#!icon = https://hdhive.com/favicon.ico
+#!system = iOS,iPadOS
+#!loon_version = 3.2.1(733)
+#!tag = HDHive,影巢,Token探测
 
 [Argument]
-RunTime = input,"0 6 * * *",tag=每日签到时间
-CaptureCookie = switch,true,tag=自动获取Cookie
+
+username = input,"",tag=影巢账号,desc=仅保存在 Loon 本地；首页无法签发 Token 时用于测试登录链路
+
+password = input,"",tag=影巢密码,desc=仅保存在 Loon 本地；不会发送给 Action ID 解析服务
+
+cron = input,"5 0 * * *",tag=探测时间,desc=默认每天 00:05 执行 Token 探测
+
+cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录或刷新 hdhive.com 时自动保存 Cookie 与 User-Agent
+
+probeEnable = switch,true,tag=启用定时探测,desc=开启后按照上面的时间自动执行 Token 签发探测
 
 [Script]
-cron {RunTime} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/HDHive%20Script, tag=HDHive签到, timeout=60, script-update-interval=86400
 
-http-request ^https?:\/\/(?:www\.)?hdhive\.com\/(?!api\/customer\/user\/checkin)(?:$|user\b|dashboard\b|go-api\b|api\b) script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/HDHive%20Script, tag=HDHive抓Cookie, timeout=10, requires-body=false, enable={CaptureCookie}, script-update-interval=86400
+http-request ^https:\/\/hdhive\.com\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/hdhive_token_probe.js,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
 
-[Mitm]
+cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/hdhive_token_probe.js,timeout=90,tag=HDHive Token探测,argument=[{username},{password}],enable={probeEnable}
+
+[MITM]
+
 hostname = hdhive.com
