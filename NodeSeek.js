@@ -295,8 +295,7 @@ function normalizeCookie(value) {
 }
 
 function getCookieFromHeaders(headers) {
-  const value =
-    getHeader(headers, "Cookie");
+  const value = getHeader(headers, "Cookie");
 
   if (!value) {
     return "";
@@ -315,8 +314,7 @@ function parseCookie(cookie) {
   String(cookie || "")
     .split(";")
     .forEach((part) => {
-      const index =
-        part.indexOf("=");
+      const index = part.indexOf("=");
 
       if (index <= 0) {
         return;
@@ -356,10 +354,7 @@ function buildAuthSignature(cookieMap) {
     "cf_clearance"
   ]
     .map((name) => {
-      return (
-        `${name}=` +
-        (cookieMap[name] || "")
-      );
+      return `${name}=${cookieMap[name] || ""}`;
     })
     .join("|");
 }
@@ -375,8 +370,7 @@ function isFogUrl(url) {
 }
 
 function isBrowserUserAgent(userAgent) {
-  const value =
-    String(userAgent || "");
+  const value = String(userAgent || "");
 
   return (
     /Mozilla\/5\.0/i.test(value) &&
@@ -403,8 +397,7 @@ function canSendCaptureNotice() {
 }
 
 async function captureRequest() {
-  const url =
-    String($request?.url || "");
+  const url = String($request?.url || "");
 
   if (
     !isNodeSeekUrl(url) ||
@@ -413,18 +406,14 @@ async function captureRequest() {
     return;
   }
 
-  const headers =
-    $request?.headers || {};
+  const headers = $request?.headers || {};
 
   const cookie =
     getCookieFromHeaders(headers);
 
   const userAgent =
     cleanText(
-      getHeader(
-        headers,
-        "User-Agent"
-      )
+      getHeader(headers, "User-Agent")
     );
 
   const oldCookie =
@@ -535,29 +524,6 @@ function buildCommonHeaders(
   };
 }
 
-function extractGain(message) {
-  const text =
-    cleanText(message);
-
-  const patterns = [
-    /(?:获得|得到|奖励|增加)\s*[+＋]?\s*(\d+)\s*(?:个|只)?\s*鸡腿/i,
-    /鸡腿\s*[+＋]\s*(\d+)/i,
-    /[+＋]\s*(\d+)\s*(?:个|只)?\s*鸡腿/i,
-    /午饭\s*[+＋]?\s*(\d+)\s*(?:个|只)?\s*鸡腿/i
-  ];
-
-  for (const pattern of patterns) {
-    const match =
-      text.match(pattern);
-
-    if (match?.[1]) {
-      return Number(match[1]);
-    }
-  }
-
-  return null;
-}
-
 function parseSignResult(json, httpCode) {
   const payload =
     (
@@ -579,7 +545,7 @@ function parseSignResult(json, httpCode) {
   const gain =
     isNumber(payload?.gain)
       ? Number(payload.gain)
-      : extractGain(message);
+      : null;
 
   if (
     /今天已完成签到|今日已签到|已经签到|重复操作|重复签到|已签到/i
@@ -596,9 +562,7 @@ function parseSignResult(json, httpCode) {
 
   if (
     payload?.success === true ||
-    gain !== null ||
-    /签到成功|获得.*鸡腿/i
-      .test(message)
+    /签到成功/i.test(message)
   ) {
     return {
       status: "success",
@@ -980,7 +944,7 @@ function formatBoardLine(
     rank !== null
   ) {
     return (
-      `🎖️今日签到获得鸡腿 ${gain} 个` +
+      `🎖️ 今日签到获得鸡腿 ${gain} 个` +
       ` | 当前排名第 ${rank}`
     );
   }
