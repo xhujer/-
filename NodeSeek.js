@@ -851,19 +851,12 @@ async function getOfficialBoardDataSafe(cookie, userAgent) {
       verifiedAt: Date.now()
     };
 
-    print(
-      "签到排行榜：" +
-        `今日奖励=${isNumber(data.gain) ? data.gain : "未知"}；` +
-        `官方 order=${data.rank}`
-    );
-
     return {
       data,
       error: ""
     };
   } catch (error) {
     const message = cleanText(error?.message || error);
-    print(`签到排行榜：${message}`);
 
     return {
       data: null,
