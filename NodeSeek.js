@@ -1,4 +1,4 @@
-const SCRIPT_NAME = "NodeSeek签到1";
+const SCRIPT_NAME = "NodeSeek签到";
 const DOMAIN = "www.nodeseek.com";
 
 // 匿名排行榜无法自动知道“你是谁”，因此必须给出目标成员 ID。
@@ -298,6 +298,39 @@ function parseCookie(cookie) {
     });
 
   return map;
+}
+
+function buildBoardVisitorCookie(cookie) {
+  const parts = [];
+
+  String(cookie || "")
+    .split(";")
+    .forEach((part) => {
+      const index = part.indexOf("=");
+
+      if (index <= 0) {
+        return;
+      }
+
+      const name = part.slice(0, index).trim();
+      const lowerName = name.toLowerCase();
+      const value = part.slice(index + 1).trim();
+
+      // 仅保留 Cloudflare / NodeSeek 风控通行信息。
+      // session、pjwt、smac 等登录身份 Cookie 不会进入公开榜单请求。
+      if (
+        lowerName === "cf_clearance" ||
+        lowerName === "fog" ||
+        lowerName === "hmti_" ||
+        lowerName === "_cfuvid" ||
+        lowerName.startsWith("__cf_") ||
+        lowerName.startsWith("cf_chl_")
+      ) {
+        parts.push(`${name}=${value}`);
+      }
+    });
+
+  return normalizeCookie(parts.join("; "));
 }
 
 function buildIdentitySignature(cookieMap) {
@@ -796,7 +829,7 @@ function buildBoardUrl(page, queryParams = {}) {
 async function getBoardPage(
   page,
   userAgent,
-  { cookie = "", queryParams = {} } = {}
+  { cookie = "", queryParams = {}, requestName = "" } = {}
 ) {
   const pageNumber = Math.max(1, Number(page) || 1);
   const url = buildBoardUrl(pageNumber, queryParams);
@@ -817,17 +850,19 @@ async function getBoardPage(
   });
 
   const code = getStatusCode(response);
-  const requestName = cookie ? "签到排行榜" : "匿名签到排行榜";
+  const label =
+    cleanText(requestName) ||
+    (cookie ? "签到排行榜" : "零 Cookie 签到排行榜");
 
   if (isCloudflarePage(response, data)) {
-    throw new Error(`${requestName}被 Cloudflare 拦截（HTTP ${code}）`);
+    throw new Error(`${label}被 Cloudflare 拦截（HTTP ${code}）`);
   }
 
   const json = parseJson(data);
 
   if (!json) {
     throw new Error(
-      `${requestName}解析失败（HTTP ${code}）：` +
+      `${label}解析失败（HTTP ${code}）：` +
         (cleanText(data).slice(0, 100) || "空响应")
     );
   }
@@ -838,14 +873,24 @@ async function getBoardPage(
 async function getAnonymousBoardPage(
   page,
   userAgent,
-  queryParams = {}
+  queryParams = {},
+  visitorCookie = ""
 ) {
-  // 此处不传 Cookie；包括直查探测在内的所有匿名排行请求均保持匿名。
-  return getBoardPage(page, userAgent, { queryParams });
+  // 仅允许风控通行 Cookie；不携带 session、pjwt、smac 等登录身份。
+  return getBoardPage(page, userAgent, {
+    cookie: visitorCookie,
+    queryParams,
+    requestName: visitorCookie
+      ? "无身份签到排行榜"
+      : "零 Cookie 签到排行榜"
+  });
 }
 
 async function getAuthenticatedBoardPage(page, cookie, userAgent) {
-  return getBoardPage(page, userAgent, { cookie });
+  return getBoardPage(page, userAgent, {
+    cookie,
+    requestName: "登录态签到排行榜"
+  });
 }
 
 function findMemberInList(boardPage, memberId) {
@@ -919,7 +964,11 @@ function saveDirectRankProbe(parameter) {
   write(getRefractProtocol().version, KEY_DIRECT_RANK_PROBE_VERSION);
 }
 
-async function probeAnonymousDirectRank(userAgent, memberId) {
+async function probeAnonymousDirectRank(
+  userAgent,
+  memberId,
+  visitorCookie
+) {
   const cached = readDirectRankProbe();
 
   if (cached === "none") {
@@ -937,6 +986,7 @@ async function probeAnonymousDirectRank(userAgent, memberId) {
     : [...DIRECT_RANK_PARAMS];
 
   let completed = 0;
+  let interrupted = false;
 
   for (let index = 0; index < parameters.length; index += 1) {
     if (index > 0) {
@@ -946,9 +996,14 @@ async function probeAnonymousDirectRank(userAgent, memberId) {
     const parameter = parameters[index];
 
     try {
-      const boardPage = await getAnonymousBoardPage(1, userAgent, {
-        [parameter]: memberId
-      });
+      const boardPage = await getAnonymousBoardPage(
+        1,
+        userAgent,
+        {
+          [parameter]: memberId
+        },
+        visitorCookie
+      );
 
       completed += 1;
 
@@ -972,15 +1027,22 @@ async function probeAnonymousDirectRank(userAgent, memberId) {
         };
       }
     } catch (error) {
-      print(
-        `匿名直查探测（${parameter}）：${cleanText(
-          error?.message || error
-        )}`
-      );
+      const message = cleanText(error?.message || error);
+      print(`匿名直查探测（${parameter}）：${message}`);
+
+      if (/Cloudflare/i.test(message)) {
+        interrupted = true;
+        break;
+      }
     }
   }
 
-  if (!cached) {
+  if (interrupted || completed !== parameters.length) {
+    print(
+      "匿名直查探测：请求被 Cloudflare 阻止，" +
+        "无法判断参数，直接改用公开分页"
+    );
+  } else if (!cached) {
     print("匿名直查探测：未发现可用参数，改用公开分页");
   } else {
     print("匿名直查探测：缓存参数已失效，改用公开分页");
@@ -989,7 +1051,9 @@ async function probeAnonymousDirectRank(userAgent, memberId) {
   return {
     candidate: null,
     // 只有三个请求都正常返回，才允许把“无直查参数”缓存下来。
-    shouldCacheNone: completed === parameters.length
+    shouldCacheNone:
+      !interrupted &&
+      completed === parameters.length
   };
 }
 
@@ -1014,10 +1078,16 @@ function pageContainsGain(boardPage, gain) {
   );
 }
 
-async function findAnonymousBoardRecord(userAgent, memberId, gainHint) {
+async function findAnonymousBoardRecord(
+  userAgent,
+  memberId,
+  gainHint,
+  visitorCookie
+) {
   const directProbe = await probeAnonymousDirectRank(
     userAgent,
-    memberId
+    memberId,
+    visitorCookie
   );
 
   if (directProbe.candidate) {
@@ -1045,7 +1115,12 @@ async function findAnonymousBoardRecord(userAgent, memberId, gainHint) {
       await delay(BOARD_REQUEST_INTERVAL);
     }
 
-    const result = await getAnonymousBoardPage(page, userAgent);
+    const result = await getAnonymousBoardPage(
+      page,
+      userAgent,
+      {},
+      visitorCookie
+    );
     requestCount += 1;
     cache.set(page, result);
     return result;
@@ -1152,7 +1227,8 @@ async function findAnonymousBoardRecord(userAgent, memberId, gainHint) {
 async function verifyAnonymousBoardRecord(
   userAgent,
   memberId,
-  candidate
+  candidate,
+  visitorCookie
 ) {
   if (!candidate) {
     return null;
@@ -1182,7 +1258,12 @@ async function verifyAnonymousBoardRecord(
     ].filter((page, index, array) => array.indexOf(page) === index);
 
     for (const page of pages) {
-      const boardPage = await getAnonymousBoardPage(page, userAgent);
+      const boardPage = await getAnonymousBoardPage(
+        page,
+        userAgent,
+        {},
+        visitorCookie
+      );
       const verified = findMemberOnPage(boardPage, memberId);
 
       if (verified) {
@@ -1207,22 +1288,36 @@ async function verifyAnonymousBoardRecord(
   return null;
 }
 
-async function getAnonymousBoardDataSafe(userAgent, memberId, gainHint) {
+async function getAnonymousBoardDataSafe(
+  userAgent,
+  memberId,
+  gainHint,
+  visitorCookie
+) {
   try {
     const candidate = await findAnonymousBoardRecord(
       userAgent,
       memberId,
-      gainHint
+      gainHint,
+      visitorCookie
     );
 
     const data = await verifyAnonymousBoardRecord(
       userAgent,
       memberId,
-      candidate
+      candidate,
+      visitorCookie
     );
 
     return {
-      data,
+      data: data
+        ? {
+            ...data,
+            rankTransport: visitorCookie
+              ? "visitor-cookie"
+              : "zero-cookie"
+          }
+        : null,
       error: data
         ? ""
         : candidate
@@ -1232,6 +1327,44 @@ async function getAnonymousBoardDataSafe(userAgent, memberId, gainHint) {
   } catch (error) {
     const message = cleanText(error?.message || error);
     print(`签到排行榜：${message}`);
+
+    return {
+      data: null,
+      error: message
+    };
+  }
+}
+
+async function getOfficialBoardDataSafe(cookie, userAgent, memberId) {
+  try {
+    const boardPage = await getAuthenticatedBoardPage(
+      1,
+      cookie,
+      userAgent
+    );
+
+    const found = findMemberOnPage(boardPage, memberId);
+
+    if (!found || found.source !== "order") {
+      throw new Error("登录态排行榜未返回目标成员的官方 order");
+    }
+
+    const data = {
+      ...found,
+      verified: true,
+      verifiedAt: Date.now(),
+      rankTransport: "authenticated-fallback"
+    };
+
+    print(`排行榜登录态兜底：官方 order=${data.rank}`);
+
+    return {
+      data,
+      error: ""
+    };
+  } catch (error) {
+    const message = cleanText(error?.message || error);
+    print(`排行榜登录态兜底：${message}`);
 
     return {
       data: null,
@@ -1370,7 +1503,8 @@ async function reconcileAnonymousRankAfterAudit(
   userAgent,
   memberId,
   candidate,
-  audit
+  audit,
+  visitorCookie
 ) {
   if (
     !candidate ||
@@ -1386,6 +1520,28 @@ async function reconcileAnonymousRankAfterAudit(
   }
 
   const previousRank = Number(candidate.rank);
+
+  if (candidate.rankTransport === "authenticated-fallback") {
+    print(
+      "排行榜实时变动：" +
+        `前次官方快照=${previousRank}；` +
+        `最新官方快照=${Number(audit.officialOrder)}`
+    );
+
+    return {
+      ...candidate,
+      rank: Number(audit.officialOrder),
+      page: Number(audit.page),
+      source: "order",
+      verified: true,
+      verifiedAt: Date.now(),
+      audit: {
+        ...audit,
+        previousOfficialRank: previousRank,
+        officialRefreshed: true
+      }
+    };
+  }
 
   print(
     "排行榜实时变动：" +
@@ -1404,12 +1560,14 @@ async function reconcileAnonymousRankAfterAudit(
       pageIndex: null,
       source: "list",
       verified: false
-    }
+    },
+    visitorCookie
   );
 
   if (refreshed) {
     return {
       ...refreshed,
+      rankTransport: candidate.rankTransport,
       audit: {
         ...audit,
         previousAnonymousRank: previousRank,
@@ -1644,15 +1802,39 @@ function formatAccountLine(account) {
       ? Number(signResult.gain)
       : readTodayGain();
 
-    const boardResult = await getAnonymousBoardDataSafe(
+    const visitorCookie = buildBoardVisitorCookie(cookie);
+
+    print(
+      "排行榜公开通道：" +
+        (visitorCookie
+          ? "仅使用 Cloudflare 通行 Cookie，不携带登录身份"
+          : "未找到 Cloudflare 通行 Cookie，尝试零 Cookie")
+    );
+
+    let boardResult = await getAnonymousBoardDataSafe(
       userAgent,
       memberId,
-      gainHint
+      gainHint,
+      visitorCookie
     );
+
+    if (!boardResult.data) {
+      print(
+        "排行榜公开通道失败：" +
+          `${boardResult.error || "未知错误"}；` +
+          "改用现有签到 Cookie 获取官方 order"
+      );
+
+      boardResult = await getOfficialBoardDataSafe(
+        cookie,
+        userAgent,
+        memberId
+      );
+    }
 
     let board = boardResult.data;
 
-    // 即使签到 POST 被拦截，只要匿名公开榜单能找到 44709，
+    // 即使签到 POST 被拦截，只要排行榜能找到目标成员，
     // 就可以确定今天已经签到。
     if (
       board &&
@@ -1661,7 +1843,7 @@ function formatAccountLine(account) {
     ) {
       signResult = {
         status: "already",
-        message: "匿名排行榜确认今天已经签到",
+        message: "排行榜确认今天已经签到",
         gain: board.gain
       };
     }
@@ -1683,7 +1865,8 @@ function formatAccountLine(account) {
         userAgent,
         memberId,
         board,
-        audit
+        audit,
+        visitorCookie
       );
     }
 
