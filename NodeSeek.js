@@ -947,7 +947,7 @@ function getResultTitle(status) {
   }
 
   if (status === "already") {
-    return "ℹ️ NodeSeek 今日已签到";
+    return "🎁 NodeSeek 今日已签到";
   }
 
   if (status === "cloudflare") {
@@ -980,21 +980,21 @@ function formatBoardLine(
     rank !== null
   ) {
     return (
-      `📊 今日签到获得鸡腿 ${gain} 个` +
+      `🎖️今日签到获得鸡腿 ${gain} 个` +
       ` | 当前排名第 ${rank}`
     );
   }
 
   if (gain !== null) {
     return (
-      `📊 今日签到获得鸡腿 ${gain} 个` +
+      `🎖️ 今日签到获得鸡腿 ${gain} 个` +
       " | 当前排名暂未获取"
     );
   }
 
   if (rank !== null) {
     return (
-      `📊 当前排名第 ${rank}`
+      `🎖️ 当前排名第 ${rank}`
     );
   }
 
