@@ -1,33 +1,43 @@
 /*
- * NodeSeek Cookie 捕获与 Fog WebSocket 握手修复测试
+ * NodeSeek Cookie 捕获与 Fog WebSocket 握手修复
  *
- * 功能：
- * 1. 从 Safari 的 NodeSeek 请求中保存 Cookie 和 User-Agent
- * 2. 尝试拦截 /edge-cgi/fog WebSocket 握手
- * 3. 注入正确的 Origin、Referer、Cookie 和 User-Agent
+ * 修复内容：
+ * 1. Fog 请求不再覆盖已经保存的 Safari UA
+ * 2. 恢复正确的 Fetch Metadata 请求头
+ * 3. 优先使用 Safari 捕获的 Cookie、UA、语言
+ * 4. 不修改 WebSocket Key、Version、Upgrade 等底层请求头
  */
 
 const SCRIPT_NAME = "NodeSeek Fog 握手";
-const DOMAIN = "nodeseek.com";
 
 const KEY_COOKIE = "nodeseek_cookie";
-const KEY_USER_AGENT = "nodeseek_user_agent";
-const KEY_CAPTURE_TIME = "nodeseek_capture_time";
+const KEY_SAFARI_UA = "nodeseek_safari_user_agent_v2";
+const KEY_LANGUAGE = "nodeseek_accept_language_v2";
+const KEY_CAPTURE_TIME = "nodeseek_capture_time_v2";
 
 function log(message) {
   console.log(`[${SCRIPT_NAME}] ${message}`);
 }
 
 function readHeader(headers, name) {
-  if (!headers || typeof headers !== "object") {
+  if (
+    !headers ||
+    typeof headers !== "object"
+  ) {
     return "";
   }
 
-  const target = String(name).toLowerCase();
+  const target =
+    String(name).toLowerCase();
 
   for (const key of Object.keys(headers)) {
-    if (String(key).toLowerCase() === target) {
-      return String(headers[key] || "");
+    if (
+      String(key).toLowerCase() ===
+      target
+    ) {
+      return String(
+        headers[key] ?? ""
+      );
     }
   }
 
@@ -35,71 +45,197 @@ function readHeader(headers, name) {
 }
 
 function removeHeader(headers, name) {
-  const target = String(name).toLowerCase();
+  const target =
+    String(name).toLowerCase();
 
   for (const key of Object.keys(headers)) {
-    if (String(key).toLowerCase() === target) {
+    if (
+      String(key).toLowerCase() ===
+      target
+    ) {
       delete headers[key];
     }
   }
 }
 
-function setHeader(headers, name, value) {
+function setHeader(
+  headers,
+  name,
+  value
+) {
   removeHeader(headers, name);
 
-  if (value !== undefined && value !== null && String(value) !== "") {
-    headers[name] = String(value);
+  if (
+    value !== undefined &&
+    value !== null &&
+    String(value) !== ""
+  ) {
+    headers[name] =
+      String(value);
   }
 }
 
 function maskCookie(cookie) {
-  if (!cookie) {
+  const value =
+    String(cookie || "");
+
+  if (!value) {
     return "无";
   }
 
-  if (cookie.length <= 20) {
-    return `${cookie.slice(0, 5)}***`;
+  if (value.length <= 24) {
+    return `${value.slice(0, 8)}***`;
   }
 
-  return `${cookie.slice(0, 10)}***${cookie.slice(-6)}`;
+  return (
+    `${value.slice(0, 12)}` +
+    "***" +
+    `${value.slice(-8)}`
+  );
 }
 
-function saveRequestIdentity(headers) {
-  const requestCookie = readHeader(headers, "Cookie");
-  const requestUserAgent = readHeader(headers, "User-Agent");
+function isFogRequest(url) {
+  return (
+    typeof url === "string" &&
+    /\/edge-cgi\/fog(?:[?#]|$)/i.test(
+      url
+    )
+  );
+}
 
-  let cookieUpdated = false;
-  let userAgentUpdated = false;
+function isNodeSeekRequest(url) {
+  return (
+    typeof url === "string" &&
+    /^https?:\/\/(?:www\.)?nodeseek\.com\//i.test(
+      url
+    )
+  );
+}
 
-  if (requestCookie) {
+function looksLikeLoginCookie(cookie) {
+  const value =
+    String(cookie || "");
+
+  return (
+    value.includes("session=") ||
+    value.includes("pjwt=") ||
+    value.includes("cf_clearance=")
+  );
+}
+
+function looksLikeSafariUA(userAgent) {
+  const value =
+    String(userAgent || "");
+
+  return (
+    /Safari\//i.test(value) &&
+    /Mobile\//i.test(value) &&
+    !/Loon/i.test(value)
+  );
+}
+
+function captureBrowserIdentity(
+  url,
+  headers
+) {
+  /*
+   * Fog 握手本身绝对不能用于更新身份，
+   * 否则 generic 环境的 UA 可能覆盖 Safari UA。
+   */
+  if (
+    !isNodeSeekRequest(url) ||
+    isFogRequest(url)
+  ) {
+    return;
+  }
+
+  const cookie =
+    readHeader(
+      headers,
+      "Cookie"
+    );
+
+  const userAgent =
+    readHeader(
+      headers,
+      "User-Agent"
+    );
+
+  const acceptLanguage =
+    readHeader(
+      headers,
+      "Accept-Language"
+    );
+
+  let updated = false;
+
+  if (
+    cookie &&
+    looksLikeLoginCookie(cookie)
+  ) {
     const oldCookie =
-      $persistentStore.read(KEY_COOKIE) || "";
+      $persistentStore.read(
+        KEY_COOKIE
+      ) || "";
 
-    if (requestCookie !== oldCookie) {
+    if (cookie !== oldCookie) {
       $persistentStore.write(
-        requestCookie,
+        cookie,
         KEY_COOKIE
       );
 
-      cookieUpdated = true;
+      updated = true;
+
+      log(
+        `Safari Cookie 已更新：${maskCookie(
+          cookie
+        )}`
+      );
     }
   }
 
-  if (requestUserAgent) {
-    const oldUserAgent =
-      $persistentStore.read(KEY_USER_AGENT) || "";
+  if (
+    userAgent &&
+    looksLikeSafariUA(userAgent)
+  ) {
+    const oldUA =
+      $persistentStore.read(
+        KEY_SAFARI_UA
+      ) || "";
 
-    if (requestUserAgent !== oldUserAgent) {
+    if (userAgent !== oldUA) {
       $persistentStore.write(
-        requestUserAgent,
-        KEY_USER_AGENT
+        userAgent,
+        KEY_SAFARI_UA
       );
 
-      userAgentUpdated = true;
+      updated = true;
+
+      log(
+        "Safari User-Agent 已更新"
+      );
     }
   }
 
-  if (cookieUpdated || userAgentUpdated) {
+  if (acceptLanguage) {
+    const oldLanguage =
+      $persistentStore.read(
+        KEY_LANGUAGE
+      ) || "";
+
+    if (
+      acceptLanguage !== oldLanguage
+    ) {
+      $persistentStore.write(
+        acceptLanguage,
+        KEY_LANGUAGE
+      );
+
+      updated = true;
+    }
+  }
+
+  if (updated) {
     const captureTime =
       new Date().toLocaleString();
 
@@ -108,56 +244,63 @@ function saveRequestIdentity(headers) {
       KEY_CAPTURE_TIME
     );
 
-    log("NodeSeek 身份信息已更新");
-
-    if (cookieUpdated) {
-      log(
-        `Cookie：${maskCookie(requestCookie)}`
-      );
-    }
-
-    if (userAgentUpdated) {
-      log(
-        `User-Agent：${requestUserAgent}`
-      );
-    }
+    log(
+      `身份捕获时间：${captureTime}`
+    );
   }
 }
 
-function isFogRequest(url) {
-  return (
-    typeof url === "string" &&
-    /\/edge-cgi\/fog(?:[?#]|$)/i.test(url)
-  );
-}
-
-function handleFogHandshake(url, originalHeaders) {
+function handleFogHandshake(
+  url,
+  originalHeaders
+) {
   const headers = {
-    ...originalHeaders
+    ...(originalHeaders || {})
   };
 
-  /*
-   * 当前握手本身可能已经带有 Cookie 和 UA。
-   * 优先使用当前请求中的值，缺少时读取此前捕获的值。
-   */
-  const currentCookie =
-    readHeader(headers, "Cookie");
-
-  const currentUserAgent =
-    readHeader(headers, "User-Agent");
-
   const savedCookie =
-    $persistentStore.read(KEY_COOKIE) || "";
+    $persistentStore.read(
+      KEY_COOKIE
+    ) || "";
 
-  const savedUserAgent =
-    $persistentStore.read(KEY_USER_AGENT) || "";
+  const savedSafariUA =
+    $persistentStore.read(
+      KEY_SAFARI_UA
+    ) || "";
 
+  const savedLanguage =
+    $persistentStore.read(
+      KEY_LANGUAGE
+    ) ||
+    "zh-CN,zh-Hans;q=0.9";
+
+  const currentCookie =
+    readHeader(
+      headers,
+      "Cookie"
+    );
+
+  const currentUA =
+    readHeader(
+      headers,
+      "User-Agent"
+    );
+
+  /*
+   * 必须优先使用 Safari 捕获值。
+   * generic WebSocket 当前请求中的 UA 只作为兜底。
+   */
   const finalCookie =
-    currentCookie || savedCookie;
+    savedCookie ||
+    currentCookie;
 
   const finalUserAgent =
-    savedUserAgent || currentUserAgent;
+    savedSafariUA ||
+    currentUA;
 
+  /*
+   * 同源信息。
+   */
   setHeader(
     headers,
     "Origin",
@@ -168,6 +311,61 @@ function handleFogHandshake(url, originalHeaders) {
     headers,
     "Referer",
     "https://www.nodeseek.com/"
+  );
+
+  /*
+   * 与 Safari 成功握手保持一致。
+   * 上一版错误地删除了这三个请求头。
+   */
+  setHeader(
+    headers,
+    "Sec-Fetch-Site",
+    "same-origin"
+  );
+
+  setHeader(
+    headers,
+    "Sec-Fetch-Mode",
+    "websocket"
+  );
+
+  setHeader(
+    headers,
+    "Sec-Fetch-Dest",
+    "websocket"
+  );
+
+  /*
+   * 常规浏览器请求头。
+   */
+  setHeader(
+    headers,
+    "Accept",
+    "*/*"
+  );
+
+  setHeader(
+    headers,
+    "Accept-Language",
+    savedLanguage
+  );
+
+  setHeader(
+    headers,
+    "Pragma",
+    "no-cache"
+  );
+
+  setHeader(
+    headers,
+    "Cache-Control",
+    "no-cache"
+  );
+
+  setHeader(
+    headers,
+    "Priority",
+    "u=3, i"
   );
 
   if (finalCookie) {
@@ -187,91 +385,103 @@ function handleFogHandshake(url, originalHeaders) {
   }
 
   /*
-   * 删除可能暴露 generic 页面来源的 Fetch Metadata，
-   * 避免与手动写入的 Origin 冲突。
+   * 不手动修改以下底层字段：
+   *
+   * Host
+   * Connection
+   * Upgrade
+   * Sec-WebSocket-Key
+   * Sec-WebSocket-Version
+   * Sec-WebSocket-Extensions
+   *
+   * 这些字段由 WebSocket 实现自动生成。
    */
-  removeHeader(
-    headers,
-    "Sec-Fetch-Site"
+
+  log(
+    "=== NodeSeek Fog 握手已修正 ==="
   );
 
-  removeHeader(
-    headers,
-    "Sec-Fetch-Mode"
-  );
-
-  removeHeader(
-    headers,
-    "Sec-Fetch-Dest"
-  );
-
-  log("=== NodeSeek Fog 握手已拦截 ===");
   log(`URL：${url}`);
-  log(`Origin：${readHeader(headers, "Origin")}`);
-  log(`Referer：${readHeader(headers, "Referer")}`);
+
+  log(
+    `Origin：${readHeader(
+      headers,
+      "Origin"
+    )}`
+  );
+
+  log(
+    `Sec-Fetch-Site：${readHeader(
+      headers,
+      "Sec-Fetch-Site"
+    )}`
+  );
+
+  log(
+    `Sec-Fetch-Mode：${readHeader(
+      headers,
+      "Sec-Fetch-Mode"
+    )}`
+  );
+
+  log(
+    `Sec-Fetch-Dest：${readHeader(
+      headers,
+      "Sec-Fetch-Dest"
+    )}`
+  );
 
   log(
     `Cookie：${
       finalCookie
-        ? `已注入（${maskCookie(finalCookie)}）`
+        ? `已注入（${maskCookie(
+            finalCookie
+          )}）`
         : "未找到"
     }`
   );
 
   log(
-    `User-Agent：${
-      finalUserAgent
+    `Safari User-Agent：${
+      savedSafariUA
         ? "已注入"
-        : "未找到"
+        : "未捕获，正在使用当前 UA"
     }`
   );
 
   const captureTime =
-    $persistentStore.read(KEY_CAPTURE_TIME) || "未知";
+    $persistentStore.read(
+      KEY_CAPTURE_TIME
+    ) || "未捕获";
 
-  log(`身份捕获时间：${captureTime}`);
-
-  $notification.post(
-    SCRIPT_NAME,
-    "Fog 握手已拦截",
-    [
-      `Cookie：${finalCookie ? "已注入" : "未找到"}`,
-      `User-Agent：${finalUserAgent ? "已注入" : "未找到"}`,
-      `Origin：https://www.nodeseek.com`
-    ].join("\n")
+  log(
+    `Safari 身份捕获时间：${captureTime}`
   );
 
-  /*
-   * 使用修改后的完整请求头继续握手。
-   */
   $done({
     headers
   });
 }
 
 function main() {
-  const request =
-    typeof $request !== "undefined"
-      ? $request
-      : null;
-
-  if (!request || !request.url) {
-    log("没有获取到 $request");
+  if (
+    typeof $request === "undefined" ||
+    !$request ||
+    !$request.url
+  ) {
+    log(
+      "未获取到请求信息"
+    );
 
     $done({});
     return;
   }
 
   const url =
-    String(request.url);
+    String($request.url);
 
   const headers =
-    request.headers || {};
-
-  /*
-   * 每次访问 NodeSeek 都尝试更新 Cookie 和 UA。
-   */
-  saveRequestIdentity(headers);
+    $request.headers || {};
 
   if (isFogRequest(url)) {
     handleFogHandshake(
@@ -282,9 +492,11 @@ function main() {
     return;
   }
 
-  /*
-   * 普通网页请求不做修改。
-   */
+  captureBrowserIdentity(
+    url,
+    headers
+  );
+
   $done({});
 }
 
@@ -293,15 +505,11 @@ try {
 } catch (error) {
   log(
     `执行异常：${String(
-      error && (
-        error.stack ||
-        error.message
-      ) || error
+      error?.stack ||
+      error?.message ||
+      error
     )}`
   );
 
-  /*
-   * 出错时保持原请求继续，避免影响网页访问。
-   */
   $done({});
 }
