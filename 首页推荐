@@ -1,1 +1,0 @@
-.data.circleList |= (map(select(.showInfo.title | IN("推荐","关注","新发"))))
