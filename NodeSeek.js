@@ -1,12 +1,6 @@
 const SCRIPT_NAME = "NodeSeek签到";
 const DOMAIN = "www.nodeseek.com";
 
-// 匿名排行榜无法自动知道“你是谁”，因此必须给出目标成员 ID。
-const TARGET_MEMBER_ID = "44709";
-const BOARD_PAGE_SIZE = 50;
-const BOARD_REQUEST_INTERVAL = 160;
-const DIRECT_RANK_PARAMS = ["member_id", "memberId", "uid"];
-
 const KEY_COOKIE = "nodeseek_cookie";
 const KEY_USER_AGENT = "nodeseek_user_agent";
 const KEY_RANDOM = "nodeseek_random";
@@ -15,11 +9,6 @@ const KEY_AUTH_SIGNATURE = "nodeseek_identity_signature_v2";
 const KEY_CAPTURE_NOTIFY_TIME = "nodeseek_capture_notify_time";
 const KEY_REFRACT_VERSION = "nodeseek_refract_version";
 const KEY_REFRACT_KEY = "nodeseek_refract_key";
-const KEY_LAST_GAIN = "nodeseek_last_gain";
-const KEY_LAST_GAIN_DAY = "nodeseek_last_gain_day";
-const KEY_DIRECT_RANK_PARAM = "nodeseek_direct_rank_param_v1";
-const KEY_DIRECT_RANK_PROBE_VERSION =
-  "nodeseek_direct_rank_probe_version_v1";
 
 // 仅作首次协商兜底；脚本会自动读取 sw.js，并处理 refract-key-update。
 const FALLBACK_REFRACT_VERSION = "0.3.34";
@@ -114,10 +103,6 @@ function isNumber(value) {
 
 function numberOrZero(value) {
   return isNumber(value) ? Number(value) : 0;
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function httpGet(options) {
@@ -248,19 +233,6 @@ function getSignMode() {
   };
 }
 
-function getTargetMemberId() {
-  const value =
-    cleanText(getArg("MemberID") ?? getArg("memberId")) ||
-    TARGET_MEMBER_ID;
-
-  if (!/^\d+$/.test(value)) {
-    throw new Error("成员 ID 格式无效");
-  }
-
-  write(value, KEY_MEMBER_ID);
-  return value;
-}
-
 function normalizeCookie(value) {
   return String(value || "")
     .replace(/\r?\n/g, "; ")
@@ -298,39 +270,6 @@ function parseCookie(cookie) {
     });
 
   return map;
-}
-
-function buildBoardVisitorCookie(cookie) {
-  const parts = [];
-
-  String(cookie || "")
-    .split(";")
-    .forEach((part) => {
-      const index = part.indexOf("=");
-
-      if (index <= 0) {
-        return;
-      }
-
-      const name = part.slice(0, index).trim();
-      const lowerName = name.toLowerCase();
-      const value = part.slice(index + 1).trim();
-
-      // 仅保留 Cloudflare / NodeSeek 风控通行信息。
-      // session、pjwt、smac 等登录身份 Cookie 不会进入公开榜单请求。
-      if (
-        lowerName === "cf_clearance" ||
-        lowerName === "fog" ||
-        lowerName === "hmti_" ||
-        lowerName === "_cfuvid" ||
-        lowerName.startsWith("__cf_") ||
-        lowerName.startsWith("cf_chl_")
-      ) {
-        parts.push(`${name}=${value}`);
-      }
-    });
-
-  return normalizeCookie(parts.join("; "));
 }
 
 function buildIdentitySignature(cookieMap) {
@@ -448,7 +387,7 @@ function buildCommonHeaders({ userAgent, referer, cookie = "", accept }) {
     "User-Agent": userAgent || DEFAULT_USER_AGENT
   };
 
-  // 匿名排行榜调用时 cookie 为空，因此不会产生 Cookie 请求头。
+  // 仅在调用方明确传入时添加 Cookie。
   if (cookie) {
     headers.Cookie = cookie;
   }
@@ -809,30 +748,18 @@ function parseBoardPage(json, page) {
   };
 }
 
-function buildBoardUrl(page, queryParams = {}) {
+function buildBoardUrl(page) {
   const pageNumber = Math.max(1, Number(page) || 1);
-  const query = [
-    ["page", pageNumber],
-    ...Object.entries(queryParams).filter(
-      ([key, value]) => cleanText(key) && value !== null && value !== undefined
-    )
-  ]
-    .map(
-      ([key, value]) =>
-        `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`
-    )
-    .join("&");
-
-  return `https://${DOMAIN}/api/attendance/board?${query}`;
+  return `https://${DOMAIN}/api/attendance/board?page=${pageNumber}`;
 }
 
 async function getBoardPage(
   page,
   userAgent,
-  { cookie = "", queryParams = {}, requestName = "" } = {}
+  { cookie = "", requestName = "" } = {}
 ) {
   const pageNumber = Math.max(1, Number(page) || 1);
-  const url = buildBoardUrl(pageNumber, queryParams);
+  const url = buildBoardUrl(pageNumber);
 
   const { response, data } = await signedRequest({
     method: "GET",
@@ -870,22 +797,6 @@ async function getBoardPage(
   return parseBoardPage(json, pageNumber);
 }
 
-async function getAnonymousBoardPage(
-  page,
-  userAgent,
-  queryParams = {},
-  visitorCookie = ""
-) {
-  // 仅允许风控通行 Cookie；不携带 session、pjwt、smac 等登录身份。
-  return getBoardPage(page, userAgent, {
-    cookie: visitorCookie,
-    queryParams,
-    requestName: visitorCookie
-      ? "无身份签到排行榜"
-      : "零 Cookie 签到排行榜"
-  });
-}
-
 async function getAuthenticatedBoardPage(page, cookie, userAgent) {
   return getBoardPage(page, userAgent, {
     cookie,
@@ -893,436 +804,62 @@ async function getAuthenticatedBoardPage(page, cookie, userAgent) {
   });
 }
 
-function findMemberInList(boardPage, memberId) {
-  const target = String(memberId);
-  const index = boardPage.list.findIndex(
-    (item) => String(item?.member_id || "") === target
-  );
+function getOfficialMember(boardPage) {
+  const record =
+    boardPage.record &&
+    typeof boardPage.record === "object"
+      ? boardPage.record
+      : null;
 
-  if (index < 0) {
+  const memberId = cleanText(record?.member_id);
+
+  if (!/^\d+$/.test(memberId) || !isNumber(boardPage.order)) {
     return null;
   }
 
-  const record = boardPage.list[index] || {};
-
   return {
-    memberId: target,
+    memberId,
     name: cleanText(record.member_name),
     gain: isNumber(record.gain) ? Number(record.gain) : null,
-    rank: (boardPage.page - 1) * BOARD_PAGE_SIZE + index + 1,
+    rank: Number(boardPage.order),
     total: boardPage.total,
-    source: "list",
+    source: "order",
     page: boardPage.page,
-    pageIndex: index,
-    verified: false
+    verified: true
   };
 }
 
-function findMemberOnPage(boardPage, memberId) {
-  const target = String(memberId);
-
-  if (
-    String(boardPage.record?.member_id || "") === target &&
-    isNumber(boardPage.order)
-  ) {
-    return {
-      memberId: target,
-      name: cleanText(boardPage.record?.member_name),
-      gain: isNumber(boardPage.record?.gain)
-        ? Number(boardPage.record.gain)
-        : null,
-      rank: Number(boardPage.order),
-      total: boardPage.total,
-      source: "order",
-      page: boardPage.page,
-      pageIndex: null,
-      verified: true
-    };
-  }
-
-  return findMemberInList(boardPage, memberId);
-}
-
-function readDirectRankProbe() {
-  const version = getRefractProtocol().version;
-
-  if (cleanText(read(KEY_DIRECT_RANK_PROBE_VERSION)) !== version) {
-    return "";
-  }
-
-  const value = cleanText(read(KEY_DIRECT_RANK_PARAM));
-
-  if (value === "none" || DIRECT_RANK_PARAMS.includes(value)) {
-    return value;
-  }
-
-  return "";
-}
-
-function saveDirectRankProbe(parameter) {
-  write(parameter || "none", KEY_DIRECT_RANK_PARAM);
-  write(getRefractProtocol().version, KEY_DIRECT_RANK_PROBE_VERSION);
-}
-
-async function probeAnonymousDirectRank(
-  userAgent,
-  memberId,
-  visitorCookie
-) {
-  const cached = readDirectRankProbe();
-
-  if (cached === "none") {
-    return {
-      candidate: null,
-      shouldCacheNone: false
-    };
-  }
-
-  const parameters = cached
-    ? [
-        cached,
-        ...DIRECT_RANK_PARAMS.filter((parameter) => parameter !== cached)
-      ]
-    : [...DIRECT_RANK_PARAMS];
-
-  let completed = 0;
-  let interrupted = false;
-
-  for (let index = 0; index < parameters.length; index += 1) {
-    if (index > 0) {
-      await delay(BOARD_REQUEST_INTERVAL);
-    }
-
-    const parameter = parameters[index];
-
-    try {
-      const boardPage = await getAnonymousBoardPage(
-        1,
-        userAgent,
-        {
-          [parameter]: memberId
-        },
-        visitorCookie
-      );
-
-      completed += 1;
-
-      if (
-        String(boardPage.record?.member_id || "") === String(memberId) &&
-        isNumber(boardPage.order)
-      ) {
-        const candidate = findMemberOnPage(boardPage, memberId);
-
-        saveDirectRankProbe(parameter);
-        print(
-          `匿名直查探测：${parameter} 可用，实时排名=${candidate.rank}`
-        );
-
-        return {
-          candidate: {
-            ...candidate,
-            directParameter: parameter
-          },
-          shouldCacheNone: false
-        };
-      }
-    } catch (error) {
-      const message = cleanText(error?.message || error);
-      print(`匿名直查探测（${parameter}）：${message}`);
-
-      if (/Cloudflare/i.test(message)) {
-        interrupted = true;
-        break;
-      }
-    }
-  }
-
-  if (interrupted || completed !== parameters.length) {
-    print(
-      "匿名直查探测：请求被 Cloudflare 阻止，" +
-        "无法判断参数，直接改用公开分页"
-    );
-  } else if (!cached) {
-    print("匿名直查探测：未发现可用参数，改用公开分页");
-  } else {
-    print("匿名直查探测：缓存参数已失效，改用公开分页");
-  }
-
-  return {
-    candidate: null,
-    // 只有三个请求都正常返回，才允许把“无直查参数”缓存下来。
-    shouldCacheNone:
-      !interrupted &&
-      completed === parameters.length
-  };
-}
-
-function getGainBounds(boardPage) {
-  const gains = boardPage.list
-    .map((item) => (isNumber(item?.gain) ? Number(item.gain) : null))
-    .filter((value) => value !== null);
-
-  if (!gains.length) {
-    return null;
-  }
-
-  return {
-    max: Math.max(...gains),
-    min: Math.min(...gains)
-  };
-}
-
-function pageContainsGain(boardPage, gain) {
-  return boardPage.list.some(
-    (item) => isNumber(item?.gain) && Number(item.gain) === Number(gain)
-  );
-}
-
-async function findAnonymousBoardRecord(
-  userAgent,
-  memberId,
-  gainHint,
-  visitorCookie
-) {
-  const directProbe = await probeAnonymousDirectRank(
-    userAgent,
-    memberId,
-    visitorCookie
-  );
-
-  if (directProbe.candidate) {
-    return directProbe.candidate;
-  }
-
-  const cache = new Map();
-  let requestCount = 0;
-
-  function finalizeFound(found) {
-    // 只有公开分页确实找到了该成员，才证明刚才的三次直查阴性有效。
-    if (found && directProbe.shouldCacheNone) {
-      saveDirectRankProbe("none");
-    }
-
-    return found;
-  }
-
-  async function fetchPage(page) {
-    if (cache.has(page)) {
-      return cache.get(page);
-    }
-
-    if (requestCount > 0) {
-      await delay(BOARD_REQUEST_INTERVAL);
-    }
-
-    const result = await getAnonymousBoardPage(
-      page,
-      userAgent,
-      {},
-      visitorCookie
-    );
-    requestCount += 1;
-    cache.set(page, result);
-    return result;
-  }
-
-  const firstPage = await fetchPage(1);
-  let found = findMemberOnPage(firstPage, memberId);
-
-  if (found) {
-    return finalizeFound(found);
-  }
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil(Number(firstPage.total || firstPage.list.length) / BOARD_PAGE_SIZE)
-  );
-
-  // 排行榜先按 gain 从高到低排列，同一 gain 内再按签到时间从早到晚排列。
-  // 已知今日奖励时，先二分找到该 gain 第一次出现的页面，再向后查找。
-  // 例如凌晨很早获得 1 个鸡腿，即使实时排名已降到 8668 左右，
-  // 通常也只需约 8 次二分请求和 1 个目标页请求。
-  if (isNumber(gainHint)) {
-    const targetGain = Number(gainHint);
-    let low = 1;
-    let high = totalPages;
-    let firstCandidatePage = null;
-
-    while (low <= high) {
-      const page = Math.floor((low + high) / 2);
-      const boardPage = await fetchPage(page);
-      found = findMemberOnPage(boardPage, memberId);
-
-      if (found) {
-        return finalizeFound(found);
-      }
-
-      const bounds = getGainBounds(boardPage);
-
-      if (!bounds) {
-        firstCandidatePage = page;
-        high = page - 1;
-      } else if (bounds.min <= targetGain) {
-        firstCandidatePage = page;
-        high = page - 1;
-      } else {
-        low = page + 1;
-      }
-    }
-
-    if (firstCandidatePage !== null) {
-      for (
-        let page = firstCandidatePage;
-        page <= totalPages;
-        page += 1
-      ) {
-        const boardPage = await fetchPage(page);
-        found = findMemberOnPage(boardPage, memberId);
-
-        if (found) {
-          return finalizeFound(found);
-        }
-
-        const bounds = getGainBounds(boardPage);
-
-        if (!bounds) {
-          break;
-        }
-
-        // 当前页已经全部低于目标 gain，说明目标奖励区间已经结束。
-        if (bounds.max < targetGain) {
-          break;
-        }
-
-        // 边界页跨越了目标 gain，但没有该 gain，说明排行榜中不存在它。
-        if (
-          bounds.min <= targetGain &&
-          bounds.max >= targetGain &&
-          !pageContainsGain(boardPage, targetGain)
-        ) {
-          break;
-        }
-      }
-    }
-  }
-
-  // “已签到”响应可能不带 gain。此时匿名扫描公开榜单。
-  // 从末页向前查找，避开已经读取过的页面。
-  for (let page = totalPages; page >= 2; page -= 1) {
-    if (cache.has(page)) {
-      continue;
-    }
-
-    const boardPage = await fetchPage(page);
-    found = findMemberOnPage(boardPage, memberId);
-
-    if (found) {
-      return finalizeFound(found);
-    }
-  }
-
-  return null;
-}
-
-async function verifyAnonymousBoardRecord(
-  userAgent,
-  memberId,
-  candidate,
-  visitorCookie
-) {
-  if (!candidate) {
-    return null;
-  }
-
-  // 如果服务器直接返回 order，它本身就是单次响应中的官方实时排名。
-  if (candidate.source === "order") {
-    return {
-      ...candidate,
-      verified: true
-    };
-  }
-
-  let targetPage =
-    Number(candidate.page) ||
-    Math.max(1, Math.ceil(Number(candidate.rank) / BOARD_PAGE_SIZE));
-
-  // 匿名分页查询期间，新的高鸡腿记录可能把目标向后一页推移。
-  // 重新请求命中页；若刚好跨页，再检查后一页和前一页。
-  for (let pass = 1; pass <= 2; pass += 1) {
-    await delay(BOARD_REQUEST_INTERVAL);
-
-    const pages = [
-      targetPage,
-      targetPage + 1,
-      Math.max(1, targetPage - 1)
-    ].filter((page, index, array) => array.indexOf(page) === index);
-
-    for (const page of pages) {
-      const boardPage = await getAnonymousBoardPage(
-        page,
-        userAgent,
-        {},
-        visitorCookie
-      );
-      const verified = findMemberOnPage(boardPage, memberId);
-
-      if (verified) {
-        print(
-          "匿名排行榜复核：" +
-            `第 ${verified.page} 页第 ${Number(verified.pageIndex) + 1} 条，` +
-            `实时排名=${verified.rank}`
-        );
-
-        return {
-          ...verified,
-          verified: true,
-          verifiedAt: Date.now()
-        };
-      }
-    }
-
-    // 排名在查询期间通常只会向后移动，下一轮从后一页继续复查。
-    targetPage += 1;
-  }
-
-  return null;
-}
-
-async function getAnonymousBoardDataSafe(
-  userAgent,
-  memberId,
-  gainHint,
-  visitorCookie
-) {
+async function getOfficialBoardDataSafe(cookie, userAgent) {
   try {
-    const candidate = await findAnonymousBoardRecord(
-      userAgent,
-      memberId,
-      gainHint,
-      visitorCookie
+    const boardPage = await getAuthenticatedBoardPage(
+      1,
+      cookie,
+      userAgent
     );
 
-    const data = await verifyAnonymousBoardRecord(
-      userAgent,
-      memberId,
-      candidate,
-      visitorCookie
+    const found = getOfficialMember(boardPage);
+
+    if (!found) {
+      throw new Error("登录态排行榜未返回当前账号的 record / order");
+    }
+
+    write(found.memberId, KEY_MEMBER_ID);
+
+    const data = {
+      ...found,
+      verified: true,
+      verifiedAt: Date.now()
+    };
+
+    print(
+      "签到排行榜：" +
+        `今日奖励=${isNumber(data.gain) ? data.gain : "未知"}；` +
+        `官方 order=${data.rank}`
     );
 
     return {
-      data: data
-        ? {
-            ...data,
-            rankTransport: visitorCookie
-              ? "visitor-cookie"
-              : "zero-cookie"
-          }
-        : null,
-      error: data
-        ? ""
-        : candidate
-          ? "匿名排行榜命中后实时复核失败"
-          : `公开榜单中未找到成员 ID ${memberId}`
+      data,
+      error: ""
     };
   } catch (error) {
     const message = cleanText(error?.message || error);
@@ -1333,257 +870,6 @@ async function getAnonymousBoardDataSafe(
       error: message
     };
   }
-}
-
-async function getOfficialBoardDataSafe(cookie, userAgent, memberId) {
-  try {
-    const boardPage = await getAuthenticatedBoardPage(
-      1,
-      cookie,
-      userAgent
-    );
-
-    const found = findMemberOnPage(boardPage, memberId);
-
-    if (!found || found.source !== "order") {
-      throw new Error("登录态排行榜未返回目标成员的官方 order");
-    }
-
-    const data = {
-      ...found,
-      verified: true,
-      verifiedAt: Date.now(),
-      rankTransport: "authenticated-fallback"
-    };
-
-    print(`排行榜登录态兜底：官方 order=${data.rank}`);
-
-    return {
-      data,
-      error: ""
-    };
-  } catch (error) {
-    const message = cleanText(error?.message || error);
-    print(`排行榜登录态兜底：${message}`);
-
-    return {
-      data: null,
-      error: message
-    };
-  }
-}
-
-async function auditAnonymousRank(cookie, userAgent, memberId, candidate) {
-  if (!cookie || !candidate || !isNumber(candidate.rank)) {
-    return {
-      checked: false,
-      matched: null,
-      error: "缺少 A/B 校验条件"
-    };
-  }
-
-  let page = Math.max(
-    1,
-    Math.ceil(Number(candidate.rank) / BOARD_PAGE_SIZE)
-  );
-
-  const visited = new Set();
-
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    if (attempt > 1) {
-      await delay(BOARD_REQUEST_INTERVAL);
-    }
-
-    visited.add(page);
-
-    const boardPage = await getAuthenticatedBoardPage(
-      page,
-      cookie,
-      userAgent
-    );
-
-    const recordMatches =
-      String(boardPage.record?.member_id || "") === String(memberId);
-
-    if (!recordMatches || !isNumber(boardPage.order)) {
-      return {
-        checked: false,
-        matched: null,
-        error: "登录态响应未返回目标成员的官方 order"
-      };
-    }
-
-    const officialOrder = Number(boardPage.order);
-    const listHit = findMemberInList(boardPage, memberId);
-
-    if (listHit) {
-      const matched = officialOrder === listHit.rank;
-      const audit = {
-        checked: true,
-        matched,
-        officialOrder,
-        listRank: listHit.rank,
-        difference: listHit.rank - officialOrder,
-        page: boardPage.page
-      };
-
-      print(
-        "排行榜 A/B 校验：" +
-          `官方 order=${audit.officialOrder}；` +
-          `页内位置=${audit.listRank}；` +
-          `差值=${audit.difference}；` +
-          `结论=${matched ? "准确" : "不一致"}`
-      );
-
-      return audit;
-    }
-
-    const officialPage = Math.max(
-      1,
-      Math.ceil(officialOrder / BOARD_PAGE_SIZE)
-    );
-
-    // 排名恰好跨页时，按本次响应给出的 order 转到新页再取一份原子快照。
-    if (officialPage !== page && !visited.has(officialPage)) {
-      page = officialPage;
-      continue;
-    }
-
-    const audit = {
-      checked: true,
-      matched: false,
-      officialOrder,
-      listRank: null,
-      difference: null,
-      page: boardPage.page,
-      error: "官方 order 对应页内没有目标成员"
-    };
-
-    print(
-      "排行榜 A/B 校验：" +
-        `官方 order=${officialOrder}；页内位置=未命中；结论=不一致`
-    );
-
-    return audit;
-  }
-
-  return {
-    checked: false,
-    matched: null,
-    error: "排名连续跨页，A/B 校验未完成"
-  };
-}
-
-async function auditAnonymousRankSafe(
-  cookie,
-  userAgent,
-  memberId,
-  candidate
-) {
-  try {
-    return await auditAnonymousRank(
-      cookie,
-      userAgent,
-      memberId,
-      candidate
-    );
-  } catch (error) {
-    const message = cleanText(error?.message || error);
-    print(`排行榜 A/B 校验：未完成（${message}）`);
-
-    return {
-      checked: false,
-      matched: null,
-      error: message
-    };
-  }
-}
-
-async function reconcileAnonymousRankAfterAudit(
-  userAgent,
-  memberId,
-  candidate,
-  audit,
-  visitorCookie
-) {
-  if (
-    !candidate ||
-    !audit?.checked ||
-    !audit.matched ||
-    !isNumber(audit.officialOrder) ||
-    Number(audit.officialOrder) === Number(candidate.rank)
-  ) {
-    return {
-      ...candidate,
-      audit
-    };
-  }
-
-  const previousRank = Number(candidate.rank);
-
-  if (candidate.rankTransport === "authenticated-fallback") {
-    print(
-      "排行榜实时变动：" +
-        `前次官方快照=${previousRank}；` +
-        `最新官方快照=${Number(audit.officialOrder)}`
-    );
-
-    return {
-      ...candidate,
-      rank: Number(audit.officialOrder),
-      page: Number(audit.page),
-      source: "order",
-      verified: true,
-      verifiedAt: Date.now(),
-      audit: {
-        ...audit,
-        previousOfficialRank: previousRank,
-        officialRefreshed: true
-      }
-    };
-  }
-
-  print(
-    "排行榜实时变动：" +
-      `匿名快照=${previousRank}；` +
-      `校验快照=${Number(audit.officialOrder)}；` +
-      "正在进行最终匿名复核"
-  );
-
-  const refreshed = await verifyAnonymousBoardRecord(
-    userAgent,
-    memberId,
-    {
-      ...candidate,
-      rank: Number(audit.officialOrder),
-      page: Number(audit.page),
-      pageIndex: null,
-      source: "list",
-      verified: false
-    },
-    visitorCookie
-  );
-
-  if (refreshed) {
-    return {
-      ...refreshed,
-      rankTransport: candidate.rankTransport,
-      audit: {
-        ...audit,
-        previousAnonymousRank: previousRank,
-        anonymousRefreshed: true
-      }
-    };
-  }
-
-  return {
-    ...candidate,
-    audit: {
-      ...audit,
-      previousAnonymousRank: previousRank,
-      anonymousRefreshFailed: true
-    }
-  };
 }
 
 async function getAccountInfo(cookie, userAgent, memberId) {
@@ -1648,30 +934,6 @@ async function getAccountInfo(cookie, userAgent, memberId) {
   };
 }
 
-function getNodeSeekDayKey() {
-  return new Date(Date.now() + 8 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
-}
-
-function saveTodayGain(gain) {
-  if (!isNumber(gain)) {
-    return;
-  }
-
-  write(Number(gain), KEY_LAST_GAIN);
-  write(getNodeSeekDayKey(), KEY_LAST_GAIN_DAY);
-}
-
-function readTodayGain() {
-  if (read(KEY_LAST_GAIN_DAY) !== getNodeSeekDayKey()) {
-    return null;
-  }
-
-  const gain = read(KEY_LAST_GAIN);
-  return isNumber(gain) ? Number(gain) : null;
-}
-
 function getResultTitle(status) {
   if (status === "success") {
     return "✅ NodeSeek 签到成功";
@@ -1696,29 +958,6 @@ function formatBoardLine(board, signResult) {
       : null;
 
   const rank = isNumber(board?.rank) ? Number(board.rank) : null;
-
-  if (board?.audit?.anonymousRefreshFailed) {
-    const gainText =
-      gain !== null
-        ? `🎖️ 今日签到获得鸡腿 ${gain} 个 | `
-        : "";
-
-    return `${gainText}⚠️ 排名已变动，最终匿名复核失败`;
-  }
-
-  if (board?.audit?.checked && board.audit.matched === false) {
-    const gainText =
-      gain !== null
-        ? `🎖️ 今日签到获得鸡腿 ${gain} 个 | `
-        : "";
-
-    return (
-      `${gainText}⚠️ 排名 A/B 校验不一致` +
-      `（匿名 ${rank ?? "未知"} / ` +
-      `order ${board.audit.officialOrder ?? "未知"} / ` +
-      `页内 ${board.audit.listRank ?? "未命中"}）`
-    );
-  }
 
   if (gain !== null && rank !== null) {
     return (
@@ -1763,17 +1002,16 @@ function formatAccountLine(account) {
 
     if (!cookie) {
       const message =
-        "签到操作仍需要登录 Cookie；匿名排行榜本身不使用 Cookie";
+        "请开启自动获取 Cookie，然后在 Safari 登录并刷新一次 NodeSeek";
 
       print(`❌ NodeSeek 签到失败\n\n${message}`);
-      notify("❌ NodeSeek 签到失败", "未获取签到 Cookie", message);
+      notify("❌ NodeSeek 签到失败", "未获取 Cookie", message);
       return done();
     }
 
     const userAgent =
       cleanText(read(KEY_USER_AGENT)) || DEFAULT_USER_AGENT;
 
-    const memberId = getTargetMemberId();
     const signMode = getSignMode();
 
     await refreshRefractProtocol(userAgent);
@@ -1794,43 +1032,10 @@ function formatAccountLine(account) {
       };
     }
 
-    if (isNumber(signResult.gain)) {
-      saveTodayGain(signResult.gain);
-    }
-
-    const gainHint = isNumber(signResult.gain)
-      ? Number(signResult.gain)
-      : readTodayGain();
-
-    const visitorCookie = buildBoardVisitorCookie(cookie);
-
-    print(
-      "排行榜公开通道：" +
-        (visitorCookie
-          ? "仅使用 Cloudflare 通行 Cookie，不携带登录身份"
-          : "未找到 Cloudflare 通行 Cookie，尝试零 Cookie")
+    const boardResult = await getOfficialBoardDataSafe(
+      cookie,
+      userAgent
     );
-
-    let boardResult = await getAnonymousBoardDataSafe(
-      userAgent,
-      memberId,
-      gainHint,
-      visitorCookie
-    );
-
-    if (!boardResult.data) {
-      print(
-        "排行榜公开通道失败：" +
-          `${boardResult.error || "未知错误"}；` +
-          "改用现有签到 Cookie 获取官方 order"
-      );
-
-      boardResult = await getOfficialBoardDataSafe(
-        cookie,
-        userAgent,
-        memberId
-      );
-    }
 
     let board = boardResult.data;
 
@@ -1850,24 +1055,6 @@ function formatAccountLine(account) {
 
     if (board && isNumber(board.gain)) {
       signResult.gain = Number(board.gain);
-      saveTodayGain(board.gain);
-    }
-
-    if (board) {
-      const audit = await auditAnonymousRankSafe(
-        cookie,
-        userAgent,
-        memberId,
-        board
-      );
-
-      board = await reconcileAnonymousRankAfterAudit(
-        userAgent,
-        memberId,
-        board,
-        audit,
-        visitorCookie
-      );
     }
 
     if (
@@ -1894,6 +1081,10 @@ function formatAccountLine(account) {
 
       return done();
     }
+
+    const memberId =
+      board?.memberId ||
+      cleanText(read(KEY_MEMBER_ID));
 
     let account = null;
 
