@@ -1,4 +1,4 @@
-const SCRIPT_NAME = "NodeSeek签到";
+const SCRIPT_NAME = "NodeSeek签到1";
 const DOMAIN = "www.nodeseek.com";
 
 // 匿名排行榜无法自动知道“你是谁”，因此必须给出目标成员 ID。
