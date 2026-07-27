@@ -1,0 +1,32 @@
+#!name=快手极速版
+#!desc=单账号 Cookie 自动获取，定时执行签到、宝箱、打卡和广告任务。首次使用请在设置中填写 Salt。
+#!author=smallfawn / Loon移植：Codex
+#!homepage=https://github.com/smallfawn/QLScriptPublic
+#!system=iOS,iPadOS
+#!loon_version=3.2.1(733)
+#!tag=快手极速版,签到
+
+[Argument]
+cron = input,"15 8 * * *",tag=执行时间,desc=默认每天 08:15，须填写合法的 cron 表达式
+cookieCapture = switch,true,tag=Cookie 自动获取,desc=开启后进入快手极速版并刷新页面，自动保存单账号 Cookie
+salt = input,"",tag=Salt,desc=原脚本必需；无法自动取得时请手动填写，勿包含井号
+tasks = input,"food,look,box,search",tag=广告任务,desc=可选 food、look、box、search，英文逗号分隔
+dailyTasks = input,"signin,box,huge",tag=日常任务,desc=可选 signin、box、huge，英文逗号分隔
+maxLook = input,"50",tag=看广告次数,desc=每次运行默认 50
+maxSearch = input,"25",tag=搜索广告次数,desc=每次运行默认 25
+maxFood = input,"10",tag=饭补广告次数,desc=每次运行默认 10
+maxBox = input,"10",tag=宝箱广告次数,desc=每次运行默认 10
+searchWords = input,"双十一,百度极速版",tag=搜索关键词,desc=多个关键词使用英文逗号分隔
+maxReward = input,"30000",tag=金币上限,desc=单次运行每个账号最多获得的金币数
+extraTask = switch,true,tag=额外任务,desc=开启可增加金币，提示领取完毕时可关闭
+skipLive = switch,true,tag=跳过直播,desc=默认跳过直播任务
+adAdd = switch,true,tag=追加广告,desc=允许原脚本追加广告任务
+noDelay = switch,false,tag=无延迟模式,desc=风险较高，可能导致账号异常，默认关闭
+notify = switch,true,tag=运行通知,desc=账号更新、缺少参数和任务结果通知
+
+[Script]
+http-request ^https:\/\/(?:[^\/]+\.)?(?:kuaishou\.com|gifshow\.com)\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/ksjsb_loon.js, requires-body=true, timeout=20, tag=快手极速版获取账号, enable={cookieCapture}, argument=[{salt},{notify}]
+cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/ksjsb_loon.js, timeout=1200, tag=快手极速版每日任务, argument=[{salt},{tasks},{dailyTasks},{maxLook},{maxSearch},{maxFood},{maxBox},{searchWords},{maxReward},{extraTask},{skipLive},{adAdd},{noDelay},{notify}]
+
+[Mitm]
+hostname=%APPEND% *.kuaishou.com,*.gifshow.com
