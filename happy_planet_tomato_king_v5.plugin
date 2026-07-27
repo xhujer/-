@@ -14,4 +14,4 @@ cron = input,"25 10 * * *",tag=执行时间,desc=默认每天 10:25 执行
 
 [Script]
 
-cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/qh.js,timeout=900,tag=统一茄皇,argument=[{QH}],enable=true
+cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/happy_planet_tomato_king_v5.jstimeout,=900,tag=统一茄皇,argument=[{QH}],enable=true
