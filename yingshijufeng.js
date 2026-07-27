@@ -268,7 +268,7 @@ function apiGet(auth, path, params) {
             {
                 url: API_BASE + path + "?" + query,
                 headers,
-                timeout: 15,
+                timeout: 15000,
             },
             (error, response, body) => {
                 if (error) {
