@@ -1,3 +1,14 @@
+/*
+ * 影视飓风小程序签到 - Loon
+ *
+ * 获取凭据：
+ * 1. 在插件参数中开启“自动获取 Cookie”
+ * 2. 打开微信中的影视飓风小程序
+ * 3. 进入积分或签到页面，收到“Cookie 获取成功”通知即可
+ *
+ * 定时任务默认每天 08:28 执行，可在插件参数中修改。
+ */
+
 const NAME = "影视飓风";
 const STORE_KEY = "yingshijufeng_auth";
 const MINI_APP_ID = "wx92782ef90ebc836d";
