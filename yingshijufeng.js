@@ -464,7 +464,7 @@ async function runCheckin() {
         } catch (error) {
             const message = String(error.message || error);
             if (isAlreadyChecked(message)) {
-                subtitle = "ℹ️ 今日已签到";
+                subtitle = "🎁 今日已签到";
             } else {
                 throw error;
             }
