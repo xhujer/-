@@ -1,868 +1,817 @@
-/*
- * 统一快乐星球茄皇 - Loon 脚本
- *
- * 账号格式：
- *   单账号：wid#手机号
- *   多账号：wid#手机号&wid#手机号
- *   也支持换行分隔
- *
- * 默认定时：25 10 * * *
- * 账号优先从插件参数 $argument.QH 读取；
- * 独立添加脚本时，也可直接把账号字符串作为 argument 传入。
- */
+'use strict';
 
-const TITLE = "统一茄皇";
-const API_BASE = "https://api.zhumanito.cn";
+const SCRIPT_NAME = "Happy Planet Tomato King V5";
+const BASE_URL = "https://farmgames.ioutu.cn";
+const ACCOUNT_KEY = "QH";
+const PUBLIC_KEY =
+  "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA70sK419vy3MabW3lEGlk" +
+  "7Zh1u78OdnVlioVazp5Y46eBh+/TDqo/wZ9VrQ/4MmAtoP0vJ2vmwP5gqO3WPoj" +
+  "b07WddXfF1eU+5M+Rj3s0eSRrvZvBcGZ3qK0dOgZJScK66IDQazt/c4xqhDcsI" +
+  "tIyNRahUqB/IKc6E80GZJvMvFtZVSCseAXC0mAJXhi1AdUOlP+3Pv0fiUVejTJp" +
+  "1j7LBNWJ7Z5/8mRcclQH0vmxsdYsaV3qZiJ2d/CfNoKcwmI2IWmeZy8NP5U8Hn" +
+  "0AsxPEwjdHoEqG/iy/SoA46TZL+RLtWqUSHXpaKR/VFN0rbl25SE91X8FTfLqyD" +
+  "8LfGMCwRQIDAQAB";
+
 const USER_AGENT =
-    "Mozilla/5.0 (Linux; Android 14; 23046RP50C Build/UKQ1.230804.001; wv) " +
-    "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 " +
-    "Chrome/142.0.7444.172 Safari/537.36 XWEB/1420045 " +
-    "MMWEBSDK/20250201 MMWEBID/5714 MicroMessenger/8.0.57.2820(0x28003956) " +
-    "WeChat/arm64 Weixin Android Tablet NetType/WIFI Language/zh_CN " +
-    "ABI/arm64 miniProgram/wx532ecb3bdaaf92f9";
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 26_5_2 like Mac OS X) " +
+  "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 " +
+  "MicroMessenger/8.0.75(0x18004b42) NetType/WIFI Language/zh_CN " +
+  "miniProgram/wx532ecb3bdaaf92f9";
 
-const STEP_ORDER = ["登录", "领取种子", "签到", "浏览任务", "收获作物", "播种", "循环浇水"];
-const STEP_EMOJI = {
-    登录: "🔑",
-    领取种子: "🌱",
-    签到: "📅",
-    浏览任务: "🔍",
-    收获作物: "🌾",
-    播种: "🌱",
-    循环浇水: "🔄",
-};
+const SUPPORTED_TASK_TYPES = new Set(["SIGN", "BROWSE", "SHARE"]);
+const FRIEND_TASK_TYPE = "FRIEND_STEAL_ENERGY";
+const FRIEND_STATUS_CLAIMABLE = "0";
+const REQUEST_TIMEOUT_MS = 20000;
+const REQUEST_RETRIES = 2;
+const FORGE_URLS = [
+  "https://cdn.jsdelivr.net/npm/node-forge@1.3.1/dist/forge.min.js",
+  "https://unpkg.com/node-forge@1.3.1/dist/forge.min.js",
+  "https://raw.githubusercontent.com/digitalbazaar/forge/1.3.1/dist/forge.min.js",
+];
 
-function shortText(value, maxLength) {
-    const text = String(value == null ? "" : value).trim();
-    const limit = maxLength || 120;
-    return text.length <= limit ? text : text.slice(0, limit - 1) + "…";
+let FORGE = null;
+let RSA_PUBLIC_KEY = null;
+
+const CONFIG = readConfig();
+
+function readConfig() {
+  const args = parseScriptArguments(
+    typeof $argument !== "undefined" ? $argument : ""
+  );
+
+  return {
+    account: safeStoreRead(ACCOUNT_KEY),
+    capture: parseBoolean(args[0], true),
+    notify: parseBoolean(args[1], true),
+    debug: parseBoolean(args[2], false),
+  };
 }
 
-function errorText(error) {
-    if (error == null) return "未知错误";
-    if (typeof error === "string") return error;
-    if (error.message) return String(error.message);
-    try {
-        return JSON.stringify(error);
-    } catch (_) {
-        return String(error);
-    }
-}
+function parseScriptArguments(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? ""));
+  }
 
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function humanDelay() {
-    return sleep(4000 + Math.floor(Math.random() * 1001));
-}
-
-function maskPhone(phone) {
-    const text = String(phone || "");
-    if (text.length >= 7) return text.slice(0, 3) + "****" + text.slice(-4);
-    if (text.length <= 2) return text ? text[0] + "*" : "未配置";
-    return text.slice(0, 1) + "***" + text.slice(-1);
-}
-
-function maskWid(wid) {
-    const text = String(wid || "");
-    if (text.length <= 4) return text ? text[0] + "***" : "未知";
-    return text.slice(0, 2) + "***" + text.slice(-2);
-}
-
-function extractQH(value) {
-    if (value == null) return "";
-
-    if (typeof value === "object") {
-        if (Array.isArray(value)) {
-            for (const item of value) {
-                const found = extractQH(item);
-                if (found) return found;
-            }
-            return "";
-        }
-        if (value.QH != null) return String(value.QH);
-        if (value.qh != null) return String(value.qh);
-        return "";
-    }
-
-    const text = String(value).trim();
-    if (!text) return "";
-
+  if (value && typeof value === "object") {
     if (
-        (text.startsWith("{") && text.endsWith("}")) ||
-        (text.startsWith("[") && text.endsWith("]"))
+      Object.prototype.hasOwnProperty.call(value, "capture") ||
+      Object.prototype.hasOwnProperty.call(value, "notify") ||
+      Object.prototype.hasOwnProperty.call(value, "debug")
     ) {
-        try {
-            const found = extractQH(JSON.parse(text));
-            if (found) return found;
-        } catch (_) {}
+      return [value.capture, value.notify, value.debug].map((item) => String(item ?? ""));
     }
+    return Object.values(value).map((item) => String(item ?? ""));
+  }
 
-    const keyMatch = text.match(/(?:^|[,&])\s*QH\s*=\s*(.+)$/i);
-    return keyMatch ? keyMatch[1].trim() : text;
+  const text = String(value ?? "").trim();
+  if (!text) return [];
+
+  if (text.startsWith("[") && text.endsWith("]")) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item ?? ""));
+      }
+    } catch (_) {}
+  }
+
+  return text.split(",").map((item) => item.trim());
 }
 
-function readQH() {
-    let raw = "";
-
-    if (typeof $argument !== "undefined") {
-        raw = extractQH($argument);
-    }
-
-    if (!raw && typeof $persistentStore !== "undefined") {
-        raw = $persistentStore.read("QH") || "";
-    }
-
-    return String(raw || "").trim();
+function cleanArgument(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "null" || text === "undefined") return "";
+  return text;
 }
 
-function parseUsers(raw) {
-    return String(raw || "")
-        .replace(/\r/g, "")
-        .split(/[\n&]+/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .map((item) => {
-            const separatorIndex = item.indexOf("#");
-            if (separatorIndex < 0) {
-                return { wid: item.trim(), phone: "" };
-            }
-            return {
-                wid: item.slice(0, separatorIndex).trim(),
-                phone: item.slice(separatorIndex + 1).trim(),
-            };
-        })
-        .filter((item) => item.wid);
+function parseBoolean(value, fallback) {
+  const text = cleanArgument(value).toLowerCase();
+  if (!text) return fallback;
+  if (["true", "1", "yes", "on", "开启"].includes(text)) return true;
+  if (["false", "0", "no", "off", "关闭"].includes(text)) return false;
+  return fallback;
+}
+
+function safeStoreRead(key) {
+  try {
+    return $persistentStore.read(key) || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function debugLog(message) {
+  if (CONFIG.debug) console.log(`[${SCRIPT_NAME}] ${message}`);
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function randomBetween(minimum, maximum) {
+  return minimum + Math.random() * (maximum - minimum);
+}
+
+function randomSleep(minimumSeconds, maximumSeconds) {
+  return sleep(Math.round(randomBetween(minimumSeconds, maximumSeconds) * 1000));
+}
+
+function shortOpenId(openId) {
+  const text = String(openId || "");
+  return text.length > 12
+    ? `${text.slice(0, 6)}...${text.slice(-4)}`
+    : text;
+}
+
+function parseSingleAccount(rawValue) {
+  const text = String(rawValue || "").trim();
+  if (!text) return { account: null, error: "未读取到已保存账号" };
+
+  const parts = text.split("#").map((item) => item.trim());
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return { account: null, error: "已保存账号格式错误，应为 wid#openId" };
+  }
+
+  const wid = parts[0];
+  const openId = parts[1];
+  if (!openId.startsWith("o")) {
+    return { account: null, error: "已保存的 openId 格式异常" };
+  }
+
+  return { account: { wid, openId }, error: "" };
+}
+
+function getGlobalObject() {
+  try {
+    return Function("return this")();
+  } catch (_) {
+    return globalThis;
+  }
 }
 
 function getHeader(headers, name) {
-    if (!headers) return "";
-    const target = String(name).toLowerCase();
-    for (const key of Object.keys(headers)) {
-        if (String(key).toLowerCase() === target) {
-            return headers[key];
-        }
-    }
-    return "";
+  if (!headers) return "";
+  const target = String(name).toLowerCase();
+  for (const key of Object.keys(headers)) {
+    if (String(key).toLowerCase() === target) return String(headers[key]);
+  }
+  return "";
 }
 
-function httpRequest(method, params) {
-    return new Promise((resolve, reject) => {
-        const clientMethod = String(method || "GET").toLowerCase();
-        const client = $httpClient && $httpClient[clientMethod];
-
-        if (typeof client !== "function") {
-            reject(new Error("Loon 不支持该请求方法：" + clientMethod));
-            return;
-        }
-
-        try {
-            client(params, (error, response, data) => {
-                if (error) {
-                    reject(new Error(errorText(error)));
-                    return;
-                }
-
-                const status = Number(
-                    response && (response.status != null ? response.status : response.statusCode)
-                ) || 0;
-
-                resolve({
-                    status,
-                    headers: (response && response.headers) || {},
-                    body: data == null ? "" : data,
-                });
-            });
-        } catch (error) {
-            reject(error);
-        }
-    });
-}
-
-function parseJSONResponse(response, label) {
-    if (response && typeof response.body === "object" && response.body !== null) {
-        return response.body;
-    }
-
-    const body = String((response && response.body) || "");
+function safeDecode(value) {
+  let text = String(value || "");
+  for (let index = 0; index < 3; index += 1) {
     try {
-        return JSON.parse(body);
+      const decoded = decodeURIComponent(text.replace(/\+/g, "%20"));
+      if (decoded === text) break;
+      text = decoded;
     } catch (_) {
-        const error = new Error((label || "接口") + "返回非 JSON：" + shortText(body, 160));
-        error.noRetry = true;
-        throw error;
+      break;
     }
+  }
+  return text;
 }
 
-function ensureHttpSuccess(response, label) {
-    if (!response || response.status < 200 || response.status >= 300) {
-        const status = response ? response.status : 0;
-        const body = response ? shortText(response.body, 120) : "";
-        throw new Error((label || "请求") + " HTTP " + status + (body ? "：" + body : ""));
+function findParam(text, names) {
+  const source = safeDecode(text);
+  for (const name of names) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const patterns = [
+      new RegExp(`[?&#]${escaped}=([^&#\\s]+)`, "i"),
+      new RegExp(`(?:^|[&\\s])${escaped}=([^&\\s]+)`, "i"),
+      new RegExp(`["']${escaped}["']\\s*:\\s*["']([^"']+)["']`, "i"),
+    ];
+    for (const pattern of patterns) {
+      const match = source.match(pattern);
+      if (match && match[1]) return safeDecode(match[1]).trim();
     }
+  }
+  return "";
 }
 
-function appendLog(logs, line) {
-    const text = String(line);
-    console.log(text);
-    logs.push(text);
+function extractAccountFromRequest(request) {
+  const headers = request && request.headers ? request.headers : {};
+  const sources = [
+    request && request.url ? request.url : "",
+    getHeader(headers, "Referer"),
+    getHeader(headers, "Referrer"),
+    request && request.body ? request.body : "",
+  ].filter(Boolean);
+
+  let wid = "";
+  let openId = "";
+  for (const source of sources) {
+    if (!wid) wid = findParam(source, ["wid"]);
+    if (!openId) openId = findParam(source, ["openId", "openid"]);
+    if (wid && openId) break;
+  }
+
+  wid = String(wid || "").replace(/["'<>]/g, "").trim();
+  openId = String(openId || "").replace(/["'<>]/g, "").trim();
+  if (!wid || !openId || !openId.startsWith("o")) return null;
+  return { wid, openId };
 }
 
-async function login(wid, phone, logs) {
-    const step = "登录";
+function saveCapturedAccount(account) {
+  const value = `${account.wid}#${account.openId}`;
+  const previous = safeStoreRead(ACCOUNT_KEY);
+  if (previous === value) {
+    debugLog(`账号未变化：wid=${account.wid}`);
+    return { saved: true, changed: false, previous };
+  }
 
-    if (!phone) {
-        appendLog(logs, "🔑 " + step + ": 未配置手机号，登录失败 🔒 ❌");
-        return null;
+  let saved = false;
+  try {
+    saved = Boolean($persistentStore.write(value, ACCOUNT_KEY));
+  } catch (_) {
+    saved = false;
+  }
+  if (saved) CONFIG.account = value;
+  return { saved, changed: saved, previous };
+}
+
+function handleCaptureMode() {
+  if (!CONFIG.capture) {
+    debugLog("自动抓取开关已关闭");
+    return;
+  }
+
+  const account = extractAccountFromRequest($request);
+  if (!account) {
+    debugLog(`当前请求未发现 wid/openId：${$request && $request.url ? $request.url : "未知地址"}`);
+    return;
+  }
+
+  const result = saveCapturedAccount(account);
+  if (!result.saved) {
+    const message = "识别到账号，但写入 Loon 本地存储失败";
+    console.log(`[${SCRIPT_NAME}] ${message}`);
+    postNotification(SCRIPT_NAME, "账号保存失败", message);
+    return;
+  }
+  if (!result.changed) return;
+
+  const action = result.previous ? "账号已更新" : "账号获取成功";
+  const message = `wid：${account.wid}\nopenId：${shortOpenId(account.openId)}`;
+  console.log(`[${SCRIPT_NAME}] ${action}\n${message}`);
+  postNotification(SCRIPT_NAME, action, message);
+}
+
+function loonHttp(method, options) {
+  return new Promise((resolve, reject) => {
+    const functionName = String(method || "GET").toLowerCase();
+    const requester = $httpClient[functionName];
+    if (typeof requester !== "function") {
+      reject(new Error(`Loon 不支持 HTTP 方法：${method}`));
+      return;
     }
 
+    requester(options, (error, response, data) => {
+      if (error) {
+        reject(new Error(String(error)));
+        return;
+      }
+
+      resolve({
+        status: Number(response?.status || response?.statusCode || 0),
+        headers: response?.headers || {},
+        body: typeof data === "string" ? data : String(data ?? ""),
+      });
+    });
+  });
+}
+
+function sanitizeExternalScript(source) {
+  let text = String(source || "");
+  text = text.replace(/^\uFEFF/, "");
+
+  // 部分 Loon JavaScriptCore 环境在 eval 外部脚本时，会把开头的 /*! ... */
+  // 错误解析为以 * 开头的代码，因此先剥离所有开头注释。
+  for (;;) {
+    const before = text;
+    text = text.replace(/^\s*\/\*[\s\S]*?\*\//, "");
+    text = text.replace(/^\s*\/\/[^\r\n]*(?:\r?\n|$)/, "");
+    if (text === before) break;
+  }
+
+  return text.trim();
+}
+
+async function loadForge() {
+  if (FORGE) return FORGE;
+
+  const globalObject = getGlobalObject();
+  if (globalObject.forge?.cipher && globalObject.forge?.pki) {
+    FORGE = globalObject.forge;
+    return FORGE;
+  }
+
+  if (typeof globalObject.window === "undefined") globalObject.window = globalObject;
+  if (typeof globalObject.self === "undefined") globalObject.self = globalObject;
+  if (typeof globalObject.navigator === "undefined") {
+    globalObject.navigator = { userAgent: "Loon JavaScriptCore" };
+  }
+
+  let lastError = null;
+  for (const url of FORGE_URLS) {
     try {
-        const response = await httpRequest("POST", {
-            url: API_BASE + "/api/login",
-            timeout: 15000,
-            headers: {
-                "User-Agent": USER_AGENT,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                wid,
-                wm_phone: phone,
-            }),
-        });
+      debugLog(`加载加密库：${url}`);
+      const response = await loonHttp("GET", {
+        url,
+        timeout: REQUEST_TIMEOUT_MS,
+        headers: { "User-Agent": USER_AGENT },
+      });
 
-        ensureHttpSuccess(response, "登录");
-        const result = parseJSONResponse(response, "登录接口");
-        const data = result && result.data;
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      if (!response.body || response.body.length < 100000) {
+        throw new Error("加密库内容不完整");
+      }
 
-        if (
-            Number(result && result.code) === 200 &&
-            data &&
-            data.token &&
-            data.user &&
-            Object.prototype.hasOwnProperty.call(data, "land")
-        ) {
-            appendLog(logs, "🔑 " + step + ": 登录成功（手机号：" + maskPhone(phone) + "）✅");
-            await humanDelay();
-            return {
-                token: String(data.token),
-                userData: data.user,
-                landData: data.land,
-            };
+      const librarySource = sanitizeExternalScript(response.body);
+      if (!librarySource || librarySource[0] === "*") {
+        throw new Error("加密库源码开头异常");
+      }
+      (0, eval)(`${librarySource}\n//# sourceURL=node-forge-1.3.1.min.js`);
+      if (!globalObject.forge?.cipher || !globalObject.forge?.pki) {
+        throw new Error("加密库初始化失败");
+      }
+
+      FORGE = globalObject.forge;
+      seedForgeRandom();
+      debugLog("加密库加载成功");
+      return FORGE;
+    } catch (error) {
+      lastError = error;
+      debugLog(`加密库加载失败：${error.message || error}`);
+    }
+  }
+
+  throw new Error(`无法加载加密库：${lastError?.message || lastError || "未知错误"}`);
+}
+
+function seedForgeRandom() {
+  if (!FORGE?.random) return;
+  const seed = [
+    Date.now(),
+    Math.random(),
+    Math.random(),
+    typeof $loon !== "undefined" ? JSON.stringify($loon) : "Loon",
+    typeof $script !== "undefined" ? String($script.startTime || "") : "",
+  ].join(":");
+
+  try {
+    FORGE.random.collect(seed);
+    FORGE.random.collectInt(Date.now() >>> 0, 32);
+  } catch (_) {}
+}
+
+function getRsaPublicKey() {
+  if (RSA_PUBLIC_KEY) return RSA_PUBLIC_KEY;
+  if (!FORGE) throw new Error("加密库尚未初始化");
+
+  const lines = PUBLIC_KEY.match(/.{1,64}/g) || [];
+  const pem =
+    "-----BEGIN PUBLIC KEY-----\n" +
+    lines.join("\n") +
+    "\n-----END PUBLIC KEY-----";
+
+  RSA_PUBLIC_KEY = FORGE.pki.publicKeyFromPem(pem);
+  return RSA_PUBLIC_KEY;
+}
+
+function encryptPayload(payload) {
+  if (!FORGE) throw new Error("加密库尚未初始化");
+
+  seedForgeRandom();
+  const plaintext = JSON.stringify(payload);
+  const aesKey = FORGE.random.getBytesSync(32);
+  const iv = FORGE.random.getBytesSync(12);
+
+  const cipher = FORGE.cipher.createCipher("AES-GCM", aesKey);
+  cipher.start({ iv, tagLength: 128 });
+  cipher.update(FORGE.util.createBuffer(plaintext, "utf8"));
+
+  if (!cipher.finish()) throw new Error("AES-GCM 加密失败");
+
+  // Python AESGCM.encrypt 的结果顺序为 ciphertext || 16-byte tag。
+  const encryptedData = cipher.output.getBytes() + cipher.mode.tag.getBytes();
+  const encryptedKey = getRsaPublicKey().encrypt(aesKey, "RSA-OAEP", {
+    md: FORGE.md.sha256.create(),
+    mgf1: { md: FORGE.md.sha256.create() },
+  });
+
+  return {
+    data: FORGE.util.encode64(encryptedData),
+    key: FORGE.util.encode64(encryptedKey),
+    iv: FORGE.util.encode64(iv),
+  };
+}
+
+class TomatoClient {
+  constructor(wid, openId) {
+    this.wid = wid;
+    this.openId = openId;
+    this.tomatoUserId = null;
+    this.token = "";
+    this.baseHeaders = {
+      "User-Agent": USER_AGENT,
+      "Content-Type": "application/json",
+      Origin: BASE_URL,
+      Referer: `${BASE_URL}/?wid=${encodeURIComponent(wid)}&openId=${encodeURIComponent(openId)}`,
+    };
+  }
+
+  async request(method, path, payload = null, encrypted = true, retry = REQUEST_RETRIES) {
+    const url = `${BASE_URL}${path}`;
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= retry; attempt += 1) {
+      try {
+        const headers = { ...this.baseHeaders };
+        if (this.token) headers.Authorization = this.token;
+
+        const options = {
+          url,
+          timeout: REQUEST_TIMEOUT_MS,
+          headers,
+        };
+
+        if (payload !== null && payload !== undefined) {
+          const requestBody = encrypted ? encryptPayload(payload) : payload;
+          options.body = JSON.stringify(requestBody);
+          if (encrypted) headers["X-Request-Encrypted"] = "true";
         }
 
-        const reason =
-            (result && (result.msg || result.message)) ||
-            ("接口返回 code=" + String(result && result.code != null ? result.code : "未知"));
-        appendLog(logs, "🔑 " + step + ": 登录失败：" + shortText(reason, 160) + " ❌");
-        return null;
-    } catch (error) {
-        appendLog(
-            logs,
-            "🔑 " + step + ": 登录出错（手机号：" + maskPhone(phone) + "）：" +
-                shortText(errorText(error), 160) + " ❌"
-        );
-        return null;
-    }
-}
+        debugLog(`${method} ${path}，第 ${attempt + 1} 次`);
+        const response = await loonHttp(method, options);
 
-async function getSeeds(authorization, logs) {
-    const step = "领取种子";
-
-    if (!authorization) {
-        appendLog(logs, "🌱 " + step + ": 未获取到授权，无法领取种子 🔒 ❌");
-        return;
-    }
-
-    try {
-        for (const status of [1, 2]) {
-            const response = await httpRequest("POST", {
-                url: API_BASE + "/api/guide",
-                timeout: 15000,
-                headers: {
-                    "User-Agent": USER_AGENT,
-                    "Content-Type": "application/json",
-                    authorization,
-                },
-                body: JSON.stringify({ status }),
-            });
-            ensureHttpSuccess(response, "领取种子");
+        if (response.status === 429 && attempt < retry) {
+          const retryAfter = Number.parseFloat(
+            getHeader(response.headers, "Retry-After") || "2"
+          );
+          const waitSeconds = Number.isFinite(retryAfter)
+            ? Math.max(1, retryAfter)
+            : 2;
+          await sleep((waitSeconds + attempt) * 1000);
+          continue;
         }
 
-        appendLog(logs, "🌱 " + step + ": 领取/引导完成 ✅");
-        await humanDelay();
-    } catch (error) {
-        appendLog(logs, "🌱 " + step + ": 领取种子出错：" + shortText(errorText(error), 160) + " ❌");
-    }
-}
-
-async function checkIn(authorization, logs) {
-    const step = "签到";
-
-    if (!authorization) {
-        appendLog(logs, "📅 " + step + ": 未获取到授权，无法签到 🔒 ❌");
-        return;
-    }
-
-    try {
-        const response = await httpRequest("POST", {
-            url: API_BASE + "/api/task/complete",
-            timeout: 15000,
-            headers: {
-                "User-Agent": USER_AGENT,
-                "Content-Type": "application/x-www-form-urlencoded",
-                authorization,
-            },
-            body: "",
-        });
-
-        const result = parseJSONResponse(response, "签到接口");
+        let result;
+        try {
+          result = JSON.parse(response.body);
+        } catch (_) {
+          throw new Error(
+            `接口返回非 JSON 数据（HTTP ${response.status}）：${response.body.slice(0, 200)}`
+          );
+        }
 
         if (response.status < 200 || response.status >= 300) {
-            const reason = result && (result.msg || result.message);
-            throw new Error("HTTP " + response.status + (reason ? "：" + reason : ""));
+          throw new Error(
+            result?.msg || result?.message || `HTTP ${response.status}`
+          );
         }
 
-        if (result && result.msg === "成功") {
-            appendLog(logs, "📅 " + step + ": 签到成功 ✅");
-        } else if (result && result.msg === "不可重复完成") {
-            appendLog(logs, "📅 " + step + ": 今日已签到，无需重复操作 ✅");
-        } else {
-            const reason = (result && (result.msg || result.message)) || "未知错误";
-            appendLog(logs, "📅 " + step + ": 失败，原因：" + shortText(reason, 160) + " ❌");
+        const message = String(result?.msg || result?.message || "");
+        if (Number(result?.code) === 200) return result;
+
+        if (
+          attempt < retry &&
+          (response.status === 429 || message.includes("频繁") || message.includes("稍后"))
+        ) {
+          await sleep((2.5 + attempt * 1.5) * 1000);
+          continue;
         }
 
-        await humanDelay();
-    } catch (error) {
-        appendLog(logs, "📅 " + step + ": 签到出错：" + shortText(errorText(error), 160) + " ❌");
-    }
-}
+        throw new Error(message || `接口返回 code=${result?.code}`);
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || error || "未知错误");
+        const retryable =
+          /timeout|timed out|network|连接|网络|频繁|稍后|HTTP 429/i.test(message);
 
-async function explore(authorization, wid, logs) {
-    const step = "浏览任务";
-
-    if (!authorization) {
-        appendLog(logs, "🔍 " + step + ": 未获取到授权，无法执行浏览任务 🔒 ❌");
-        return;
-    }
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const response = await httpRequest("GET", {
-                url: API_BASE + "/?wid=" + encodeURIComponent(wid),
-                timeout: 10000,
-                "auto-redirect": false,
-                headers: {
-                    "User-Agent": USER_AGENT,
-                    authorization,
-                    "sec-ch-ua": "\"Chromium\";v=\"142\", \"Android WebView\";v=\"142\", \"Not_A Brand\";v=\"99\"",
-                    "sec-ch-ua-mobile": "?0",
-                    "sec-ch-ua-platform": "\"Android\"",
-                    "upgrade-insecure-requests": "1",
-                    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/wxpic,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                    "x-requested-with": "com.tencent.mm",
-                    "sec-fetch-site": "same-site",
-                    "sec-fetch-mode": "navigate",
-                    "sec-fetch-user": "?1",
-                    "sec-fetch-dest": "document",
-                    referer: "https://h5.zhumanito.cn/",
-                    "accept-language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-                    priority: "u=0, i",
-                },
-            });
-
-            if (response.status === 302) {
-                appendLog(logs, "🔍 " + step + ": 浏览任务完成 ✅");
-                await humanDelay();
-                return;
-            }
-
-            if (response.status === 429) {
-                const parsed = parseInt(getHeader(response.headers, "Retry-After"), 10);
-                const retryAfter = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-
-                if (attempt < 3) {
-                    console.log(
-                        "浏览任务：请求限速，等待 " + retryAfter +
-                            " 秒后重试（第 " + attempt + "/3 次）"
-                    );
-                    await sleep(retryAfter * 1000);
-                    continue;
-                }
-
-                appendLog(logs, "🔍 " + step + ": 浏览请求多次限速，放弃重试 ❌");
-                return;
-            }
-
-            appendLog(logs, "🔍 " + step + ": 浏览失败，状态码：" + response.status + " ❌");
-            return;
-        } catch (error) {
-            appendLog(logs, "🔍 " + step + ": 浏览任务出错：" + shortText(errorText(error), 160) + " ❌");
-            return;
+        if (attempt < retry && retryable) {
+          await sleep((2 + attempt * 1.5) * 1000);
+          continue;
         }
-    }
-}
-
-async function harvest(authorization, logs, account) {
-    const step = "收获作物";
-
-    try {
-        const beforeFruit = Number(account.userData.fruit_num || 0);
-        const response = await httpRequest("POST", {
-            url: API_BASE + "/api/harvest",
-            timeout: 15000,
-            headers: {
-                "User-Agent": USER_AGENT,
-                "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
-                authorization,
-            },
-            body: "",
-        });
-
-        ensureHttpSuccess(response, "收获");
-        const result = parseJSONResponse(response, "收获接口");
-
-        if (Number(result && result.code) === 200 && result.data && result.data.user) {
-            account.userData = result.data.user;
-            account.landData = result.data.land || [];
-
-            const afterFruit = Number(account.userData.fruit_num || 0);
-            const totalAfter = Number(account.userData.total_fruit_num || afterFruit);
-            const delta = Math.max(0, afterFruit - beforeFruit);
-
-            appendLog(
-                logs,
-                "🌾 " + step + ": 收获成功！🍅+" + delta +
-                    " → 现有 " + afterFruit + "（累计 " + totalAfter + "）✅"
-            );
-            appendLog(
-                logs,
-                "📊 收获后资源：☀️" + Number(account.userData.sun_num || 0) +
-                    "  💧" + Number(account.userData.water_num || 0) +
-                    "  🍅" + afterFruit
-            );
-            await humanDelay();
-            return true;
-        }
-
-        const reason = (result && (result.msg || result.message)) || "未知信息";
-        appendLog(logs, "🌾 " + step + ": 收获失败：" + shortText(reason, 160) + " ⚠️");
-        return false;
-    } catch (error) {
-        appendLog(logs, "🌾 " + step + ": 收获请求出错：" + shortText(errorText(error), 160) + " ❌");
-        return false;
-    }
-}
-
-async function plantSeed(authorization, logs, account) {
-    const step = "播种";
-
-    try {
-        const response = await httpRequest("POST", {
-            url: API_BASE + "/api/seed",
-            timeout: 15000,
-            headers: {
-                "User-Agent": USER_AGENT,
-                "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
-                authorization,
-            },
-            body: "",
-        });
-
-        ensureHttpSuccess(response, "播种");
-        const result = parseJSONResponse(response, "播种接口");
-
-        if (Number(result && result.code) === 200 && result.data && result.data.user) {
-            account.userData = result.data.user;
-            account.landData = result.data.land || [];
-            appendLog(logs, "🌱 " + step + ": 播种成功！✅");
-            await humanDelay();
-            return true;
-        }
-
-        const reason = (result && (result.msg || result.message)) || "未知信息";
-        appendLog(logs, "🌱 " + step + ": 播种失败：" + shortText(reason, 160) + " ⚠️");
-        return false;
-    } catch (error) {
-        appendLog(logs, "🌱 " + step + ": 播种请求出错：" + shortText(errorText(error), 160) + " ❌");
-        return false;
-    }
-}
-
-async function waterOnce(headers, accountIndex) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const response = await httpRequest("POST", {
-                url: API_BASE + "/api/water",
-                timeout: 30000,
-                "auto-redirect": false,
-                headers,
-                body: "",
-            });
-
-            if (response.status === 200) {
-                return parseJSONResponse(response, "浇水接口");
-            }
-
-            if (response.status === 429) {
-                const parsed = parseInt(getHeader(response.headers, "Retry-After"), 10);
-                const retryAfter = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-
-                if (attempt < 3) {
-                    console.log(
-                        "账号" + accountIndex + "：浇水请求限速，等待 " + retryAfter +
-                            " 秒后重试（第 " + attempt + "/3 次）"
-                    );
-                    await sleep(retryAfter * 1000);
-                    continue;
-                }
-
-                throw new Error("浇水请求多次限速（3 次），放弃重试");
-            }
-
-            const responseError = new Error(
-                "响应状态码异常：" + response.status +
-                    (response.body ? "，内容：" + shortText(response.body, 160) : "")
-            );
-
-            if (attempt >= 3) throw responseError;
-            await sleep(1000);
-        } catch (error) {
-            if (error && error.noRetry) throw error;
-            if (attempt >= 3) throw error;
-            await sleep(1000);
-        }
+        throw error;
+      }
     }
 
-    throw new Error("浇水请求未返回有效结果");
-}
+    throw new Error(lastError?.message || "请求重试后仍未成功");
+  }
 
-async function loopWatering(headers, accountIndex, account, logs) {
-    const step = "循环浇水";
-    appendLog(logs, "🔄 " + step + "：进入循环浇水（需💧≥20且☀️≥20）");
-
-    const waterHeaders = Object.assign({}, headers, {
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+  async login() {
+    const result = await this.request("POST", "/api/web/open/tomato/login", {
+      shareTomatoUserId: null,
+      openId: this.openId,
+      wid: this.wid,
+      queryCardStatus: true,
     });
 
-    while (true) {
-        const water = Number(account.userData.water_num || 0);
-        const sun = Number(account.userData.sun_num || 0);
+    const data = result?.data || {};
+    if (!data.token) throw new Error("登录响应中没有 token");
 
-        if (water < 20 || sun < 20) {
-            appendLog(
-                logs,
-                "🔄 " + step + "：🔚 账号" + accountIndex +
-                    "：资源不足（💧" + water + "，☀️" + sun + "），停止浇水 ⏹️"
-            );
-            appendLog(
-                logs,
-                "📊 最终资源：☀️" + sun +
-                    "  💧" + water +
-                    "  🍅" + Number(account.userData.fruit_num || 0)
-            );
-            return;
-        }
+    this.token = data.token;
+    this.tomatoUserId = data.tomatoUserId || null;
+    return data;
+  }
 
-        appendLog(
-            logs,
-            "🔄 " + step + "：📌 账号" + accountIndex +
-                "：资源满足（💧" + water + "，☀️" + sun + "），浇水..."
+  async home() {
+    const result = await this.request("GET", "/api/web/member/tomato/home");
+    return result?.data || {};
+  }
+
+  async tasks() {
+    const result = await this.request("GET", "/api/web/member/tomato/tasks");
+    return Array.isArray(result?.data) ? result.data : [];
+  }
+
+  async completeTask(task) {
+    const taskType = task?.taskType;
+    const payload = { taskType };
+
+    if (taskType !== "SHARE") {
+      payload.browseTarget = task?.browseTarget || "";
+    } else if (this.tomatoUserId) {
+      try {
+        await this.request(
+          "POST",
+          "/api/web/member/tomato/miniprogram/qrcode/create",
+          {
+            page: "packages/wm-cloud-qiehuang/home/index",
+            scene: String(this.tomatoUserId),
+          }
         );
-
-        try {
-            const result = await waterOnce(waterHeaders, accountIndex);
-
-            if (Number(result && result.code) !== 200 || !result.data || !result.data.user) {
-                const reason = (result && (result.msg || result.message)) || "未知错误";
-                appendLog(
-                    logs,
-                    "🔄 " + step + "：❌ 账号" + accountIndex +
-                        "：浇水失败：" + shortText(reason, 160)
-                );
-                return;
-            }
-
-            account.userData = result.data.user;
-            account.landData = result.data.land || [];
-
-            const nextWater = Number(account.userData.water_num || 0);
-            const nextSun = Number(account.userData.sun_num || 0);
-
-            appendLog(logs, "🔄 " + step + "：✅ 账号" + accountIndex + "：浇水成功！");
-            appendLog(
-                logs,
-                "🔄 " + step + "：📊 剩余：💧" + nextWater + "，☀️" + nextSun
-            );
-
-            if (Array.isArray(account.landData) && account.landData.length > 0) {
-                appendLog(
-                    logs,
-                    "🔄 " + step + "：🌱 土地：共" + account.landData.length +
-                        "块，阶段" + Number(account.landData[0].seed_stage || 0) + " 🌱"
-                );
-            }
-
-            if (nextWater >= water && nextSun >= sun) {
-                appendLog(
-                    logs,
-                    "🔄 " + step + "：⚠️ 资源数值未减少，为防止死循环已停止浇水"
-                );
-                return;
-            }
-
-            await humanDelay();
-        } catch (error) {
-            appendLog(
-                logs,
-                "🔄 " + step + "：⚠️ 账号" + accountIndex +
-                    "：浇水请求异常：" + shortText(errorText(error), 160) + " ❌"
-            );
-            return;
-        }
+      } catch (error) {
+        debugLog(`分享二维码创建失败，继续完成 SHARE：${error.message || error}`);
+      }
     }
+
+    const result = await this.request(
+      "POST",
+      "/api/web/member/tomato/tasks/complete",
+      payload
+    );
+    return result?.data || {};
+  }
+
+  async friends(pageSize = 20) {
+    const friends = [];
+    let pageNum = 1;
+
+    while (pageNum <= 50) {
+      const result = await this.request(
+        "GET",
+        `/api/web/member/tomato/friends?pageNum=${pageNum}&pageSize=${pageSize}`
+      );
+      const rows = Array.isArray(result?.rows) ? result.rows : [];
+      friends.push(...rows);
+
+      const total = Number(result?.total || 0);
+      if (
+        rows.length === 0 ||
+        (total > 0 && friends.length >= total) ||
+        rows.length < pageSize
+      ) {
+        break;
+      }
+      pageNum += 1;
+    }
+
+    return friends;
+  }
+
+  async friendHome(friendUserId) {
+    const result = await this.request(
+      "GET",
+      `/api/web/member/tomato/friends/${encodeURIComponent(friendUserId)}/home`
+    );
+    return result?.data || {};
+  }
+
+  async stealFriendEnergy(friendUserId) {
+    const result = await this.request(
+      "POST",
+      "/api/web/member/tomato/friends/steal",
+      { friendTomatoUserId: friendUserId }
+    );
+    return result?.data;
+  }
+
+  async useEnergy() {
+    // 官方前端发送空 POST，不附加加密请求体。
+    const result = await this.request(
+      "POST",
+      "/api/web/member/tomato/energy/use",
+      null,
+      false
+    );
+    return result?.data || {};
+  }
 }
 
-function getCurrentStage(landData) {
-    if (!Array.isArray(landData) || landData.length === 0) return 0;
-    return Number(landData[0] && landData[0].seed_stage) || 0;
+function homeLine(data, prefix = "当前状态") {
+  return (
+    `${prefix}：能量 ${Number(data?.energyBalance || 0)}，` +
+    `番茄 ${Number(data?.tomatoBalance || 0)}，` +
+    `${data?.stageName || "未知阶段"} ` +
+    `${Number(data?.currentExp || 0)}/${Number(data?.stageRequiredExp || 0)}`
+  );
 }
 
-async function processUser(user, index) {
-    const wid = user.wid;
-    const phone = user.phone;
-    const logs = [
-        "👤 用户" + index + ": wid=" + maskWid(wid) + " | 手机号=" + maskPhone(phone),
-    ];
+async function processUser(wid, openId, index) {
+  const logs = [`账号（wid=${wid}，openId=${shortOpenId(openId)}）`];
+  const client = new TomatoClient(wid, openId);
 
-    console.log(
-        "\n===== 开始处理用户 " + index +
-            "（wid: " + maskWid(wid) + "，手机号: " + maskPhone(phone) + "）====="
+  const loginData = await client.login();
+  logs.push(`登录成功：${loginData?.nickName || "未设置昵称"}`);
+
+  let home = await client.home();
+  logs.push(homeLine(home));
+
+  let completed = 0;
+  let skipped = 0;
+  let friendTask = null;
+  const tasks = await client.tasks();
+
+  for (const task of tasks) {
+    const name = task?.taskName || task?.taskCode || "未知任务";
+    const taskType = task?.taskType;
+
+    if (taskType === FRIEND_TASK_TYPE) {
+      friendTask = task;
+      if (String(task?.completed) === "1") logs.push(`任务已完成：${name}`);
+      continue;
+    }
+
+    if (String(task?.completed) === "1") {
+      logs.push(`任务已完成：${name}`);
+      continue;
+    }
+
+    if (!SUPPORTED_TASK_TYPES.has(taskType)) {
+      skipped += 1;
+      logs.push(`跳过任务：${name}（需在小程序内操作）`);
+      continue;
+    }
+
+    try {
+      const result = await client.completeTask(task);
+      const reward = result?.rewardText || task?.rewardText || "已领取";
+      logs.push(`任务完成：${name}，${reward}`);
+      completed += 1;
+    } catch (error) {
+      logs.push(`任务失败：${name}，${error.message || error}`);
+    }
+
+    await randomSleep(2.5, 3.5);
+  }
+
+  try {
+    const allFriends = await client.friends();
+    const claimableFriends = allFriends.filter(
+      (friend) =>
+        String(friend?.friendStatus) === FRIEND_STATUS_CLAIMABLE &&
+        friend?.friendTomatoUserId
     );
 
-    const loginData = await login(wid, phone, logs);
+    let stolenCount = 0;
+    let stolenEnergy = 0;
+    let failedCount = 0;
 
-    if (!loginData) {
-        appendLog(logs, "⚠️ 获取授权失败，无法执行后续操作 🔒");
-        console.log("===== 完成处理用户 " + index + " =====\n");
-        await sleep(3000);
-        return logs;
+    for (const friend of claimableFriends) {
+      const friendUserId = friend.friendTomatoUserId;
+      try {
+        const friendHome = await client.friendHome(friendUserId);
+        const amount = Number(friendHome?.stealAmount || 0);
+        if (String(friendHome?.canSteal) !== "1" || amount <= 0) continue;
+
+        await client.stealFriendEnergy(friendUserId);
+        stolenCount += 1;
+        stolenEnergy += amount;
+      } catch (error) {
+        failedCount += 1;
+        debugLog(`好友 ${friendUserId} 收取失败：${error.message || error}`);
+      }
+      await randomSleep(1.5, 2.5);
     }
 
-    const authorization = loginData.token;
-    const headers = {
-        "User-Agent": USER_AGENT,
-        authorization,
-    };
-    const account = {
-        userData: loginData.userData,
-        landData: loginData.landData,
-    };
-
-    appendLog(logs, "📊 当前番茄数量：🍅" + Number(account.userData.fruit_num || 0));
-
-    if (Number(account.userData.new_status) !== 2) {
-        await getSeeds(authorization, logs);
-    }
-
-    await checkIn(authorization, logs);
-    await explore(authorization, wid, logs);
-
-    const currentStage = getCurrentStage(account.landData);
-    appendLog(logs, "ℹ️ 土地状态：" + currentStage);
-
-    if (currentStage === 5) {
-        appendLog(logs, "🧠 判断：作物已成熟。");
-        const harvested = await harvest(authorization, logs, account);
-        if (harvested) {
-            await plantSeed(authorization, logs, account);
-        }
-    } else if (currentStage === 0) {
-        appendLog(logs, "🧠 判断：土地为空。");
-        await plantSeed(authorization, logs, account);
+    if (stolenCount > 0) {
+      let detail = `好友能量：成功收取 ${stolenCount} 位好友，共 ${stolenEnergy} 能量`;
+      if (failedCount > 0) detail += `，失败 ${failedCount} 位`;
+      logs.push(detail);
+      if (friendTask && String(friendTask?.completed) !== "1") completed += 1;
+    } else if (failedCount > 0) {
+      logs.push(`好友能量：收取失败 ${failedCount} 位`);
     } else {
-        appendLog(logs, "🧠 判断：作物生长中。");
+      logs.push("好友能量：暂无可收取能量");
     }
+  } catch (error) {
+    logs.push(`好友能量失败：${error.message || error}`);
+  }
 
-    await loopWatering(headers, index, account, logs);
+  home = await client.home();
+  logs.push(homeLine(home, "任务后状态"));
 
-    console.log("===== 完成处理用户 " + index + " =====\n");
-    await sleep(3000);
-    return logs;
-}
+  const energy = Number(home?.energyBalance || 0);
+  if (energy > 0) {
+    const beforeTomato = Number(home?.tomatoBalance || 0);
+    try {
+      const grown = await client.useEnergy();
+      const afterTomato = Number(grown?.tomatoBalance || 0);
+      let gained = Number(grown?.gainedTomatoAmount || 0);
+      if (!gained) gained = Math.max(0, afterTomato - beforeTomato);
 
-function pickStatus(line) {
-    if (line.includes("✅")) return "✅";
-    if (line.includes("⚠️")) return "⚠️";
-    if (line.includes("❌")) return "❌";
-    return "ℹ️";
-}
-
-function stepKey(line) {
-    for (const step of STEP_ORDER) {
-        if (line.includes(step)) return step;
+      logs.push(
+        `使用能量：消耗 ${Number(grown?.usedEnergyAmount || energy)}，` +
+          `成长到 ${grown?.stageName || "未知阶段"} ` +
+          `${Number(grown?.currentExp || 0)}/${Number(grown?.stageRequiredExp || 0)}，` +
+          `获得番茄 ${gained}`
+      );
+      home = grown;
+    } catch (error) {
+      logs.push(`使用能量失败：${error.message || error}`);
     }
-    return "信息";
+  } else {
+    logs.push("使用能量：当前没有可用能量");
+  }
+
+  logs.push(homeLine(home, "最终状态"));
+  logs.push(`本次完成任务 ${completed} 个，跳过 ${skipped} 个`);
+  return logs;
 }
 
-function pullResourceSnapshot(lines) {
-    const result = {};
-
-    for (let index = lines.length - 1; index >= 0; index--) {
-        const line = lines[index];
-        let match;
-
-        if (result.sun == null && (match = line.match(/☀️(\d+)/))) {
-            result.sun = Number(match[1]);
-        }
-        if (result.water == null && (match = line.match(/💧(\d+)/))) {
-            result.water = Number(match[1]);
-        }
-        if (result.fruit == null && (match = line.match(/🍅(\d+)/))) {
-            result.fruit = Number(match[1]);
-        }
-
-        if (Object.keys(result).length >= 3) break;
-    }
-
-    return result;
+function renderReport(allLogs) {
+  const lines = [SCRIPT_NAME];
+  for (const logs of allLogs) {
+    lines.push("━━━━━━━━━━━━━━━━━━━━");
+    lines.push(...logs);
+  }
+  lines.push("━━━━━━━━━━━━━━━━━━━━");
+  return lines.join("\n");
 }
 
-function escapeRegExp(text) {
-    return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function cleanStepBody(line, step) {
-    let body = String(line);
-    const prefix = new RegExp(
-        "^[🔑🌱📅🔍🌾🔄]+\\s*" + escapeRegExp(step) + "[:：]?\\s*"
-    );
-    body = body.replace(prefix, "");
-    body = body.replace(/^[✅❌⚠️ℹ️]+\s*/, "");
-    return body;
-}
-
-function renderReport(blocks) {
-    const output = [];
-
-    for (const block of blocks) {
-        if (!Array.isArray(block) || block.length === 0) continue;
-
-        output.push("━━━━━━━━━━━━━━━━━━━━━━");
-        output.push(block[0]);
-
-        const bucket = {};
-        for (const line of block.slice(1)) {
-            if (!line || !String(line).trim()) continue;
-            const key = stepKey(String(line));
-            if (key === "信息" && String(line).trim().startsWith("📊")) continue;
-            if (!bucket[key]) bucket[key] = [];
-            bucket[key].push(String(line));
-        }
-
-        const snapshot = pullResourceSnapshot(block);
-        if (Object.keys(snapshot).length > 0) {
-            const parts = [];
-            if (snapshot.sun != null) parts.push("☀️" + snapshot.sun);
-            if (snapshot.water != null) parts.push("💧" + snapshot.water);
-            if (snapshot.fruit != null) parts.push("🍅" + snapshot.fruit);
-            output.push("📊 当前资源：" + parts.join("  "));
-        }
-
-        for (const step of STEP_ORDER.concat(["信息"])) {
-            const lines = bucket[step];
-            if (!lines || lines.length === 0) continue;
-
-            const cleaned = [];
-            const seen = new Set();
-
-            for (const line of lines) {
-                if (/^=+$/.test(line.trim())) continue;
-
-                if (step === "循环浇水") {
-                    cleaned.push(line);
-                    continue;
-                }
-
-                const normalized = line
-                    .replace(/账号\d+[：:]/g, "")
-                    .replace(/\s+/g, " ")
-                    .trim();
-
-                if (!seen.has(normalized)) {
-                    seen.add(normalized);
-                    cleaned.push(line);
-                }
-            }
-
-            const picked = step === "循环浇水" ? cleaned : cleaned.slice(-1);
-
-            for (const line of picked) {
-                const status = pickStatus(line);
-                const icon = STEP_EMOJI[step] || "•";
-                const body = cleanStepBody(line, step);
-                output.push(icon + " " + step + " " + status + "  " + shortText(body, 160));
-            }
-        }
-
-        const success = block.filter((line) => String(line).includes("✅")).length;
-        const warning = block.filter((line) => String(line).includes("⚠️")).length;
-        const failed = block.filter((line) => String(line).includes("❌")).length;
-        output.push("🧾 小结：成功 " + success + " · 预警 " + warning + " · 失败 " + failed);
-    }
-
-    output.push("━━━━━━━━━━━━━━━━━━━━━━");
-    return output.join("\n");
-}
-
-function notify(title, subtitle, content) {
-    if (typeof $notification !== "undefined" && $notification) {
-        $notification.post(String(title), String(subtitle || ""), String(content || ""));
-    }
+function postNotification(title, subtitle, body) {
+  if (!CONFIG.notify) return;
+  try {
+    $notification.post(title, subtitle, body);
+  } catch (error) {
+    console.log(`[${SCRIPT_NAME}] 通知失败：${error.message || error}`);
+  }
 }
 
 async function main() {
-    const users = parseUsers(readQH());
+  const { account, error } = parseSingleAccount(CONFIG.account);
+  if (!account) {
+    const message = `没有可用账号：${error}。请先在微信中打开一次茄皇活动页面自动获取`;
+    console.log(message);
+    postNotification(SCRIPT_NAME, "尚未获取账号", message);
+    return;
+  }
 
-    if (users.length === 0) {
-        const message = "未从插件参数 QH 中获取到账号信息！\n格式：wid#手机号，多账号用 & 或换行分隔。";
-        console.log(message);
-        notify(TITLE, "配置错误", message);
-        return;
-    }
+  await loadForge();
 
-    console.log("共检测到 " + users.length + " 个用户，开始依次处理...");
+  const { wid, openId } = account;
+  console.log(`
+===== 开始处理账号（wid=${wid}）=====`);
 
-    const blocks = [];
-    for (let index = 0; index < users.length; index++) {
-        const user = users[index];
-        try {
-            blocks.push(await processUser(user, index + 1));
-        } catch (error) {
-            const failure = [
-                "👤 用户" + (index + 1) +
-                    ": wid=" + maskWid(user.wid) +
-                    " | 手机号=" + maskPhone(user.phone),
-                "❌ 用户处理过程中发生未捕获错误：" + shortText(errorText(error), 180),
-            ];
-            console.log(failure[1]);
-            blocks.push(failure);
-        }
-    }
+  let logs;
+  try {
+    logs = await processUser(wid, openId, 1);
+  } catch (error) {
+    logs = [
+      `账号（wid=${wid}，openId=${shortOpenId(openId)}）`,
+      `处理失败：${error.message || error}`,
+    ];
+  }
 
-    const report = renderReport(blocks);
-    console.log("\n" + report);
-    notify(TITLE, "共 " + users.length + " 个账号", report);
+  console.log(logs.join("\n"));
+  const report = renderReport([logs]);
+  console.log(`
+${report}`);
+  postNotification(SCRIPT_NAME, "单账号任务完成", report);
 }
 
 (async () => {
-    try {
-        await main();
-    } catch (error) {
-        const message = "脚本运行失败：" + shortText(errorText(error), 200);
-        console.log(message);
-        notify(TITLE, "运行失败", message);
-    } finally {
-        $done();
+  const requestMode = typeof $request !== "undefined" && Boolean($request && $request.url);
+
+  try {
+    if (requestMode) {
+      handleCaptureMode();
+    } else {
+      await main();
     }
+  } catch (error) {
+    const message = `${requestMode ? "账号获取" : "脚本运行"}失败：${error.message || error}`;
+    console.log(`[${SCRIPT_NAME}] ${message}`);
+    postNotification(SCRIPT_NAME, requestMode ? "账号获取失败" : "运行失败", message);
+  } finally {
+    if (requestMode) {
+      $done({});
+    } else {
+      $done();
+    }
+  }
 })();
