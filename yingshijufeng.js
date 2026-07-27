@@ -1,15 +1,5 @@
-/*
- * 影视飓风小程序签到 - Loon
- *
- * 获取凭据：
- * 1. 在插件参数中开启“自动获取 Cookie”
- * 2. 打开微信中的影视飓风小程序
- * 3. 进入积分或签到页面，收到“Cookie 获取成功”通知即可
- *
- * 定时任务默认每天 08:28 执行，可在插件参数中修改。
- */
-
 const NAME = "影视飓风";
+const SCRIPT_VERSION = "1.2.3";
 const STORE_KEY = "yingshijufeng_auth";
 const MINI_APP_ID = "wx92782ef90ebc836d";
 const DEFAULT_KDT_ID = "149536603";
@@ -84,6 +74,25 @@ function accountName(auth) {
     return [nickName, mobile].filter(Boolean).join(" ") || "当前账号";
 }
 
+function postNotice(subtitle, content) {
+    $notification.post(NAME, subtitle, String(content || ""));
+}
+
+function postCheckinResult(subtitle, content) {
+    const body = String(content || "");
+    console.log(
+        [
+            "===" + NAME + "===",
+            "📌 签到结果",
+            subtitle,
+            body,
+        ]
+            .filter(Boolean)
+            .join("\n")
+    );
+    postNotice(subtitle, body);
+}
+
 function splitSetCookie(value) {
     if (!value) return [];
     const values = Array.isArray(value) ? value : [String(value)];
@@ -137,7 +146,7 @@ function notifyCapture(oldAuth, newAuth) {
         newAuth.cookie ? "Cookie：已保存" : "Cookie：请求中未携带",
         newAuth.sessionId ? "Session：已保存" : "Session：未检测到",
     ];
-    $notification.post(NAME, "✅ Cookie 获取成功", details.join("\n"));
+    postNotice("✅ Cookie 获取成功", details.join("\n"));
 }
 
 function captureFromRequest() {
@@ -161,6 +170,7 @@ function captureFromRequest() {
         referer: getHeader(headers, "Referer") || oldAuth.referer || DEFAULT_REFERER,
         nickName: oldAuth.nickName || "",
         mobile: oldAuth.mobile || "",
+        requestMode: oldAuth.requestMode || "",
         capturedAt: new Date().toISOString(),
     };
 
@@ -204,6 +214,7 @@ function captureFromAuthorizeResponse() {
         nickName:
             data.nick_name || data.nickName || oldAuth.nickName || "",
         mobile: data.mobile || oldAuth.mobile || "",
+        requestMode: oldAuth.requestMode || "",
         capturedAt: new Date().toISOString(),
     };
 
@@ -233,6 +244,12 @@ function encodeQuery(params) {
         .join("&");
 }
 
+function sanitizeHeaderValue(value) {
+    return String(value || "")
+        .replace(/[\r\n]+/g, " ")
+        .trim();
+}
+
 function updateResponseCookie(auth, response) {
     const setCookie = getHeader(response && response.headers, "Set-Cookie");
     if (!setCookie) return;
@@ -243,7 +260,58 @@ function updateResponseCookie(auth, response) {
     }
 }
 
-function apiGet(auth, path, params) {
+function rawGet(options) {
+    return new Promise((resolve, reject) => {
+        $httpClient.get(options, (error, response, body) => {
+            if (error || !response) {
+                const transportError = new Error(
+                    error ? String(error) : "HTTPClient 未返回响应"
+                );
+                transportError.isTransportError = true;
+                reject(transportError);
+                return;
+            }
+
+            resolve({ response, body });
+        });
+    });
+}
+
+function parseApiResult(auth, response, body) {
+    updateResponseCookie(auth, response);
+    const status = Number(
+        (response && (response.status || response.statusCode)) || 0
+    );
+
+    if (!status) {
+        const transportError = new Error("HTTPClient 返回空状态码");
+        transportError.isTransportError = true;
+        throw transportError;
+    }
+
+    const result = parseJson(body);
+    if (status !== 200) {
+        throw new Error(
+            "HTTP " + status + ": " + String(body || "").slice(0, 200)
+        );
+    }
+
+    if (!result) {
+        throw new Error("接口返回不是有效 JSON");
+    }
+
+    if (Number(result.code) !== 0) {
+        throw new Error(
+            result.msg ||
+                result.message ||
+                "接口错误：" + JSON.stringify(result)
+        );
+    }
+
+    return result.data || {};
+}
+
+async function apiGet(auth, path, params) {
     const query = encodeQuery(
         Object.assign(
             {
@@ -255,62 +323,75 @@ function apiGet(auth, path, params) {
         )
     );
 
-    const headers = {
+    const fullHeaders = {
         Accept: "*/*",
-        "User-Agent": auth.userAgent || DEFAULT_UA,
-        Referer: auth.referer || DEFAULT_REFERER,
+        "User-Agent": sanitizeHeaderValue(auth.userAgent || DEFAULT_UA),
+        Referer: sanitizeHeaderValue(auth.referer || DEFAULT_REFERER),
         "Extra-Data": buildExtraData(auth),
     };
-    if (auth.cookie) headers.Cookie = auth.cookie;
+    if (auth.cookie) {
+        fullHeaders.Cookie = sanitizeHeaderValue(auth.cookie);
+    }
 
-    return new Promise((resolve, reject) => {
-        $httpClient.get(
-            {
-                url: API_BASE + path + "?" + query,
-                headers,
-                timeout: 15000,
-            },
-            (error, response, body) => {
-                if (error) {
-                    reject(new Error(String(error)));
-                    return;
-                }
+    const liteHeaders = {
+        Accept: "*/*",
+        "User-Agent": DEFAULT_UA,
+        Referer: DEFAULT_REFERER,
+        "Extra-Data": buildExtraData(auth),
+    };
 
-                updateResponseCookie(auth, response);
-                const status = Number(
-                    (response && (response.status || response.statusCode)) || 0
-                );
-                const result = parseJson(body);
+    const modes = {
+        full: {
+            name: "完整请求",
+            headers: fullHeaders,
+        },
+        direct: {
+            name: "完整请求/DIRECT",
+            headers: fullHeaders,
+            node: "DIRECT",
+        },
+        lite: {
+            name: "精简请求/DIRECT",
+            headers: liteHeaders,
+            node: "DIRECT",
+        },
+    };
 
-                if (status !== 200) {
-                    reject(
-                        new Error(
-                            "HTTP " + status + ": " + String(body || "").slice(0, 200)
-                        )
-                    );
-                    return;
-                }
+    const order = [];
+    for (const mode of [auth.requestMode, "full", "direct", "lite"]) {
+        if (mode && modes[mode] && !order.includes(mode)) order.push(mode);
+    }
 
-                if (!result) {
-                    reject(new Error("接口返回不是有效 JSON"));
-                    return;
-                }
+    const transportErrors = [];
+    for (const mode of order) {
+        const config = modes[mode];
+        const options = {
+            url: API_BASE + path + "?" + query,
+            headers: config.headers,
+            timeout: 15000,
+        };
+        if (config.node) options.node = config.node;
 
-                if (Number(result.code) !== 0) {
-                    reject(
-                        new Error(
-                            result.msg ||
-                                result.message ||
-                                "接口错误：" + JSON.stringify(result)
-                        )
-                    );
-                    return;
-                }
-
-                resolve(result.data || {});
+        try {
+            const result = await rawGet(options);
+            const data = parseApiResult(auth, result.response, result.body);
+            if (auth.requestMode !== mode) {
+                auth.requestMode = mode;
+                saveAuth(auth);
             }
-        );
-    });
+            return data;
+        } catch (error) {
+            if (!error.isTransportError) throw error;
+            transportErrors.push(config.name + "：" + String(error.message || error));
+        }
+    }
+
+    throw new Error(
+        "网络请求失败（v" +
+            SCRIPT_VERSION +
+            "）\n" +
+            transportErrors.join("\n")
+    );
 }
 
 function awardText(data) {
@@ -340,15 +421,24 @@ function isAuthError(message) {
 async function runCheckin() {
     const auth = readAuth();
     if (!auth.accessToken) {
-        $notification.post(
-            NAME,
+        postCheckinResult(
             "❌ 未获取 Cookie",
             "请开启插件中的“自动获取 Cookie”，打开影视飓风小程序并进入积分或签到页面。"
         );
         return;
     }
 
-    const lines = ["账号：" + accountName(auth)];
+    const debugLines = [
+        "版本：" + SCRIPT_VERSION,
+        "账号：" + accountName(auth),
+        "凭据：" +
+            [
+                auth.accessToken ? "Token✓" : "Token×",
+                auth.sessionId ? "Session✓" : "Session×",
+                auth.cookie ? "Cookie✓" : "Cookie×",
+            ].join(" "),
+    ];
+    const summary = [];
     let subtitle = "✅ 签到成功";
 
     try {
@@ -369,12 +459,12 @@ async function runCheckin() {
                 { checkinId }
             );
             const awards = awardText(result);
-            lines.push("签到：" + (result.desc || "成功") + (awards ? "，" + awards : ""));
+            summary.push(result.desc || "签到成功");
+            if (awards) summary.push("奖励：" + awards);
         } catch (error) {
             const message = String(error.message || error);
             if (isAlreadyChecked(message)) {
                 subtitle = "ℹ️ 今日已签到";
-                lines.push("签到：今天已经签到");
             } else {
                 throw error;
             }
@@ -389,21 +479,21 @@ async function runCheckin() {
                 points.current_points !== undefined
                     ? points.current_points
                     : points.real_points;
-            lines.push(
+            summary.push(
                 "当前积分：" + (current !== undefined ? current : "未识别")
             );
         } catch (error) {
-            lines.push("积分查询失败：" + String(error.message || error));
+            summary.push("积分查询失败：" + String(error.message || error));
         }
 
-        $notification.post(NAME, subtitle, lines.join("\n"));
+        postCheckinResult(subtitle, summary.join("\n") || "任务执行完成");
     } catch (error) {
         const message = String(error.message || error);
-        lines.push("原因：" + message);
+        debugLines.push("原因：" + message);
         if (isAuthError(message)) {
-            lines.push("请重新打开小程序进入签到页，更新 Cookie 后再试。");
+            debugLines.push("请重新打开小程序进入签到页，更新 Cookie 后再试。");
         }
-        $notification.post(NAME, "❌ 签到失败", lines.join("\n"));
+        postCheckinResult("❌ 签到失败", debugLines.join("\n"));
     }
 }
 
@@ -422,7 +512,7 @@ async function runCheckin() {
     .catch((error) => {
         const message = String(error.message || error);
         if (!isRewrite) {
-            $notification.post(NAME, "❌ 脚本异常", message);
+            postCheckinResult("❌ 脚本异常", message);
         }
         console.log("[" + NAME + "] " + message);
     })
