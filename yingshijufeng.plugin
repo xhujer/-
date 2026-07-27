@@ -13,11 +13,11 @@ cookieCapture = switch,true,tag=自动获取 Cookie,desc=打开影视飓风小�
 
 [Script]
 
-http-request ^https:\/\/h5\.youzan\.com\/wscump\/(?:checkin|integral)\/.+\.json script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/yingshijufeng.js,timeout=10,tag=影视飓风获取Cookie,enable={cookieCapture}
+http-request ^https:\/\/h5\.youzan\.com\/wscump\/(?:checkin|integral)\/.+\.json script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/yingshijufeng.js?v=20260727-9-capture,timeout=10,tag=影视飓风获取Cookie,enable={cookieCapture}
 
-http-response ^https:\/\/h5\.youzan\.com\/wscshop\/weapp\/authorize\.json script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/yingshijufeng.js,timeout=10,requires-body=true,tag=影视飓风更新Cookie,enable={cookieCapture}
+http-response ^https:\/\/h5\.youzan\.com\/wscshop\/weapp\/authorize\.json script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/yingshijufeng.js?v=20260727-9-authorize,timeout=10,requires-body=true,tag=影视飓风更新Cookie,enable={cookieCapture}
 
-cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/yingshijufeng.js,timeout=60,tag=影视飓风每日签到,enable=true
+cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/yingshijufeng.js?v=20260727-9-checkin,timeout=90,tag=影视飓风每日签到,enable=true
 
 [MITM]
 
