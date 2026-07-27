@@ -1,7 +1,8 @@
 #!name=影视飓风小程序签到
 #!desc=自动获取影视飓风小程序 Cookie，并执行每日签到和积分查询
-#!author=tianbian
+#!author=Ming
 #!date=2026-07-27
+!icon=https://cdn.nodeimage.com/i/zPloAQAVmj4ztuytlodOhs3El7BO6pXh.webp
 #!system=iOS,iPadOS
 #!tag=影视飓风,签到
 
