@@ -2,8 +2,9 @@
     'use strict';
 
     var url = typeof $request !== 'undefined' && $request.url
-        ? $request.url
+        ? String($request.url)
         : '';
+
     var body = typeof $response !== 'undefined' && typeof $response.body === 'string'
         ? $response.body
         : '';
@@ -14,235 +15,276 @@
     }
 
     var BLOCKED_COMPONENT_IDS = new Set([
-        816, // 品宣图
-        818, // 我的权益
-        837, // 热门商品
-        859, 860, 861, 862, 863, 864, 865, 866, 867, // 优惠券
-        894, // 精选推荐瀑布流
-        900  // 行程推荐中的商品
+        816,
+        818,
+        837,
+        859, 860, 861, 862, 863, 864, 865, 866, 867,
+        894,
+        900
     ]);
 
-    var BLOCKED_FLOOR_RULES = [
-        /品宣图/,
-        /热门商品/,
-        /商品推荐/,
-        /热门权益/,
-        /我的权益/,
-        /精选推荐/,
-        /优惠券/,
-        /活动推广/,
-        /活动专区/,
-        /商城(?:入口|推荐|专区)?/
-    ];
-
-    var BLOCKED_COMPONENT_RULES = [
-        /商品/,
-        /优惠券/,
-        /瀑布流/,
-        /广告/,
+    var BLOCKED_TEXT_RULES = [
+        /广告/i,
+        /品宣/,
+        /推广/,
         /营销/,
-        /活动推广/,
-        /商城/
-    ];
-
-    // 快捷入口中保留工具类入口，移除导购、套餐和商城入口。
-    var BLOCKED_SHORTCUT_RULES = [
+        /活动/,
+        /福利/,
+        /优惠/,
+        /优惠券/,
+        /权益/,
+        /礼包/,
+        /商城/,
+        /购物/,
+        /商品/,
         /特价/,
+        /限时/,
+        /秒杀/,
+        /爆款/,
+        /热门推荐/,
+        /精选推荐/,
+        /猜你喜欢/,
+        /瀑布流/,
+        /社区/,
+        /发现/,
+        /内容流/,
+        /攻略/,
+        /游记/,
+        /目的地/,
+        /景点/,
         /酒店/,
         /机票/,
         /流量/,
         /数据卡/,
-        /商城/,
-        /活动/,
-        /优惠/,
-        /权益/,
-        /礼包/,
-        /购物/,
-        /会员/,
+        /套餐/,
         /订购/,
-        /套餐/
+        /充值/,
+        /会员中心/
     ];
 
+    var BLOCKED_LINK_RULES = [
+        /\/commodity\//i,
+        /\/community\//i,
+        /\/destination\//i,
+        /\/product\//i,
+        /\/mall\//i,
+        /\/coupon/i,
+        /\/activity/i,
+        /\/campaign/i,
+        /\/promotion/i,
+        /\/benefit/i,
+        /\/rights/i,
+        /\/hotel/i,
+        /\/flight/i,
+        /\/traffic/i,
+        /\/sim/i,
+        /\/data-card/i
+    ];
+
+    var PROTECTED_TEXT_RULES = [
+        /电话托管/,
+        /来电/,
+        /短信/,
+        /语音/,
+        /voip/i,
+        /push/i,
+        /消息通知/,
+        /账号/,
+        /登录/,
+        /用户资料/,
+        /个人资料/,
+        /实名认证/,
+        /客服/,
+        /设置/,
+        /帮助/
+    ];
+
+    function text(value) {
+        if (value === undefined || value === null) return '';
+        return String(value);
+    }
+
     function matchesAny(value, rules) {
-        var text = String(value || '');
+        var valueText = text(value);
         return rules.some(function (rule) {
-            return rule.test(text);
+            return rule.test(valueText);
         });
     }
 
-    function getComponentId(component) {
-        if (!component || typeof component !== 'object') return NaN;
-        var value = component.id;
+    function collectSearchable(obj) {
+        if (!obj || typeof obj !== 'object') return '';
+
+        var fields = [
+            'name', 'title', 'subTitle', 'subtitle', 'subHeading',
+            'floorName', 'componentName', 'moduleName', 'label',
+            'desc', 'description', 'content', 'type', 'code',
+            'link', 'url', 'jumpUrl', 'htmlLink', 'rnLink',
+            'schema', 'scheme', 'targetUrl', 'iconUrl', 'imageUrl'
+        ];
+
+        return fields.map(function (key) {
+            return text(obj[key]);
+        }).join(' ');
+    }
+
+    function getComponentId(obj) {
+        if (!obj || typeof obj !== 'object') return NaN;
+
+        var value = obj.id;
         if (value === undefined || value === null || value === '') {
-            value = component.componentId;
+            value = obj.componentId;
         }
+
         return Number(value);
     }
 
-    function isBlockedComponent(component) {
-        if (!component || typeof component !== 'object') return false;
+    function isProtected(obj) {
+        return matchesAny(collectSearchable(obj), PROTECTED_TEXT_RULES);
+    }
 
-        var id = getComponentId(component);
+    function shouldRemove(obj) {
+        if (!obj || typeof obj !== 'object') return false;
+        if (isProtected(obj)) return false;
+
+        var id = getComponentId(obj);
         if (BLOCKED_COMPONENT_IDS.has(id)) return true;
 
-        return matchesAny(component.componentName, BLOCKED_COMPONENT_RULES);
+        var searchable = collectSearchable(obj);
+        return matchesAny(searchable, BLOCKED_TEXT_RULES) ||
+            matchesAny(searchable, BLOCKED_LINK_RULES);
     }
 
-    function isBlockedFloor(floor) {
-        if (!floor || typeof floor !== 'object') return false;
-        return matchesAny(floor.floorName, BLOCKED_FLOOR_RULES);
+    function isEmptyContainer(obj) {
+        if (!obj || typeof obj !== 'object') return false;
+
+        var containerKeys = [
+            'data', 'list', 'records', 'items', 'columns',
+            'resourceComponents', 'pageFloorVos', 'subPageFloorVos',
+            'children', 'modules', 'components'
+        ];
+
+        var hasContainer = false;
+        var hasContent = false;
+
+        containerKeys.forEach(function (key) {
+            if (Array.isArray(obj[key])) {
+                hasContainer = true;
+                if (obj[key].length > 0) hasContent = true;
+            }
+        });
+
+        return hasContainer && !hasContent;
     }
 
-    function isBlockedShortcut(item) {
-        if (!item || typeof item !== 'object') return false;
+    function cleanArray(arr) {
+        if (!Array.isArray(arr)) return arr;
 
-        var searchable = [
-            item.name,
-            item.title,
-            item.subHeading,
-            item.link,
-            item.url,
-            item.jumpUrl,
-            item.htmlLink,
-            item.rnLink
-        ].join(' ');
-
-        return matchesAny(searchable, BLOCKED_SHORTCUT_RULES);
-    }
-
-    function cleanComponent(component) {
-        if (!component || typeof component !== 'object') return component;
-        if (isBlockedComponent(component)) return null;
-
-        var id = getComponentId(component);
-        var name = String(component.componentName || '');
-
-        if ((id === 817 || name.indexOf('快捷入口') !== -1) && Array.isArray(component.data)) {
-            component.data = component.data.filter(function (item) {
-                return !isBlockedShortcut(item);
-            });
-
-            if (component.data.length === 0) return null;
-        }
-
-        return component;
-    }
-
-    function cleanComponentList(components) {
-        if (!Array.isArray(components)) return components;
-
-        return components
-            .map(cleanComponent)
-            .filter(function (component) {
-                return component !== null;
+        return arr
+            .map(function (item) {
+                return cleanValue(item);
+            })
+            .filter(function (item) {
+                return item !== null && item !== undefined;
             });
     }
 
-    function getFloorVersion(floor) {
-        if (!floor || typeof floor !== 'object') return null;
-        return floor.queryPageFloorVersionVo || floor.subPageFloorVersionVo || null;
-    }
+    function cleanObject(obj) {
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+        if (shouldRemove(obj)) return null;
 
-    function cleanFloor(floor) {
-        if (!floor || typeof floor !== 'object') return floor;
-        if (isBlockedFloor(floor)) return null;
+        Object.keys(obj).forEach(function (key) {
+            var value = obj[key];
 
-        var version = getFloorVersion(floor);
-        var beforeComponents = 0;
-        var beforeSubFloors = 0;
-
-        if (version && typeof version === 'object') {
-            if (Array.isArray(version.resourceComponents)) {
-                beforeComponents = version.resourceComponents.length;
-                version.resourceComponents = cleanComponentList(version.resourceComponents);
+            if (Array.isArray(value)) {
+                obj[key] = cleanArray(value);
+                return;
             }
 
-            if (Array.isArray(version.subPageFloorVos)) {
-                beforeSubFloors += version.subPageFloorVos.length;
-                version.subPageFloorVos = cleanFloorList(version.subPageFloorVos);
+            if (value && typeof value === 'object') {
+                obj[key] = cleanObject(value);
+            }
+        });
+
+        ['total', 'totalCount', 'totalPages', 'pageOccupyNum', 'count'].forEach(function (key) {
+            if (key in obj) {
+                var listKeys = ['data', 'list', 'records', 'items', 'columns'];
+                var allEmpty = listKeys.every(function (listKey) {
+                    return !Array.isArray(obj[listKey]) || obj[listKey].length === 0;
+                });
+
+                if (allEmpty && typeof obj[key] === 'number') {
+                    obj[key] = 0;
+                }
+            }
+        });
+
+        if (isEmptyContainer(obj) && !isProtected(obj)) {
+            var searchable = collectSearchable(obj);
+
+            if (!searchable ||
+                matchesAny(searchable, BLOCKED_TEXT_RULES) ||
+                matchesAny(searchable, BLOCKED_LINK_RULES)) {
+                return null;
             }
         }
 
-        if (Array.isArray(floor.subPageFloorVos)) {
-            beforeSubFloors += floor.subPageFloorVos.length;
-            floor.subPageFloorVos = cleanFloorList(floor.subPageFloorVos);
-        }
-
-        var afterComponents = version && Array.isArray(version.resourceComponents)
-            ? version.resourceComponents.length
-            : 0;
-        var afterSubFloors = 0;
-
-        if (version && Array.isArray(version.subPageFloorVos)) {
-            afterSubFloors += version.subPageFloorVos.length;
-        }
-        if (Array.isArray(floor.subPageFloorVos)) {
-            afterSubFloors += floor.subPageFloorVos.length;
-        }
-
-        // 原本只由推广组件/子楼层组成，清理后整层一并移除，避免留下空白。
-        if ((beforeComponents > 0 || beforeSubFloors > 0) &&
-            afterComponents === 0 && afterSubFloors === 0) {
-            return null;
-        }
-
-        // 部分地区会返回没有任何内容的容器楼层，直接移除空白占位。
-        var floorName = String(floor.floorName || '');
-        if ((floorName === '行程推荐' || floorName === '金刚区') &&
-            afterComponents === 0 && afterSubFloors === 0) {
-            return null;
-        }
-
-        return floor;
+        return obj;
     }
 
-    function cleanFloorList(floors) {
-        if (!Array.isArray(floors)) return floors;
-
-        return floors
-            .map(cleanFloor)
-            .filter(function (floor) {
-                return floor !== null;
-            });
+    function cleanValue(value) {
+        if (Array.isArray(value)) return cleanArray(value);
+        if (value && typeof value === 'object') return cleanObject(value);
+        return value;
     }
 
-    function clearRecommendationBody(responseBody) {
-        if (!responseBody || typeof responseBody !== 'object') return;
+    function clearKnownRecommendationResponse(data) {
+        if (!data || typeof data !== 'object') return;
 
-        if (Array.isArray(responseBody.dataList)) responseBody.dataList = [];
-        if (Array.isArray(responseBody.list)) responseBody.list = [];
-        if (Array.isArray(responseBody.records)) responseBody.records = [];
+        var target = data.body && typeof data.body === 'object'
+            ? data.body
+            : data;
 
-        if ('pageOccupyNum' in responseBody) responseBody.pageOccupyNum = 0;
-        if ('totalCount' in responseBody) responseBody.totalCount = 0;
-        if ('totalPages' in responseBody) responseBody.totalPages = 0;
-        if ('total' in responseBody) responseBody.total = 0;
+        ['dataList', 'list', 'records', 'items', 'columns'].forEach(function (key) {
+            if (Array.isArray(target[key])) target[key] = [];
+        });
+
+        ['pageOccupyNum', 'totalCount', 'totalPages', 'total', 'count'].forEach(function (key) {
+            if (key in target && typeof target[key] === 'number') {
+                target[key] = 0;
+            }
+        });
+
+        if ('recName' in target) target.recName = '';
+        if ('recSubName' in target) target.recSubName = '';
     }
 
     try {
         var data = JSON.parse(body);
 
-        if (url.indexOf('/api/assembly/v1/findByPageCode') !== -1) {
-            if (data.body && typeof data.body === 'object') {
-                data.body.pageFloorVos = cleanFloorList(data.body.pageFloorVos);
-            }
-        } else if (url.indexOf('/api/assembly/v1/queryDataSources') !== -1) {
-            if (Array.isArray(data.body)) {
-                data.body = cleanComponentList(data.body);
-            }
-        } else if (url.indexOf('/api/destination/v1/rec/queryData') !== -1) {
-            clearRecommendationBody(data.body);
-        } else if (url.indexOf('/api/destination/v1/rec/columnListByRegion') !== -1) {
-            if (data.body && typeof data.body === 'object') {
-                data.body.recName = '';
-                data.body.recSubName = '';
-                data.body.columns = [];
-            }
+        if (
+            url.indexOf('/api/destination/') !== -1 ||
+            url.indexOf('/api/community/') !== -1 ||
+            url.indexOf('/api/content/') !== -1 ||
+            url.indexOf('/api/product/') !== -1
+        ) {
+            clearKnownRecommendationResponse(data);
         }
 
-        $done({ body: JSON.stringify(data) });
+        data = cleanValue(data);
+
+        if (data === null || data === undefined) {
+            data = {
+                code: 0,
+                success: true,
+                body: {}
+            };
+        }
+
+        $done({
+            body: JSON.stringify(data)
+        });
     } catch (error) {
-        console.log('[无忧行去广告（托管安全最终版）] 响应解析失败：' + error);
+        console.log('[无忧行深度精简] JSON 解析失败：' + error);
         $done({});
     }
 })();
