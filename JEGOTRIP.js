@@ -1,10 +1,6 @@
 (function () {
     'use strict';
 
-    var url = typeof $request !== 'undefined' && $request.url
-        ? String($request.url)
-        : '';
-
     var body = typeof $response !== 'undefined' && typeof $response.body === 'string'
         ? $response.body
         : '';
@@ -18,70 +14,58 @@
         816,
         818,
         837,
-        859, 860, 861, 862, 863, 864, 865, 866, 867,
+        859,
+        860,
+        861,
+        862,
+        863,
+        864,
+        865,
+        866,
+        867,
         894,
         900
     ]);
 
-    var BLOCKED_TEXT_RULES = [
-        /广告/i,
-        /品宣/,
-        /推广/,
+    var BLOCKED_NAME_RULES = [
+        /品宣图/,
+        /广告/,
         /营销/,
-        /活动/,
-        /福利/,
-        /优惠/,
+        /活动推广/,
+        /活动专区/,
         /优惠券/,
-        /权益/,
-        /礼包/,
-        /商城/,
-        /购物/,
-        /商品/,
-        /特价/,
-        /限时/,
-        /秒杀/,
-        /爆款/,
-        /热门推荐/,
+        /热门商品/,
+        /商品推荐/,
         /精选推荐/,
         /猜你喜欢/,
         /瀑布流/,
-        /社区/,
-        /发现/,
-        /内容流/,
-        /攻略/,
-        /游记/,
-        /目的地/,
-        /景点/,
-        /酒店/,
-        /机票/,
-        /流量/,
-        /数据卡/,
-        /套餐/,
-        /订购/,
-        /充值/,
-        /会员中心/
+        /我的权益/,
+        /热门权益/,
+        /商城入口/,
+        /商城专区/,
+        /商城推荐/,
+        /购物入口/,
+        /限时特价/,
+        /秒杀专区/
     ];
 
     var BLOCKED_LINK_RULES = [
-        /\/commodity\//i,
-        /\/community\//i,
-        /\/destination\//i,
-        /\/product\//i,
-        /\/mall\//i,
-        /\/coupon/i,
-        /\/activity/i,
-        /\/campaign/i,
-        /\/promotion/i,
-        /\/benefit/i,
-        /\/rights/i,
-        /\/hotel/i,
-        /\/flight/i,
-        /\/traffic/i,
-        /\/sim/i,
-        /\/data-card/i
+        /\/commodity(?:\/|$)/i,
+        /\/mall(?:\/|$)/i,
+        /\/product(?:\/|$)/i,
+        /\/coupon(?:\/|$)/i,
+        /\/promotion(?:\/|$)/i,
+        /\/campaign(?:\/|$)/i,
+        /\/activity(?:\/|$)/i,
+        /\/benefit(?:\/|$)/i,
+        /\/rights(?:\/|$)/i,
+        /commodityDetail/i,
+        /productDetail/i,
+        /couponCenter/i,
+        /mallHome/i
     ];
 
-    var PROTECTED_TEXT_RULES = [
+    var PROTECTED_RULES = [
         /电话托管/,
         /来电/,
         /短信/,
@@ -89,107 +73,168 @@
         /voip/i,
         /push/i,
         /消息通知/,
-        /账号/,
         /登录/,
+        /账号/,
         /用户资料/,
         /个人资料/,
         /实名认证/,
+        /会员资料/,
         /客服/,
-        /设置/,
-        /帮助/
+        /帮助/,
+        /设置/
     ];
 
-    function text(value) {
-        if (value === undefined || value === null) return '';
-        return String(value);
+    var ARRAY_KEYS = [
+        'data',
+        'list',
+        'records',
+        'items',
+        'columns',
+        'resourceComponents',
+        'pageFloorVos',
+        'subPageFloorVos',
+        'children',
+        'modules',
+        'components'
+    ];
+
+    function toText(value) {
+        return value === undefined || value === null ? '' : String(value);
     }
 
-    function matchesAny(value, rules) {
-        var valueText = text(value);
+    function matches(value, rules) {
+        var text = toText(value);
         return rules.some(function (rule) {
-            return rule.test(valueText);
+            return rule.test(text);
         });
     }
 
-    function collectSearchable(obj) {
+    function getNameText(obj) {
         if (!obj || typeof obj !== 'object') return '';
 
-        var fields = [
-            'name', 'title', 'subTitle', 'subtitle', 'subHeading',
-            'floorName', 'componentName', 'moduleName', 'label',
-            'desc', 'description', 'content', 'type', 'code',
-            'link', 'url', 'jumpUrl', 'htmlLink', 'rnLink',
-            'schema', 'scheme', 'targetUrl', 'iconUrl', 'imageUrl'
-        ];
+        return [
+            obj.name,
+            obj.title,
+            obj.subTitle,
+            obj.subtitle,
+            obj.floorName,
+            obj.componentName,
+            obj.moduleName,
+            obj.label,
+            obj.type,
+            obj.code
+        ].map(toText).join(' ');
+    }
 
-        return fields.map(function (key) {
-            return text(obj[key]);
-        }).join(' ');
+    function getLinkText(obj) {
+        if (!obj || typeof obj !== 'object') return '';
+
+        return [
+            obj.link,
+            obj.url,
+            obj.jumpUrl,
+            obj.htmlLink,
+            obj.rnLink,
+            obj.schema,
+            obj.scheme,
+            obj.targetUrl
+        ].map(toText).join(' ');
+    }
+
+    function getProtectedText(obj) {
+        if (!obj || typeof obj !== 'object') return '';
+
+        return [
+            getNameText(obj),
+            getLinkText(obj),
+            obj.desc,
+            obj.description
+        ].map(toText).join(' ');
     }
 
     function getComponentId(obj) {
         if (!obj || typeof obj !== 'object') return NaN;
 
-        var value = obj.id;
+        var value = obj.componentId;
+
         if (value === undefined || value === null || value === '') {
-            value = obj.componentId;
+            value = obj.id;
         }
 
         return Number(value);
     }
 
     function isProtected(obj) {
-        return matchesAny(collectSearchable(obj), PROTECTED_TEXT_RULES);
+        return matches(getProtectedText(obj), PROTECTED_RULES);
     }
 
     function shouldRemove(obj) {
         if (!obj || typeof obj !== 'object') return false;
         if (isProtected(obj)) return false;
 
-        var id = getComponentId(obj);
-        if (BLOCKED_COMPONENT_IDS.has(id)) return true;
+        if (BLOCKED_COMPONENT_IDS.has(getComponentId(obj))) {
+            return true;
+        }
 
-        var searchable = collectSearchable(obj);
-        return matchesAny(searchable, BLOCKED_TEXT_RULES) ||
-            matchesAny(searchable, BLOCKED_LINK_RULES);
-    }
+        if (matches(getNameText(obj), BLOCKED_NAME_RULES)) {
+            return true;
+        }
 
-    function isEmptyContainer(obj) {
-        if (!obj || typeof obj !== 'object') return false;
+        if (matches(getLinkText(obj), BLOCKED_LINK_RULES)) {
+            return true;
+        }
 
-        var containerKeys = [
-            'data', 'list', 'records', 'items', 'columns',
-            'resourceComponents', 'pageFloorVos', 'subPageFloorVos',
-            'children', 'modules', 'components'
-        ];
-
-        var hasContainer = false;
-        var hasContent = false;
-
-        containerKeys.forEach(function (key) {
-            if (Array.isArray(obj[key])) {
-                hasContainer = true;
-                if (obj[key].length > 0) hasContent = true;
-            }
-        });
-
-        return hasContainer && !hasContent;
+        return false;
     }
 
     function cleanArray(arr) {
-        if (!Array.isArray(arr)) return arr;
-
         return arr
-            .map(function (item) {
-                return cleanValue(item);
-            })
+            .map(cleanValue)
             .filter(function (item) {
                 return item !== null && item !== undefined;
             });
     }
 
+    function hasArrayContainer(obj) {
+        return ARRAY_KEYS.some(function (key) {
+            return Array.isArray(obj[key]);
+        });
+    }
+
+    function hasNonEmptyArrayContainer(obj) {
+        return ARRAY_KEYS.some(function (key) {
+            return Array.isArray(obj[key]) && obj[key].length > 0;
+        });
+    }
+
+    function shouldDropEmptyContainer(obj) {
+        if (!obj || typeof obj !== 'object') return false;
+        if (isProtected(obj)) return false;
+        if (!hasArrayContainer(obj) || hasNonEmptyArrayContainer(obj)) return false;
+
+        return matches(getNameText(obj), BLOCKED_NAME_RULES) ||
+            matches(getLinkText(obj), BLOCKED_LINK_RULES);
+    }
+
+    function normalizeCounts(obj) {
+        var hasKnownList = ['data', 'list', 'records', 'items', 'columns'].some(function (key) {
+            return Array.isArray(obj[key]);
+        });
+
+        var allKnownListsEmpty = ['data', 'list', 'records', 'items', 'columns'].every(function (key) {
+            return !Array.isArray(obj[key]) || obj[key].length === 0;
+        });
+
+        if (!hasKnownList || !allKnownListsEmpty) return;
+
+        ['total', 'totalCount', 'totalPages', 'pageOccupyNum', 'count'].forEach(function (key) {
+            if (typeof obj[key] === 'number') {
+                obj[key] = 0;
+            }
+        });
+    }
+
     function cleanObject(obj) {
-        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
         if (shouldRemove(obj)) return null;
 
         Object.keys(obj).forEach(function (key) {
@@ -197,83 +242,38 @@
 
             if (Array.isArray(value)) {
                 obj[key] = cleanArray(value);
-                return;
-            }
-
-            if (value && typeof value === 'object') {
+            } else if (value && typeof value === 'object') {
                 obj[key] = cleanObject(value);
             }
         });
 
-        ['total', 'totalCount', 'totalPages', 'pageOccupyNum', 'count'].forEach(function (key) {
-            if (key in obj) {
-                var listKeys = ['data', 'list', 'records', 'items', 'columns'];
-                var allEmpty = listKeys.every(function (listKey) {
-                    return !Array.isArray(obj[listKey]) || obj[listKey].length === 0;
-                });
+        normalizeCounts(obj);
 
-                if (allEmpty && typeof obj[key] === 'number') {
-                    obj[key] = 0;
-                }
-            }
-        });
-
-        if (isEmptyContainer(obj) && !isProtected(obj)) {
-            var searchable = collectSearchable(obj);
-
-            if (!searchable ||
-                matchesAny(searchable, BLOCKED_TEXT_RULES) ||
-                matchesAny(searchable, BLOCKED_LINK_RULES)) {
-                return null;
-            }
+        if (shouldDropEmptyContainer(obj)) {
+            return null;
         }
 
         return obj;
     }
 
     function cleanValue(value) {
-        if (Array.isArray(value)) return cleanArray(value);
-        if (value && typeof value === 'object') return cleanObject(value);
+        if (Array.isArray(value)) {
+            return cleanArray(value);
+        }
+
+        if (value && typeof value === 'object') {
+            return cleanObject(value);
+        }
+
         return value;
-    }
-
-    function clearKnownRecommendationResponse(data) {
-        if (!data || typeof data !== 'object') return;
-
-        var target = data.body && typeof data.body === 'object'
-            ? data.body
-            : data;
-
-        ['dataList', 'list', 'records', 'items', 'columns'].forEach(function (key) {
-            if (Array.isArray(target[key])) target[key] = [];
-        });
-
-        ['pageOccupyNum', 'totalCount', 'totalPages', 'total', 'count'].forEach(function (key) {
-            if (key in target && typeof target[key] === 'number') {
-                target[key] = 0;
-            }
-        });
-
-        if ('recName' in target) target.recName = '';
-        if ('recSubName' in target) target.recSubName = '';
     }
 
     try {
         var data = JSON.parse(body);
+        var cleaned = cleanValue(data);
 
-        if (
-            url.indexOf('/api/destination/') !== -1 ||
-            url.indexOf('/api/community/') !== -1 ||
-            url.indexOf('/api/content/') !== -1 ||
-            url.indexOf('/api/product/') !== -1
-        ) {
-            clearKnownRecommendationResponse(data);
-        }
-
-        data = cleanValue(data);
-
-        if (data === null || data === undefined) {
-            data = {
+        if (cleaned === null || cleaned === undefined) {
+            cleaned = {
                 code: 0,
                 success: true,
                 body: {}
@@ -281,10 +281,10 @@
         }
 
         $done({
-            body: JSON.stringify(data)
+            body: JSON.stringify(cleaned)
         });
     } catch (error) {
-        console.log('[无忧行深度精简] JSON 解析失败：' + error);
+        console.log('[JEGOTRIP] JSON parse failed: ' + error);
         $done({});
     }
 })();
