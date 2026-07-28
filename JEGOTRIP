@@ -11,9 +11,7 @@
 [Rule]
 
 DOMAIN,cp.jegotrip.com.cn,REJECT
-
 DOMAIN,jegotrip3.jegotrip.com.cn,REJECT
-
 DOMAIN,video.jegotrip.com.cn,REJECT
 
 DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.cn-hangzhou.log.aliyuncs.com,REJECT
