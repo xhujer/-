@@ -5,76 +5,121 @@
         ? $request.url
         : '';
 
-    var body = typeof $response !== 'undefined' && typeof $response.body === 'string'
+    var isFindByPageCode =
+        /\/api\/assembly\/v1\/findByPageCode(?:\?|$)/i.test(url);
+
+    var isQueryDataSources =
+        /\/api\/assembly\/v1\/queryDataSources(?:\?|$)/i.test(url);
+
+    if (!isFindByPageCode && !isQueryDataSources) {
+        $done({});
+        return;
+    }
+
+    var body = typeof $response !== 'undefined' &&
+        typeof $response.body === 'string'
         ? $response.body
         : '';
 
     if (!body) {
-        $done({});
-        return;
-    }
-
-    var isHomeApi =
-        url.indexOf('/api/assembly/v1/findByPageCode') !== -1 ||
-        url.indexOf('/api/assembly/v1/queryDataSources') !== -1;
-
-    if (!isHomeApi) {
-        $done({});
-        return;
-    }
-
-    function clearArrays(value) {
-        if (!value || typeof value !== 'object') {
-            return;
-        }
-
-        Object.keys(value).forEach(function (key) {
-            var item = value[key];
-
-            if (Array.isArray(item)) {
-                value[key] = [];
-                return;
-            }
-
-            if (item && typeof item === 'object') {
-                clearArrays(item);
-            }
+        $done({
+            body: JSON.stringify({
+                code: 0,
+                success: true,
+                data: []
+            })
         });
-    }
-
-    function resetCounts(value) {
-        if (!value || typeof value !== 'object') {
-            return;
-        }
-
-        Object.keys(value).forEach(function (key) {
-            var item = value[key];
-
-            if (
-                typeof item === 'number' &&
-                /^(?:total|totalCount|totalPages|count|pageCount|pageOccupyNum)$/i.test(key)
-            ) {
-                value[key] = 0;
-                return;
-            }
-
-            if (item && typeof item === 'object') {
-                resetCounts(item);
-            }
-        });
+        return;
     }
 
     try {
-        var data = JSON.parse(body);
+        var original = JSON.parse(body);
 
-        clearArrays(data);
-        resetCounts(data);
+        var result = {};
+
+        if (
+            Object.prototype.hasOwnProperty.call(original, 'code')
+        ) {
+            result.code = original.code;
+        } else {
+            result.code = 0;
+        }
+
+        if (
+            Object.prototype.hasOwnProperty.call(original, 'success')
+        ) {
+            result.success = original.success;
+        } else {
+            result.success = true;
+        }
+
+        if (
+            Object.prototype.hasOwnProperty.call(original, 'message')
+        ) {
+            result.message = original.message;
+        }
+
+        if (
+            Object.prototype.hasOwnProperty.call(original, 'msg')
+        ) {
+            result.msg = original.msg;
+        }
+
+        if (
+            Object.prototype.hasOwnProperty.call(original, 'data')
+        ) {
+            result.data = [];
+        }
+
+        if (
+            Object.prototype.hasOwnProperty.call(original, 'body')
+        ) {
+            result.body = [];
+        }
+
+        if (
+            Object.prototype.hasOwnProperty.call(original, 'result')
+        ) {
+            result.result = [];
+        }
+
+        if (
+            !Object.prototype.hasOwnProperty.call(result, 'data') &&
+            !Object.prototype.hasOwnProperty.call(result, 'body') &&
+            !Object.prototype.hasOwnProperty.call(result, 'result')
+        ) {
+            result.data = [];
+        }
+
+        result.total = 0;
+        result.totalCount = 0;
+        result.count = 0;
 
         $done({
-            body: JSON.stringify(data)
+            status: 200,
+            headers: {
+                'Content-Type': 'application/json;charset=utf-8',
+                'Cache-Control': 'no-store, no-cache, must-revalidate',
+                'Pragma': 'no-cache'
+            },
+            body: JSON.stringify(result)
         });
     } catch (error) {
-        console.log('[JEGOTRIP] JSON parse failed: ' + error);
-        $done({});
+        console.log('[JEGOTRIP] 首页响应解析失败：' + error);
+
+        $done({
+            status: 200,
+            headers: {
+                'Content-Type': 'application/json;charset=utf-8',
+                'Cache-Control': 'no-store, no-cache, must-revalidate'
+            },
+            body: JSON.stringify({
+                code: 0,
+                success: true,
+                data: [],
+                total: 0,
+                totalCount: 0
+            })
+        });
     }
 })();
