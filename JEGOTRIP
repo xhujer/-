@@ -19,10 +19,10 @@ DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.cn-hangzhou.log.
 ^https?:\/\/video\.jegotrip\.com\.cn\/[^\/]+\/image\/dynamic\/[^?]+\.gif(?:\?.*)?$ url reject
 
 [Script]
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/findByPageCode(?:\?.*)?$ script-path=JegoTrip_remove_ads_final.js,requires-body=true,max-size=0,timeout=10,tag=无忧行首页楼层去广告
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryDataSources(?:\?.*)?$ script-path=JegoTrip_remove_ads_final.js,requires-body=true,max-size=0,timeout=10,tag=无忧行动态组件去广告
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData(?:\?.*)?$ script-path=JegoTrip_remove_ads_final.js,requires-body=true,max-size=0,timeout=10,tag=无忧行目的地推荐去广告
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion(?:\?.*)?$ script-path=JegoTrip_remove_ads_final.js,requires-body=true,max-size=0,timeout=10,tag=无忧行推荐栏目去广告
+http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/findByPageCode(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js,requires-body=true,max-size=0,timeout=10,tag=无忧行首页楼层去广告
+http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryDataSources(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js,requires-body=true,max-size=0,timeout=10,tag=无忧行动态组件去广告
+http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js,requires-body=true,max-size=0,timeout=10,tag=无忧行目的地推荐去广告
+http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js,requires-body=true,max-size=0,timeout=10,tag=无忧行推荐栏目去广告
 
 [MITM]
 hostname = app.jegotrip.com.cn, app-product.jegotrip.com.cn, dualstack-logs.amap.com, jegotrip3.jegotrip.com.cn, video.jegotrip.com.cn
