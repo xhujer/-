@@ -1,5 +1,5 @@
-#!name=无忧行去广告（托管安全最终版）
-#!desc=精确移除首页推荐、商品、优惠券和推广内容；保留登录、用户、会员、手机号托管、来电短信提醒、电话服务器及推送
+#!name=无忧行深度精简（电话托管保留）
+#!desc=深度移除广告、商城、商品、优惠券、活动、社区、内容流及目的地推荐；保留登录、用户资料、会员、VoIP 电话托管、来电短信提醒与推送
 #!author=tianbian
 #!date=2026-07-29
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -9,20 +9,47 @@
 #!loon_version=3.2.4
 
 [Rule]
+# 社区网页及营销素材
+DOMAIN,cp.jegotrip.com.cn,REJECT
+DOMAIN,jegotrip3.jegotrip.com.cn,REJECT
+DOMAIN,video.jegotrip.com.cn,REJECT
+
+# 性能、统计和第三方日志
 DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.cn-hangzhou.log.aliyuncs.com,REJECT
+DOMAIN,analysis.tratao.com,REJECT
+DOMAIN,dualstack-logs.amap.com,REJECT
+DOMAIN,loggw-exsdk.alipay.com,REJECT
 
 [Rewrite]
+# 无忧行事件日志：仅拒绝上传接口，保留 app/getInfo 配置接口
 ^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/api\/business\/event\/api\/log\/upload(?:\?.*)?$ url reject
+
+# 点击行为日志：保留同域名关键的 /servertime
 ^https?:\/\/app-product\.jegotrip\.com\.cn\/logstores\/clickevent_ios_v5\/shards\/lb(?:\?.*)?$ url reject
-^https?:\/\/dualstack-logs\.amap\.com\/ws\/log\/upload(?:\?.*)?$ url reject
+
+# 主站社区、内容分享
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/community\/.* url reject
+
+# 目的地、景点和目的地推荐
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/destination\/.* url reject
+
+# app3 社区、社交、内容流
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/.* url reject
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/content\/.* url reject
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/service\/content\/.* url reject
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/service\/socialcontact\/.* url reject
+
+# app3 商品、导购和商城
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/product\/.* url reject
+
+# 商品图片及动态推广素材
 ^https?:\/\/jegotrip3\.jegotrip\.com\.cn\/commodity\/.* url reject
 ^https?:\/\/video\.jegotrip\.com\.cn\/[^\/]+\/image\/dynamic\/[^?]+\.gif(?:\?.*)?$ url reject
 
 [Script]
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/findByPageCode(?:\?.*)?$ script-path=JegoTrip_remove_ads_final.js,requires-body=true,max-size=0,timeout=10,tag=无忧行首页楼层去广告
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryDataSources(?:\?.*)?$ script-path=JegoTrip_remove_ads_final.js,requires-body=true,max-size=0,timeout=10,tag=无忧行动态组件去广告
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData(?:\?.*)?$ script-path=JegoTrip_remove_ads_final.js,requires-body=true,max-size=0,timeout=10,tag=无忧行目的地推荐去广告
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/columnListByRegion(?:\?.*)?$ script-path=JegoTrip_remove_ads_final.js,requires-body=true,max-size=0,timeout=10,tag=无忧行推荐栏目去广告
+# 首页及动态楼层继续用远程脚本精确删除广告、商品、优惠券、权益、活动和商业快捷入口
+http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/findByPageCode(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js,requires-body=true,max-size=0,timeout=10,tag=无忧行首页深度精简
+http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryDataSources(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js,requires-body=true,max-size=0,timeout=10,tag=无忧行动态组件深度精简
 
 [MITM]
-hostname = app.jegotrip.com.cn, app-product.jegotrip.com.cn, dualstack-logs.amap.com, jegotrip3.jegotrip.com.cn, video.jegotrip.com.cn
+hostname = app.jegotrip.com.cn, app3.jegotrip.com.cn, app-product.jegotrip.com.cn, jegotrip3.jegotrip.com.cn, video.jegotrip.com.cn
