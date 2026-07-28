@@ -1,5 +1,5 @@
-#!name=无忧行去广告
-#!desc=精简广告、社区入口、商城商品和推广素材；保留目的地、登录、用户资料、会员、VoIP 电话托管、来电短信提醒与推送
+#!name=无忧行净化版
+#!desc=首页净空、去除广告推广与商业组件；保留目的地、登录、用户资料、会员、VoIP电话托管、来电短信提醒与推送
 #!author=Ming
 #!date=2026-07-29
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -8,45 +8,43 @@
 #!system=iOS,iPadOS
 #!loon_version=3.2.4
 
+
 [Rule]
 
-# 社区网页
+# 社区网页入口
 DOMAIN,cp.jegotrip.com.cn,REJECT
 
-# 商品及商城图片素材
+# 商品图片素材
 DOMAIN,jegotrip3.jegotrip.com.cn,REJECT
 
 # 动态推广素材
 DOMAIN,video.jegotrip.com.cn,REJECT
 
-# 性能监控
+# 日志服务器
 DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.cn-hangzhou.log.aliyuncs.com,REJECT
 
-# 高德日志
-DOMAIN,dualstack-logs.amap.com,REJECT
 
 [Rewrite]
 
-# 第三方分析日志
+# 第三方日志
 ^https?:\/\/analysis\.tratao\.com\/api\/log(?:\?.*)?$ url reject
 
-# 无忧行事件日志上传
+# 无忧行事件日志
 ^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/api\/business\/event\/api\/log\/upload(?:\?.*)?$ url reject
 
 # 点击行为日志
-# 保留同域名电话链路使用的 /servertime
+# 保留 app-product 其他业务，例如 servertime
 ^https?:\/\/app-product\.jegotrip\.com\.cn\/logstores\/clickevent_ios_v5\/shards\/lb(?:\?.*)?$ url reject
 
-# 主接口社区内容
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/community\/.* url reject
 
 [Script]
 
-# 首页楼层、活动、商城和社区入口精简
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/findByPageCode(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js?v=20260729-3,requires-body=true,max-size=0,timeout=10,tag=无忧行首页精简
+# 首页楼层净空
+http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/findByPageCode script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP_home_clean.js,requires-body=true,max-size=0,timeout=10,tag=无忧行首页净空
 
-# 动态组件精简
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryDataSources(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js?v=20260729-3,requires-body=true,max-size=0,timeout=10,tag=无忧行动态组件精简
+# 首页动态组件净空
+http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryDataSources script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP_home_clean.js,requires-body=true,max-size=0,timeout=10,tag=无忧行动态净空
+
 
 [MITM]
 
