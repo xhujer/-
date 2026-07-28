@@ -1,25 +1,38 @@
-#!name=无忧行去广告
-#!desc=移除开屏广告、屏蔽首页推荐、活动推广
-#!tag=去广告
+#!name=无忧行极致精简（仅登录与用户信息）
+#!desc=仅保留登录、认证、用户及会员资料相关接口；拒绝首页、推荐、活动、商城、社区、目的地和埋点请求。底部原生 Tab 栏不会被隐藏。
+#!author=tianbian
+#!date=2026-07-28
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
-#!date=2025-08-31
+#!system=iOS,iPadOS
+#!loon_version=3.2.4
 
 [Rule]
-DOMAIN,app.jegotrip.com.cn,REJECT
-DOMAIN,app3.jegotrip.com.cn,REJECT
-DOMAIN,push.it.10086.cn,REJECT
-DOMAIN,oss.jegotrip.com.cn,REJECT
+# 商品、社区、推广素材与推送
 DOMAIN,app-product.jegotrip.com.cn,REJECT
+DOMAIN,cp.jegotrip.com.cn,REJECT
+DOMAIN,jegotrip3.jegotrip.com.cn,REJECT
+DOMAIN,video.jegotrip.com.cn,REJECT
+DOMAIN,push.it.10086.cn,REJECT
+
+# 埋点、性能监控与日志
+DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.cn-hangzhou.log.aliyuncs.com,REJECT
+DOMAIN,analysis.tratao.com,REJECT
+DOMAIN,dualstack-logs.amap.com,REJECT
 DOMAIN,loggw-exsdk.alipay.com,REJECT
 
 [Rewrite]
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/service\/user\/v1\/getUser url pass
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/equity\/v1\/rights\/product\/details url pass
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/service\/member\/v1\/expireRewardQuery url pass
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/thirdauth\/ url pass
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/message\/recommend url pass
+# 拒绝无忧行埋点
+^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/.* url reject
+
+# app 主接口白名单：
+# 仅放行 user/member/login/auth/oauth/passport/account/sms/captcha/verify/token/session/thirdauth
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/(?!(?:(?:service\/)?(?:user|member|login|auth|oauth|passport|account|sms|captcha|verify|token|session)|thirdauth)(?:\/|$)).* url reject
+
+# app3 主接口白名单：
+# 仅放行用户、会员和登录认证相关路径
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/(?!(?:(?:service\/)?(?:user|member|login|auth|oauth|passport|account|sms|captcha|verify|token|session)|thirdauth)(?:\/|$)).* url reject
 
 [MITM]
-hostname = app.jegotrip.com.cn, app3.jegotrip.com.cn, oss.jegotrip.com.cn, push.it.10086.cn
+hostname = app.jegotrip.com.cn, app3.jegotrip.com.cn
