@@ -1,5 +1,5 @@
-#!name=无忧行净化版
-#!desc=首页净空、去除广告推广与商业组件；保留目的地、登录、用户资料、会员、VoIP电话托管、来电短信提醒与推送
+#!name=无忧行去广告
+#!desc=移除签到任务、动态助手、社区动态、广告推广；保留登录、用户信息、会员、VoIP电话托管、来电短信提醒
 #!author=Ming
 #!date=2026-07-29
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -8,31 +8,72 @@
 #!system=iOS,iPadOS
 #!loon_version=3.2.4
 
+
 [Rule]
 
+# 社区网页
 DOMAIN,cp.jegotrip.com.cn,REJECT
+
+# 社区动态静态资源
+DOMAIN,cdn.jegotrip.com.cn,REJECT
+
+# 商品推广素材
 DOMAIN,jegotrip3.jegotrip.com.cn,REJECT
+
+# 动态推广图片
 DOMAIN,video.jegotrip.com.cn,REJECT
 
-DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.cn-hangzhou.log.aliyuncs.com,REJECT
+# 日志
+DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com,REJECT
 
 
 [Rewrite]
 
+
+# 第三方日志
 ^https?:\/\/analysis\.tratao\.com\/api\/log(?:\?.*)?$ url reject
 
+
+# 无忧行事件日志
 ^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/api\/business\/event\/api\/log\/upload(?:\?.*)?$ url reject
 
+
+# 点击日志
 ^https?:\/\/app-product\.jegotrip\.com\.cn\/logstores\/clickevent_ios_v5\/shards\/lb(?:\?.*)?$ url reject
 
 
-[Script]
 
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/findByPageCode script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js?v=20260729-home,requires-body=true,max-size=0,timeout=10,tag=无忧行首页净空
+# ==========================
+# 签到/任务/福利入口
+# ==========================
 
-http-response ^https:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryDataSources script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js?v=20260729-home,requires-body=true,max-size=0,timeout=10,tag=无忧行动态净空
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/service\/v1\/mission\/.* url reject
+
+
+
+# ==========================
+# 动态悬浮助手
+# ==========================
+
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/message\/recommend(?:\?.*)?$ url reject
+
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/alertV2(?:\?.*)?$ url reject
+
+
+
+# ==========================
+# 社区动态图片
+# ==========================
+
+^https?:\/\/cdn\.jegotrip\.com\.cn\/socialcontact\/.* url reject
+
+^https?:\/\/cdn\.jegotrip\.com\.cn\/material\/userAlbum\/.* url reject
+
 
 
 [MITM]
 
-hostname = app.jegotrip.com.cn, app-product.jegotrip.com.cn, analysis.tratao.com
+hostname =
+app.jegotrip.com.cn,
+app-product.jegotrip.com.cn,
+analysis.tratao.com
