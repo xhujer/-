@@ -1,23 +1,39 @@
 const SCRIPT_NAME = "小黑盒签到与任务";
-const SCRIPT_VERSION = "2.0.3";
+const SCRIPT_VERSION = "3.0.0";
 const STORAGE_KEY = "xhh_sign_accounts_v1";
 const CAPTURE_NOTICE_KEY = "xhh_sign_capture_notice_v1";
-const SIGN_PATH = "/task/sign/";
-const SIGN_V3_PATH = "/task/sign_v3/sign";
-const TASK_LIST_PATH = "/task/list_v2/";
-const DATA_REPORT_PATH = "/account/data_report/";
 const API_BASE = "https://api.xiaoheihe.cn";
 const DATA_BASE = "https://data.xiaoheihe.cn";
-const DEFAULT_TASK_SERVICE = "http://47.120.39.109:9900/hkey";
-const API_NONCE = "tb6e1k7WqQCIHToyzWzI8Ogq9d0EIgpb";
-const DATA_NONCE = "fSz04CwxvcWzG737aFNKKxNeGZDFOqJ1";
+const HKEY_API = "https://hkey.qcciii.com/hkey";
+const PATH_TASK_LIST = "/task/list_v2/";
+const PATH_SIGN = "/task/sign_v3/sign";
+const PATH_SIGN_STATE = "/task/sign_v3/get_sign_state";
+const PATH_FEEDS = "/bbs/app/feeds";
+const PATH_GAME_RECOMMEND = "/game/all_recommend/v2";
+const PATH_GAME_COMMENTS = "/bbs/app/link/game/comments";
+const PATH_VIEW_TIME = "/bbs/app/link/view/time";
+const PATH_DATA_REPORT = "/account/data_report/";
+const PATH_BBS_POST = "/bbs/app/api/link/post";
+const PATH_BBS_DELETE = "/bbs/app/link/delete";
+const APP_UA =
+  "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.118 Safari/537.36 ApiMaxJia/1.0";
+const APP_REFERER = "http://api.maxjia.com/";
 const MAX_ACCOUNTS = 10;
-const DAILY_TASKS = [
-  { key: "shareArticle", label: "分享帖子" },
-  { key: "shareGameDetail", label: "分享游戏详情" },
-  { key: "shareGameComment", label: "分享游戏评价" },
-  { key: "visitGameRank", label: "访问游戏榜单" }
-];
+const WAITING_STATE = "waiting";
+const FINISH_STATE = "finish";
+const OK_STATE = "ok";
+const SHARE_TASK_SETTLE_MS = 2200;
+const APP_PROFILE = {
+  os_type: "Android",
+  x_os_type: "Android",
+  x_client_type: "mobile",
+  os_version: "12",
+  dw: "360",
+  channel: "heybox",
+  x_app: "heybox",
+  time_zone: "Asia/Shanghai",
+  device_info: "HBP-AL00"
+};
 
 function notify(title, subtitle, content) {
   const detail = String(content == null ? "" : content);
@@ -25,246 +41,149 @@ function notify(title, subtitle, content) {
   $notification.post(String(title), String(subtitle), detail);
 }
 
-function safeAdd(x, y) {
-  const lsw = (x & 0xffff) + (y & 0xffff);
-  const msw = (x >>> 16) + (y >>> 16) + (lsw >>> 16);
-  return (msw << 16) | (lsw & 0xffff);
-}
-
-function bitRotateLeft(num, cnt) {
-  return (num << cnt) | (num >>> (32 - cnt));
-}
-
-function md5Cmn(q, a, b, x, s, t) {
-  return safeAdd(bitRotateLeft(safeAdd(safeAdd(a, q), safeAdd(x, t)), s), b);
-}
-
-function md5Ff(a, b, c, d, x, s, t) {
-  return md5Cmn((b & c) | (~b & d), a, b, x, s, t);
-}
-
-function md5Gg(a, b, c, d, x, s, t) {
-  return md5Cmn((b & d) | (c & ~d), a, b, x, s, t);
-}
-
-function md5Hh(a, b, c, d, x, s, t) {
-  return md5Cmn(b ^ c ^ d, a, b, x, s, t);
-}
-
-function md5Ii(a, b, c, d, x, s, t) {
-  return md5Cmn(c ^ (b | ~d), a, b, x, s, t);
-}
-
-function binlMd5(x, len) {
-  x[len >> 5] |= 0x80 << len % 32;
-  x[((len + 64) >>> 9 << 4) + 14] = len;
-
-  let a = 1732584193;
-  let b = -271733879;
-  let c = -1732584194;
-  let d = 271733878;
-
-  for (let i = 0; i < x.length; i += 16) {
-    const oldA = a;
-    const oldB = b;
-    const oldC = c;
-    const oldD = d;
-
-    a = md5Ff(a, b, c, d, x[i], 7, -680876936);
-    d = md5Ff(d, a, b, c, x[i + 1], 12, -389564586);
-    c = md5Ff(c, d, a, b, x[i + 2], 17, 606105819);
-    b = md5Ff(b, c, d, a, x[i + 3], 22, -1044525330);
-    a = md5Ff(a, b, c, d, x[i + 4], 7, -176418897);
-    d = md5Ff(d, a, b, c, x[i + 5], 12, 1200080426);
-    c = md5Ff(c, d, a, b, x[i + 6], 17, -1473231341);
-    b = md5Ff(b, c, d, a, x[i + 7], 22, -45705983);
-    a = md5Ff(a, b, c, d, x[i + 8], 7, 1770035416);
-    d = md5Ff(d, a, b, c, x[i + 9], 12, -1958414417);
-    c = md5Ff(c, d, a, b, x[i + 10], 17, -42063);
-    b = md5Ff(b, c, d, a, x[i + 11], 22, -1990404162);
-    a = md5Ff(a, b, c, d, x[i + 12], 7, 1804603682);
-    d = md5Ff(d, a, b, c, x[i + 13], 12, -40341101);
-    c = md5Ff(c, d, a, b, x[i + 14], 17, -1502002290);
-    b = md5Ff(b, c, d, a, x[i + 15], 22, 1236535329);
-
-    a = md5Gg(a, b, c, d, x[i + 1], 5, -165796510);
-    d = md5Gg(d, a, b, c, x[i + 6], 9, -1069501632);
-    c = md5Gg(c, d, a, b, x[i + 11], 14, 643717713);
-    b = md5Gg(b, c, d, a, x[i], 20, -373897302);
-    a = md5Gg(a, b, c, d, x[i + 5], 5, -701558691);
-    d = md5Gg(d, a, b, c, x[i + 10], 9, 38016083);
-    c = md5Gg(c, d, a, b, x[i + 15], 14, -660478335);
-    b = md5Gg(b, c, d, a, x[i + 4], 20, -405537848);
-    a = md5Gg(a, b, c, d, x[i + 9], 5, 568446438);
-    d = md5Gg(d, a, b, c, x[i + 14], 9, -1019803690);
-    c = md5Gg(c, d, a, b, x[i + 3], 14, -187363961);
-    b = md5Gg(b, c, d, a, x[i + 8], 20, 1163531501);
-    a = md5Gg(a, b, c, d, x[i + 13], 5, -1444681467);
-    d = md5Gg(d, a, b, c, x[i + 2], 9, -51403784);
-    c = md5Gg(c, d, a, b, x[i + 7], 14, 1735328473);
-    b = md5Gg(b, c, d, a, x[i + 12], 20, -1926607734);
-
-    a = md5Hh(a, b, c, d, x[i + 5], 4, -378558);
-    d = md5Hh(d, a, b, c, x[i + 8], 11, -2022574463);
-    c = md5Hh(c, d, a, b, x[i + 11], 16, 1839030562);
-    b = md5Hh(b, c, d, a, x[i + 14], 23, -35309556);
-    a = md5Hh(a, b, c, d, x[i + 1], 4, -1530992060);
-    d = md5Hh(d, a, b, c, x[i + 4], 11, 1272893353);
-    c = md5Hh(c, d, a, b, x[i + 7], 16, -155497632);
-    b = md5Hh(b, c, d, a, x[i + 10], 23, -1094730640);
-    a = md5Hh(a, b, c, d, x[i + 13], 4, 681279174);
-    d = md5Hh(d, a, b, c, x[i], 11, -358537222);
-    c = md5Hh(c, d, a, b, x[i + 3], 16, -722521979);
-    b = md5Hh(b, c, d, a, x[i + 6], 23, 76029189);
-    a = md5Hh(a, b, c, d, x[i + 9], 4, -640364487);
-    d = md5Hh(d, a, b, c, x[i + 12], 11, -421815835);
-    c = md5Hh(c, d, a, b, x[i + 15], 16, 530742520);
-    b = md5Hh(b, c, d, a, x[i + 2], 23, -995338651);
-
-    a = md5Ii(a, b, c, d, x[i], 6, -198630844);
-    d = md5Ii(d, a, b, c, x[i + 7], 10, 1126891415);
-    c = md5Ii(c, d, a, b, x[i + 14], 15, -1416354905);
-    b = md5Ii(b, c, d, a, x[i + 5], 21, -57434055);
-    a = md5Ii(a, b, c, d, x[i + 12], 6, 1700485571);
-    d = md5Ii(d, a, b, c, x[i + 3], 10, -1894986606);
-    c = md5Ii(c, d, a, b, x[i + 10], 15, -1051523);
-    b = md5Ii(b, c, d, a, x[i + 1], 21, -2054922799);
-    a = md5Ii(a, b, c, d, x[i + 8], 6, 1873313359);
-    d = md5Ii(d, a, b, c, x[i + 15], 10, -30611744);
-    c = md5Ii(c, d, a, b, x[i + 6], 15, -1560198380);
-    b = md5Ii(b, c, d, a, x[i + 13], 21, 1309151649);
-    a = md5Ii(a, b, c, d, x[i + 4], 6, -145523070);
-    d = md5Ii(d, a, b, c, x[i + 11], 10, -1120210379);
-    c = md5Ii(c, d, a, b, x[i + 2], 15, 718787259);
-    b = md5Ii(b, c, d, a, x[i + 9], 21, -343485551);
-
-    a = safeAdd(a, oldA);
-    b = safeAdd(b, oldB);
-    c = safeAdd(c, oldC);
-    d = safeAdd(d, oldD);
-  }
-
-  return [a, b, c, d];
-}
-
-function rstr2binl(input) {
-  const output = [];
-  output[(input.length >> 2) - 1] = undefined;
-  for (let i = 0; i < output.length; i += 1) output[i] = 0;
-  for (let i = 0; i < input.length * 8; i += 8) {
-    output[i >> 5] |= (input.charCodeAt(i / 8) & 0xff) << i % 32;
-  }
-  return output;
-}
-
-function binl2rstr(input) {
-  let output = "";
-  for (let i = 0; i < input.length * 32; i += 8) {
-    output += String.fromCharCode((input[i >> 5] >>> i % 32) & 0xff);
-  }
-  return output;
-}
-
-function rstrMd5(input) {
-  return binl2rstr(binlMd5(rstr2binl(input), input.length * 8));
-}
-
-function rstr2hex(input) {
-  const hexTab = "0123456789abcdef";
-  let output = "";
-  for (let i = 0; i < input.length; i += 1) {
-    const x = input.charCodeAt(i);
-    output += hexTab.charAt((x >>> 4) & 0x0f) + hexTab.charAt(x & 0x0f);
-  }
-  return output;
-}
-
-function str2rstrUtf8(input) {
-  return unescape(encodeURIComponent(input));
-}
-
 function md5(input) {
-  return rstr2hex(rstrMd5(str2rstrUtf8(String(input))));
-}
-
-function vm(num) {
-  return num & 128 ? 255 & ((num << 1) ^ 27) : num << 1;
-}
-
-function qm(num) {
-  return vm(num) ^ num;
-}
-
-function xm(num) {
-  return qm(vm(num));
-}
-
-function ym(num) {
-  return xm(qm(vm(num)));
-}
-
-function gm(num) {
-  return ym(num) ^ xm(num) ^ qm(num);
-}
-
-function mixed(values) {
-  return [
-    gm(values[0]) ^ ym(values[1]) ^ xm(values[2]) ^ qm(values[3]),
-    qm(values[0]) ^ gm(values[1]) ^ ym(values[2]) ^ xm(values[3]),
-    xm(values[0]) ^ qm(values[1]) ^ gm(values[2]) ^ ym(values[3]),
-    ym(values[0]) ^ xm(values[1]) ^ qm(values[2]) ^ gm(values[3]),
-    values[4],
-    values[5]
-  ];
-}
-
-function av(value, key, offset) {
-  const alphabet = key.slice(0, key.length + offset);
-  let output = "";
-  for (let i = 0; i < value.length; i += 1) {
-    output += alphabet.charAt(value.charCodeAt(i) % alphabet.length);
+  function add32(a, b) {
+    return (a + b) & 0xffffffff;
   }
-  return output;
-}
-
-function sv(value, key) {
-  let output = "";
-  for (let i = 0; i < value.length; i += 1) {
-    output += key.charAt(value.charCodeAt(i) % key.length);
+  function cmn(q, a, b, x, s, t) {
+    a = add32(add32(a, q), add32(x, t));
+    return add32((a << s) | (a >>> (32 - s)), b);
   }
-  return output;
-}
+  function ff(a, b, c, d, x, s, t) {
+    return cmn((b & c) | (~b & d), a, b, x, s, t);
+  }
+  function gg(a, b, c, d, x, s, t) {
+    return cmn((b & d) | (c & ~d), a, b, x, s, t);
+  }
+  function hh(a, b, c, d, x, s, t) {
+    return cmn(b ^ c ^ d, a, b, x, s, t);
+  }
+  function ii(a, b, c, d, x, s, t) {
+    return cmn(c ^ (b | ~d), a, b, x, s, t);
+  }
+  function cycle(state, block) {
+    let a = state[0];
+    let b = state[1];
+    let c = state[2];
+    let d = state[3];
+    const oa = a;
+    const ob = b;
+    const oc = c;
+    const od = d;
 
-function interleave(values) {
-  let output = "";
-  const maxLength = Math.max.apply(null, values.map((item) => item.length));
-  for (let i = 0; i < maxLength; i += 1) {
-    for (let j = 0; j < values.length; j += 1) {
-      if (i < values[j].length) output += values[j].charAt(i);
+    a = ff(a, b, c, d, block[0], 7, -680876936);
+    d = ff(d, a, b, c, block[1], 12, -389564586);
+    c = ff(c, d, a, b, block[2], 17, 606105819);
+    b = ff(b, c, d, a, block[3], 22, -1044525330);
+    a = ff(a, b, c, d, block[4], 7, -176418897);
+    d = ff(d, a, b, c, block[5], 12, 1200080426);
+    c = ff(c, d, a, b, block[6], 17, -1473231341);
+    b = ff(b, c, d, a, block[7], 22, -45705983);
+    a = ff(a, b, c, d, block[8], 7, 1770035416);
+    d = ff(d, a, b, c, block[9], 12, -1958414417);
+    c = ff(c, d, a, b, block[10], 17, -42063);
+    b = ff(b, c, d, a, block[11], 22, -1990404162);
+    a = ff(a, b, c, d, block[12], 7, 1804603682);
+    d = ff(d, a, b, c, block[13], 12, -40341101);
+    c = ff(c, d, a, b, block[14], 17, -1502002290);
+    b = ff(b, c, d, a, block[15], 22, 1236535329);
+
+    a = gg(a, b, c, d, block[1], 5, -165796510);
+    d = gg(d, a, b, c, block[6], 9, -1069501632);
+    c = gg(c, d, a, b, block[11], 14, 643717713);
+    b = gg(b, c, d, a, block[0], 20, -373897302);
+    a = gg(a, b, c, d, block[5], 5, -701558691);
+    d = gg(d, a, b, c, block[10], 9, 38016083);
+    c = gg(c, d, a, b, block[15], 14, -660478335);
+    b = gg(b, c, d, a, block[4], 20, -405537848);
+    a = gg(a, b, c, d, block[9], 5, 568446438);
+    d = gg(d, a, b, c, block[14], 9, -1019803690);
+    c = gg(c, d, a, b, block[3], 14, -187363961);
+    b = gg(b, c, d, a, block[8], 20, 1163531501);
+    a = gg(a, b, c, d, block[13], 5, -1444681467);
+    d = gg(d, a, b, c, block[2], 9, -51403784);
+    c = gg(c, d, a, b, block[7], 14, 1735328473);
+    b = gg(b, c, d, a, block[12], 20, -1926607734);
+
+    a = hh(a, b, c, d, block[5], 4, -378558);
+    d = hh(d, a, b, c, block[8], 11, -2022574463);
+    c = hh(c, d, a, b, block[11], 16, 1839030562);
+    b = hh(b, c, d, a, block[14], 23, -35309556);
+    a = hh(a, b, c, d, block[1], 4, -1530992060);
+    d = hh(d, a, b, c, block[4], 11, 1272893353);
+    c = hh(c, d, a, b, block[7], 16, -155497632);
+    b = hh(b, c, d, a, block[10], 23, -1094730640);
+    a = hh(a, b, c, d, block[13], 4, 681279174);
+    d = hh(d, a, b, c, block[0], 11, -358537222);
+    c = hh(c, d, a, b, block[3], 16, -722521979);
+    b = hh(b, c, d, a, block[6], 23, 76029189);
+    a = hh(a, b, c, d, block[9], 4, -640364487);
+    d = hh(d, a, b, c, block[12], 11, -421815835);
+    c = hh(c, d, a, b, block[15], 16, 530742520);
+    b = hh(b, c, d, a, block[2], 23, -995338651);
+
+    a = ii(a, b, c, d, block[0], 6, -198630844);
+    d = ii(d, a, b, c, block[7], 10, 1126891415);
+    c = ii(c, d, a, b, block[14], 15, -1416354905);
+    b = ii(b, c, d, a, block[5], 21, -57434055);
+    a = ii(a, b, c, d, block[12], 6, 1700485571);
+    d = ii(d, a, b, c, block[3], 10, -1894986606);
+    c = ii(c, d, a, b, block[10], 15, -1051523);
+    b = ii(b, c, d, a, block[1], 21, -2054922799);
+    a = ii(a, b, c, d, block[8], 6, 1873313359);
+    d = ii(d, a, b, c, block[15], 10, -30611744);
+    c = ii(c, d, a, b, block[6], 15, -1560198380);
+    b = ii(b, c, d, a, block[13], 21, 1309151649);
+    a = ii(a, b, c, d, block[4], 6, -145523070);
+    d = ii(d, a, b, c, block[11], 10, -1120210379);
+    c = ii(c, d, a, b, block[2], 15, 718787259);
+    b = ii(b, c, d, a, block[9], 21, -343485551);
+
+    state[0] = add32(a, oa);
+    state[1] = add32(b, ob);
+    state[2] = add32(c, oc);
+    state[3] = add32(d, od);
+  }
+  function block(text) {
+    const out = [];
+    for (let i = 0; i < 64; i += 4) {
+      out[i >> 2] =
+        text.charCodeAt(i) +
+        (text.charCodeAt(i + 1) << 8) +
+        (text.charCodeAt(i + 2) << 16) +
+        (text.charCodeAt(i + 3) << 24);
     }
+    return out;
   }
-  return output;
-}
-
-function createSignature(path, fixedTime, fixedNonce) {
-  const time = fixedTime || Math.floor(Date.now() / 1000);
-  const nonce =
-    fixedNonce ||
-    md5(String(time) + String(Math.floor(Math.random() * Date.now()))).toUpperCase();
-  const key = "AB45STUVWZEFGJ6CH01D237IXYPQRKLMN89";
-  const parts = [av(String(time), key, -2), sv(path, key), sv(nonce, key)];
-  parts.sort((a, b) => a.length - b.length);
-  const digest = md5(interleave(parts).slice(0, 20));
-  const tail = digest
-    .slice(-6)
-    .split("")
-    .map((char) => char.charCodeAt(0));
-  const total = mixed(tail).reduce((sum, item) => sum + item, 0);
-  return {
-    hkey: av(digest.slice(0, 5), key, -4) + String(total % 100).padStart(2, "0"),
-    nonce,
-    time
-  };
+  function digest(text) {
+    const state = [1732584193, -271733879, -1732584194, 271733878];
+    const totalLength = text.length;
+    let i;
+    for (i = 64; i <= text.length; i += 64) cycle(state, block(text.substring(i - 64, i)));
+    text = text.substring(i - 64);
+    const tail = new Array(16).fill(0);
+    for (i = 0; i < text.length; i += 1) tail[i >> 2] |= text.charCodeAt(i) << ((i % 4) << 3);
+    tail[i >> 2] |= 0x80 << ((i % 4) << 3);
+    if (i > 55) {
+      cycle(state, tail);
+      for (i = 0; i < 16; i += 1) tail[i] = 0;
+    }
+    tail[14] = totalLength * 8;
+    cycle(state, tail);
+    return state;
+  }
+  function rhex(value) {
+    const hex = "0123456789abcdef";
+    let out = "";
+    for (let i = 0; i < 4; i += 1) {
+      out +=
+        hex.charAt((value >> (i * 8 + 4)) & 15) +
+        hex.charAt((value >> (i * 8)) & 15);
+    }
+    return out;
+  }
+  const text = unescape(encodeURIComponent(String(input)));
+  return digest(text).map(rhex).join("");
 }
 
 function readStore(key, fallback) {
@@ -284,13 +203,8 @@ function writeStore(value, key) {
   }
 }
 
-function loadAccounts() {
-  try {
-    const accounts = JSON.parse(readStore(STORAGE_KEY, "[]"));
-    return Array.isArray(accounts) ? accounts : [];
-  } catch (_) {
-    return [];
-  }
+function toText(value) {
+  return value == null ? "" : String(value).trim();
 }
 
 function getHeader(headers, name) {
@@ -312,51 +226,54 @@ function getQueryParam(url, name) {
   }
 }
 
-function pickCookie(rawCookie) {
-  const wanted = {};
-  String(rawCookie || "")
-    .split(";")
-    .forEach((part) => {
-      const index = part.indexOf("=");
-      if (index < 1) return;
-      const name = part.slice(0, index).trim();
-      const value = part.slice(index + 1).trim();
-      const lower = name.toLowerCase();
-      if ((lower === "pkey" || lower === "x_xhh_tokenid") && value) {
-        wanted[lower] = name + "=" + value;
-      }
-    });
-  return wanted.pkey && wanted.x_xhh_tokenid
-    ? wanted.pkey + "; " + wanted.x_xhh_tokenid
-    : "";
+function pickCookieValue(cookie, key) {
+  const items = String(cookie || "").split(";");
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i].trim();
+    const pos = item.indexOf("=");
+    if (pos < 1) continue;
+    if (item.slice(0, pos).trim().toLowerCase() === String(key).toLowerCase()) {
+      return item.slice(pos + 1).trim();
+    }
+  }
+  return "";
 }
 
-function captureClient(url, headers) {
-  const fields = [
-    "imei",
-    "device_info",
-    "device_id",
-    "os_type",
-    "x_os_type",
-    "app",
-    "client_type",
-    "x_client_type",
-    "os_version",
-    "version",
-    "web_version",
-    "build",
-    "dw",
-    "channel",
-    "x_app"
-  ];
-  const client = {};
-  fields.forEach((field) => {
-    const value = getQueryParam(url, field);
-    if (value) client[field] = value;
-  });
-  const userAgent = getHeader(headers, "User-Agent");
-  if (userAgent) client.userAgent = userAgent;
-  return client;
+function buildAppCookie(cookie) {
+  const pkey = pickCookieValue(cookie, "pkey");
+  const token = pickCookieValue(cookie, "x_xhh_tokenid");
+  if (!pkey || !token) return "";
+  return "pkey=" + pkey + ";x_xhh_tokenid=" + token;
+}
+
+function decodePkeyUserId(cookie) {
+  const pkey = pickCookieValue(cookie, "pkey");
+  if (!pkey) return "";
+  let encoded;
+  try {
+    encoded = decodeURIComponent(pkey);
+  } catch (_) {
+    encoded = pkey;
+  }
+  const compact = encoded.replace(/_+$/, "") || encoded;
+  const padded = compact + "=".repeat((4 - (compact.length % 4)) % 4);
+  const base64 = padded.replace(/-/g, "+").replace(/_/g, "/");
+  try {
+    let plain;
+    if (typeof atob === "function") plain = atob(base64);
+    else if (typeof Buffer !== "undefined") plain = Buffer.from(base64, "base64").toString("utf8");
+    else return "";
+    const match = plain.match(/_(\d{5,})/);
+    return match ? match[1] : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function makeImei(cookie) {
+  const pkey = pickCookieValue(cookie, "pkey");
+  if (!pkey) throw new Error("Cookie 缺少 pkey");
+  return md5(pkey).slice(0, 16);
 }
 
 function maskId(id) {
@@ -365,24 +282,49 @@ function maskId(id) {
   return value.slice(0, 2) + "***" + value.slice(-2);
 }
 
+function loadAccounts() {
+  try {
+    const list = JSON.parse(readStore(STORAGE_KEY, "[]"));
+    return Array.isArray(list)
+      ? list
+          .map((item) => {
+            const cookie = buildAppCookie(item && item.cookie);
+            const heyboxId =
+              toText(item && item.heyboxId) || decodePkeyUserId(cookie);
+            if (!cookie || !heyboxId) return null;
+            return {
+              heyboxId,
+              cookie,
+              imei: makeImei(cookie),
+              updatedAt: Number(item.updatedAt) || 0
+            };
+          })
+          .filter(Boolean)
+      : [];
+  } catch (_) {
+    return [];
+  }
+}
+
 async function captureAccount() {
-  const url = $request.url || "";
-  const headers = $request.headers || {};
-  const heyboxId = getQueryParam(url, "heybox_id") || getQueryParam(url, "user_id");
-  const cookie = pickCookie(getHeader(headers, "Cookie"));
-  if (!heyboxId || !cookie) return;
+  const url = toText($request && $request.url);
+  const headers = ($request && $request.headers) || {};
+  const cookie = buildAppCookie(getHeader(headers, "Cookie"));
+  if (!cookie) return;
+  const heyboxId =
+    getQueryParam(url, "heybox_id") ||
+    getQueryParam(url, "user_id") ||
+    decodePkeyUserId(cookie);
+  if (!heyboxId) return;
 
   const accounts = loadAccounts();
-  const client = captureClient(url, headers);
-  const index = accounts.findIndex((item) => String(item.heyboxId) === String(heyboxId));
-  const previous = index >= 0 ? accounts[index] : null;
   const account = {
     heyboxId: String(heyboxId),
     cookie,
-    client: Object.assign({}, previous ? previous.client : {}, client),
+    imei: makeImei(cookie),
     updatedAt: Date.now()
   };
-
+  const index = accounts.findIndex((item) => String(item.heyboxId) === String(heyboxId));
   if (index >= 0) accounts[index] = account;
   else accounts.push(account);
   while (accounts.length > MAX_ACCOUNTS) accounts.shift();
@@ -398,105 +340,76 @@ async function captureAccount() {
     notify(
       SCRIPT_NAME,
       "✅ 获取账号成功",
-      "账号：" + maskId(heyboxId) + "\n已保存 Cookie 和当前客户端参数"
+      "账号：" + maskId(heyboxId) + "\n已保存 Cookie，并根据 pkey 生成设备标识"
     );
   }
 }
 
 function encodeQuery(params) {
-  return Object.keys(params)
+  return Object.keys(params || {})
     .filter((key) => params[key] !== undefined && params[key] !== null && params[key] !== "")
     .map((key) => encodeURIComponent(key) + "=" + encodeURIComponent(String(params[key])))
     .join("&");
 }
 
+function parseSwitch(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return !/^(false|0|off|no)$/i.test(String(value));
+}
+
 function runtimeOptions() {
-  const defaults = {
-    dailyTasks: true,
-    taskService: DEFAULT_TASK_SERVICE
-  };
+  const defaults = { dailyTasks: true, publishTask: false };
   if (typeof $argument === "undefined" || $argument == null) return defaults;
-  if (typeof $argument === "object") {
+  let value = $argument;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch (_) {
+      value = value.split(",");
+    }
+  }
+  if (Array.isArray(value)) {
     return {
-      dailyTasks: !/^(false|0|off)$/i.test(String($argument.dailyTasks)),
-      taskService: String($argument.taskService || DEFAULT_TASK_SERVICE).trim()
+      dailyTasks: parseSwitch(value[0], true),
+      publishTask: parseSwitch(value[1], false)
     };
   }
-  try {
-    const parsed = JSON.parse(String($argument));
+  if (typeof value === "object") {
     return {
-      dailyTasks: !/^(false|0|off)$/i.test(String(parsed.dailyTasks)),
-      taskService: String(parsed.taskService || DEFAULT_TASK_SERVICE).trim()
+      dailyTasks: parseSwitch(value.dailyTasks, true),
+      publishTask: parseSwitch(value.publishTask, false)
     };
-  } catch (_) {
-    return defaults;
   }
+  return defaults;
 }
 
-function buildClientParams(account, signature) {
-  return {
-    heybox_id: account.heyboxId,
-    imei: "4187fb55b1be198a",
-    device_info: "XiaoMi 13私人定制版",
-    nonce: signature.nonce || API_NONCE,
-    hkey: signature.hkey,
-    os_type: "Android",
-    x_os_type: "Android",
-    x_client_type: "mobile",
-    os_version: "9",
-    version: "1.3.332",
-    build: "871",
-    _time: signature.time || signature.timestamp,
-    dw: "428",
-    channel: "heybox_xiaomi",
-    x_app: "heybox"
-  };
-}
-
-function commonHeaders(account, host) {
-  return {
-    Cookie: account.cookie,
-    Referer: "http://api.maxjia.com/",
-    Host: host,
-    Connection: "Keep-Alive",
-    "Accept-Encoding": "gzip",
-    "User-Agent":
-      "Mozilla/5.0 AppleWebKit/537.36 (KHTML like Gecko) Chrome/41.0.2272.118 Safari/537.36 ApiMaxJia/1.0"
-  };
-}
-
-function buildSignedRequest(account, base, path, signature, extraParams, method, body) {
-  const params = Object.assign(
-    {},
-    buildClientParams(account, signature),
-    extraParams || {}
-  );
-  const host = base.replace(/^https?:\/\//i, "");
-  const request = {
-    url: base + path + "?" + encodeQuery(params),
-    headers: commonHeaders(account, host),
-    timeout: 15000
-  };
-  if (String(method || "GET").toUpperCase() === "POST") {
-    request.headers["Content-Type"] = "application/x-www-form-urlencoded";
-    request.body = body || "";
+function randomString(length) {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let output = "";
+  for (let i = 0; i < length; i += 1) {
+    output += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return request;
+  return output;
 }
 
-function buildSignRequest(account, signature) {
-  if (signature) {
-    return buildSignedRequest(account, API_BASE, SIGN_V3_PATH, signature);
-  }
-  return buildSignedRequest(account, API_BASE, SIGN_PATH, createSignature(SIGN_PATH));
+function randomUuid() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const value = Math.floor(Math.random() * 16);
+    return (char === "x" ? value : (value & 3) | 8).toString(16);
+  });
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function httpRequest(method, options) {
   return new Promise((resolve, reject) => {
-    const fn = String(method).toUpperCase() === "POST" ? "post" : "get";
-    $httpClient[fn](options, (error, response, data) => {
+    const fn = String(method || "GET").toUpperCase() === "POST" ? "post" : "get";
+    const request = Object.assign({ timeout: 15000 }, options || {});
+    $httpClient[fn](request, (error, response, data) => {
       if (error) {
-        const host = String(options.url || "").match(/^https?:\/\/([^/?#]+)/i);
+        const host = toText(request.url).match(/^https?:\/\/([^/?#]+)/i);
         reject(
           new Error(
             fn.toUpperCase() +
@@ -516,232 +429,652 @@ function httpRequest(method, options) {
   });
 }
 
-function httpGet(options) {
-  return httpRequest("GET", options);
-}
-
-function httpPost(options) {
-  return httpRequest("POST", options);
-}
-
-async function getTaskSignature(account, type, taskName, serviceUrl) {
-  if (!/^https?:\/\/[^/]+/i.test(serviceUrl || "")) {
-    throw new Error("任务编码服务地址无效");
-  }
-  let lastError;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      const response = await httpPost({
-        url: serviceUrl,
-        headers: {
-          "Content-Type": "application/json",
-          Connection: "close"
-        },
-        body: JSON.stringify({
-          heyboxId: String(account.heyboxId),
-          type: Number(type),
-          taskName: taskName || "null"
-        }),
-        timeout: 15000,
-        "auto-cookie": false
-      });
-      if (response.status < 200 || response.status >= 300) {
-        throw new Error("编码服务 HTTP " + response.status);
-      }
-      let payload;
-      try {
-        payload = JSON.parse(response.body);
-      } catch (_) {
-        throw new Error("编码服务返回内容不是 JSON");
-      }
-      if (!payload || !payload.hkey || !payload.timestamp) {
-        throw new Error(
-          String((payload && (payload.msg || payload.message)) || "编码服务缺少签名")
-        );
-      }
-      payload.time = payload.timestamp;
-      if (attempt > 1) console.log("任务编码服务第 " + attempt + " 次请求成功");
-      return payload;
-    } catch (error) {
-      lastError = error;
-      if (attempt < 3) await sleep(700 * attempt);
-    }
-  }
-  throw new Error(
-    "编码服务连续 3 次请求失败：" + String(lastError.message || lastError)
-  );
-}
-
-function parseSignResult(response) {
-  if (response.status < 200 || response.status >= 300) {
-    return {
-      ok: false,
-      text: "HTTP " + response.status + "\n" + response.body.slice(0, 160)
-    };
-  }
-
-  let data;
-  try {
-    data = JSON.parse(response.body);
-  } catch (_) {
-    return { ok: false, text: "返回内容不是 JSON\n" + response.body.slice(0, 160) };
-  }
-
-  const message = String(data.msg || data.message || "").trim();
-  const state = String(
-    data.result && data.result.state != null ? data.result.state : ""
-  );
-  const resultText = (message + " " + state).trim();
-
-  if (
-    /非法请求|失败|错误|过期|重新登录|未登录|无效|拒绝/i.test(resultText) ||
-    /\b(invalid|error|fail(?:ed|ure)?|denied|expired)\b/i.test(resultText)
-  ) {
-    return {
-      ok: false,
-      text: message || state || "服务器返回签到失败"
-    };
-  }
-
-  if (
-    data.status === "ok" ||
-    data.success === true ||
-    data.code === 0 ||
-    /^(signed|success|ok)$/i.test(state) ||
-    /签到成功|^成功$/.test(message)
-  ) {
-    return {
-      ok: true,
-      text: message || "今天已经签到"
-    };
-  }
-
-  if (/已签到|已经签到|重复签到/.test(message)) {
-    return { ok: true, text: message };
-  }
-
-  return {
-    ok: false,
-    text: message || "服务器返回签到失败"
-  };
-}
-
 function parseJsonResponse(response, action) {
   if (response.status < 200 || response.status >= 300) {
-    return {
-      ok: false,
-      data: null,
-      text: action + " HTTP " + response.status
-    };
+    throw new Error(action + " HTTP " + response.status + " " + response.body.slice(0, 180));
   }
-  let data;
   try {
-    data = JSON.parse(response.body);
+    return response.body ? JSON.parse(response.body) : null;
   } catch (_) {
-    return { ok: false, data: null, text: action + "返回内容不是 JSON" };
-  }
-  const message = String(data.msg || data.message || "").trim();
-  const ok =
-    data.status === "ok" ||
-    data.success === true ||
-    data.code === 0 ||
-    message === "";
-  return {
-    ok,
-    data,
-    text: message || (ok ? action + "成功" : action + "失败")
-  };
-}
-
-async function signAccount(account, serviceUrl) {
-  let serviceError;
-  try {
-    const signature = await getTaskSignature(account, 1, "null", serviceUrl);
-    return parseSignResult(await httpGet(buildSignRequest(account, signature)));
-  } catch (error) {
-    serviceError = error;
-  }
-
-  try {
-    const fallback = parseSignResult(await httpGet(buildSignRequest(account)));
-    if (!fallback.ok) {
-      fallback.text += "\n任务编码服务：" + String(serviceError.message || serviceError);
-    }
-    return fallback;
-  } catch (fallbackError) {
-    throw new Error(
-      "任务编码服务：" +
-        String(serviceError.message || serviceError) +
-        "\n官方签到请求：" +
-        String(fallbackError.message || fallbackError)
-    );
+    throw new Error(action + "返回内容不是 JSON：" + response.body.slice(0, 180));
   }
 }
 
-async function reportDailyTask(account, task, serviceUrl) {
-  const signature = await getTaskSignature(account, 5, task.key, serviceUrl);
-  if (!signature.data || !signature.key || !signature.sid) {
-    throw new Error("编码服务未返回任务数据");
+async function getJsonRequest(options, action) {
+  return parseJsonResponse(await httpRequest("GET", options), action);
+}
+
+async function postJsonRequest(options, action) {
+  return parseJsonResponse(await httpRequest("POST", options), action);
+}
+
+function apiFailureMessage(payload, fallback) {
+  if (!payload) return fallback;
+  return toText(payload.msg || payload.message) || toText(payload.status) || fallback;
+}
+
+function requireOk(payload, action) {
+  if (!payload || toText(payload.status) !== OK_STATE) {
+    throw new Error(action + "：" + apiFailureMessage(payload, "服务器未返回成功状态"));
   }
-  const params = {
-    type: 104,
-    time_: signature.timestamp,
-    session_id: "77ee4fea-46d9-4a53-b5ce-5df9cf056b7e",
-    nonce: DATA_NONCE
-  };
-  const body = encodeQuery({
-    data: signature.data,
-    key: signature.key,
-    sid: signature.sid
-  });
-  const request = buildSignedRequest(
-    account,
-    DATA_BASE,
-    DATA_REPORT_PATH,
-    signature,
-    params,
-    "POST",
-    body
+  return payload;
+}
+
+function unwrapHkeyPayload(payload) {
+  if (!payload || typeof payload !== "object") return {};
+  if (payload.result && typeof payload.result === "object") return payload.result;
+  return payload;
+}
+
+async function requestHkey(account, path, timeSec) {
+  const time = String(timeSec || Math.floor(Date.now() / 1000));
+  const payload = await getJsonRequest(
+    {
+      url:
+        HKEY_API +
+        "?" +
+        encodeQuery({
+          mode: "request",
+          path,
+          time,
+          imei: account.imei,
+          heybox_id: account.heyboxId
+        }),
+      headers: { "User-Agent": APP_UA, Accept: "application/json" }
+    },
+    "hkey请求"
   );
-  return parseJsonResponse(await httpPost(request), task.label);
+  if (payload && payload.status && toText(payload.status) !== OK_STATE) {
+    throw new Error("hkey接口：" + apiFailureMessage(payload, "签名失败"));
+  }
+  const result = unwrapHkeyPayload(payload);
+  if (!result.hkey || !result.version || !/^\d+$/.test(toText(result.build))) {
+    throw new Error("hkey接口缺少 hkey/version/build");
+  }
+  return {
+    hkey: toText(result.hkey),
+    version: toText(result.version),
+    build: toText(result.build),
+    time
+  };
 }
 
-function flattenTaskList(payload) {
-  const result = payload && payload.result;
-  const groups = result && Array.isArray(result.task_list) ? result.task_list : [];
-  const lines = [];
+async function requestReportData(account, path, textPayload) {
+  const time = String(Math.floor(Date.now() / 1000));
+  const payload = await postJsonRequest(
+    {
+      url: HKEY_API,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify({
+        mode: "report",
+        path,
+        text: textPayload,
+        time,
+        imei: account.imei,
+        heybox_id: account.heyboxId
+      }),
+      "auto-cookie": false
+    },
+    "任务数据编码"
+  );
+  if (payload && payload.status && toText(payload.status) !== OK_STATE) {
+    throw new Error("任务数据编码：" + apiFailureMessage(payload, "编码失败"));
+  }
+  const result = unwrapHkeyPayload(payload);
+  if (
+    !result.hkey ||
+    !result.version ||
+    !/^\d+$/.test(toText(result.build)) ||
+    !result.time ||
+    !result.data ||
+    !result.key ||
+    !result.sid
+  ) {
+    throw new Error("任务数据编码返回字段不完整");
+  }
+  return result;
+}
+
+function appHeaders(account, hasBody) {
+  const headers = {
+    "User-Agent": APP_UA,
+    Referer: APP_REFERER,
+    Cookie: account.cookie,
+    Accept: "application/json"
+  };
+  if (hasBody) headers["Content-Type"] = "application/x-www-form-urlencoded";
+  return headers;
+}
+
+function buildSignedQuery(account, signature, extraQuery) {
+  return Object.assign(
+    {
+      heybox_id: account.heyboxId,
+      imei: account.imei,
+      device_info: APP_PROFILE.device_info,
+      nonce: randomString(32),
+      hkey: signature.hkey,
+      os_type: APP_PROFILE.os_type,
+      x_os_type: APP_PROFILE.x_os_type,
+      x_client_type: APP_PROFILE.x_client_type,
+      os_version: APP_PROFILE.os_version,
+      version: signature.version,
+      build: signature.build,
+      _time: signature.time,
+      dw: APP_PROFILE.dw,
+      channel: APP_PROFILE.channel,
+      x_app: APP_PROFILE.x_app,
+      time_zone: APP_PROFILE.time_zone
+    },
+    extraQuery || {}
+  );
+}
+
+async function appGet(account, path, extraQuery, baseUrl) {
+  const signature = await requestHkey(account, path);
+  const url =
+    (baseUrl || API_BASE) +
+    path +
+    "?" +
+    encodeQuery(buildSignedQuery(account, signature, extraQuery));
+  const payload = await getJsonRequest(
+    { url, headers: appHeaders(account, false), "auto-cookie": false },
+    path
+  );
+  console.log("[官方接口] " + path + " status=" + apiFailureMessage(payload, "空"));
+  return payload;
+}
+
+async function appPostForm(account, path, extraQuery, bodyData, baseUrl) {
+  const signature = await requestHkey(account, path);
+  const url =
+    (baseUrl || API_BASE) +
+    path +
+    "?" +
+    encodeQuery(buildSignedQuery(account, signature, extraQuery));
+  const payload = await postJsonRequest(
+    {
+      url,
+      headers: appHeaders(account, true),
+      body: encodeQuery(bodyData || {}),
+      "auto-cookie": false
+    },
+    path
+  );
+  console.log("[官方接口] " + path + " status=" + apiFailureMessage(payload, "空"));
+  return payload;
+}
+
+async function postEncryptedForm(account, path, textPayload, extraQuery, baseUrl) {
+  const encoded = await requestReportData(account, path, textPayload);
+  const signature = {
+    hkey: encoded.hkey,
+    version: encoded.version,
+    build: encoded.build,
+    time: toText(encoded.time)
+  };
+  const query = buildSignedQuery(
+    account,
+    signature,
+    Object.assign({ time_: signature.time }, extraQuery || {})
+  );
+  const payload = await postJsonRequest(
+    {
+      url: (baseUrl || DATA_BASE) + path + "?" + encodeQuery(query),
+      headers: appHeaders(account, true),
+      body: encodeQuery({
+        data: encoded.data,
+        key: encoded.key,
+        sid: encoded.sid
+      }),
+      "auto-cookie": false
+    },
+    path
+  );
+  console.log("[任务上报] " + path + " status=" + apiFailureMessage(payload, "空"));
+  return payload;
+}
+
+function extractTaskList(payload) {
+  requireOk(payload, "任务列表");
+  const result = payload.result && typeof payload.result === "object" ? payload.result : {};
+  const user = result.user && typeof result.user === "object" ? result.user : {};
+  const levelInfo =
+    user.level_info && typeof user.level_info === "object" ? user.level_info : {};
+  const groups = Array.isArray(result.task_list) ? result.task_list : [];
+  const tasks = [];
   groups.forEach((group) => {
-    const tasks = Array.isArray(group.tasks) ? group.tasks : [];
-    tasks.forEach((task) => {
-      const title = String(task.title || task.name || "未命名任务");
-      const state = String(task.state == null ? "" : task.state);
-      const done =
-        /^(1|2|done|complete|completed|finish|finished)$/i.test(state) ||
-        /已完成|已领取/.test(state);
-      lines.push((done ? "✅ " : "▫️ ") + title + "：" + (done ? "已完成" : state || "未完成"));
+    const list = Array.isArray(group.tasks) ? group.tasks : [];
+    list.forEach((item) => {
+      const reportExtra =
+        item.report_extra && typeof item.report_extra === "object"
+          ? item.report_extra
+          : {};
+      const awardText = (Array.isArray(item.award_desc_v2) ? item.award_desc_v2 : [])
+        .map((award) => {
+          const desc = toText(award && award.desc);
+          const icon = toText(award && award.icon);
+          if (icon.indexOf("b9aca51c") >= 0) return desc + "H币";
+          if (icon.indexOf("c10d89ae") >= 0) return desc + "经验";
+          if (icon.indexOf("e63b192a") >= 0) return desc + "盒电";
+          return desc;
+        })
+        .filter(Boolean)
+        .join(" ");
+      tasks.push({
+        title: toText(item.title || item.name || "未命名任务"),
+        state: toText(item.state),
+        stateDesc: toText(item.state_desc),
+        taskId: toText(reportExtra.task_id),
+        taskType: toText(item.type),
+        reportTaskType: toText(reportExtra.task_type),
+        maxjia: toText(item.maxjia),
+        awardText
+      });
     });
   });
-  return lines;
+  return {
+    nickname: toText(user.username),
+    coin: toText(levelInfo.coin),
+    tasks
+  };
 }
 
-async function getTaskList(account, serviceUrl) {
-  let signature;
-  try {
-    signature = await getTaskSignature(account, 3, "null", serviceUrl);
-  } catch (_) {
-    signature = createSignature(TASK_LIST_PATH);
+function taskKey(task) {
+  return task.taskId + "|" + task.title;
+}
+
+function findTask(snapshot, key) {
+  return snapshot.tasks.find((task) => taskKey(task) === key);
+}
+
+function isSignTask(task) {
+  return task.taskType === "sign";
+}
+
+function isDailyTask(task) {
+  return isSignTask(task) || task.reportTaskType === "daily";
+}
+
+async function fetchSnapshot(account) {
+  return extractTaskList(await appGet(account, PATH_TASK_LIST));
+}
+
+function collectObjects(root, matcher, limit) {
+  const output = [];
+  const stack = [root];
+  const max = limit || 20;
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node !== "object") continue;
+    if (matcher(node)) {
+      output.push(node);
+      if (output.length >= max) break;
+    }
+    const values = Array.isArray(node) ? node : Object.keys(node).map((key) => node[key]);
+    for (let i = values.length - 1; i >= 0; i -= 1) stack.push(values[i]);
   }
-  const request = buildSignedRequest(
-    account,
-    API_BASE,
-    TASK_LIST_PATH,
-    signature
-  );
-  return parseJsonResponse(await httpGet(request), "任务列表");
+  return output;
 }
 
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function extractFeeds(payload) {
+  const links = payload && payload.result && payload.result.links;
+  if (!Array.isArray(links)) return [];
+  const seen = {};
+  return links
+    .map((item) => ({
+      linkId: toText(item && item.link_id),
+      hSrc: toText(item && item.h_src)
+    }))
+    .filter((item) => {
+      const key = item.linkId + "|" + item.hSrc;
+      if (!/^\d+$/.test(item.linkId) || !item.hSrc || seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+}
+
+function extractGames(payload) {
+  const objects = collectObjects(
+    payload && payload.result,
+    (node) =>
+      !Array.isArray(node) &&
+      Object.prototype.hasOwnProperty.call(node, "appid") &&
+      Object.prototype.hasOwnProperty.call(node, "h_src"),
+    40
+  );
+  const seen = {};
+  return objects
+    .map((item) => ({
+      appid: toText(item.appid),
+      hSrc: toText(item.h_src)
+    }))
+    .filter((item) => {
+      const key = item.appid + "|" + item.hSrc;
+      if (!/^\d+$/.test(item.appid) || !item.hSrc || seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+}
+
+function extractComment(payload) {
+  const links = payload && payload.result && payload.result.links;
+  if (!Array.isArray(links)) return null;
+  for (let i = 0; i < links.length; i += 1) {
+    const item = links[i] || {};
+    const linkId = toText(item.linkid || item.link_id);
+    const userId = toText(item.userid);
+    const hSrc = toText(item.h_src);
+    if (/^\d+$/.test(linkId) && /^\d+$/.test(userId) && hSrc) {
+      return { linkId, userId, hSrc };
+    }
+  }
+  return null;
+}
+
+function buildShareReport(action, source, extra) {
+  return JSON.stringify({
+    events: [
+      {
+        type: action === "tap" ? "4" : "3",
+        path: action === "tap" ? "/share/behavior/tap" : "/share/behavior/success",
+        time: String(Math.floor(Date.now() / 1000)),
+        addition: Object.assign({}, extra || {}, {
+          src: source,
+          plat: "WechatSession"
+        })
+      }
+    ]
+  });
+}
+
+async function sendShareEvents(account, source, extra) {
+  const sessionId = randomUuid();
+  const actions = ["tap", "success"];
+  for (let i = 0; i < actions.length; i += 1) {
+    const action = actions[i];
+    const payload = await postEncryptedForm(
+      account,
+      PATH_DATA_REPORT,
+      buildShareReport(action, source, extra),
+      { type: "104", session_id: sessionId },
+      DATA_BASE
+    );
+    requireOk(payload, "分享 " + action + " 上报");
+    if (action === "tap") await sleep(2000);
+  }
+}
+
+async function settleTask(account, task, detail) {
+  await sleep(SHARE_TASK_SETTLE_MS);
+  const snapshot = await fetchSnapshot(account);
+  const after = findTask(snapshot, taskKey(task));
+  if (after && after.state === FINISH_STATE) {
+    return {
+      ok: true,
+      message: task.title + "完成" + (detail ? " " + detail : ""),
+      snapshot
+    };
+  }
+  return { ok: false, message: task.title + "仍为待完成", snapshot };
+}
+
+async function executeSign(account) {
+  const first = await appGet(account, PATH_SIGN);
+  if (first && first.status && toText(first.status) !== OK_STATE) {
+    return { ok: false, message: apiFailureMessage(first, "签到失败") };
+  }
+  await sleep(800);
+  const finalPayload = await appGet(account, PATH_SIGN_STATE);
+  const result =
+    finalPayload && finalPayload.result && typeof finalPayload.result === "object"
+      ? finalPayload.result
+      : {};
+  const state = toText(result.state);
+  if (
+    (toText(finalPayload && finalPayload.status) === OK_STATE && state === OK_STATE) ||
+    state === "ignore"
+  ) {
+    const details = [];
+    if (result.sign_in_coin) details.push("+" + result.sign_in_coin + "H币");
+    if (result.sign_in_exp) details.push("+" + result.sign_in_exp + "经验");
+    if (result.sign_in_streak) details.push("连签" + result.sign_in_streak + "天");
+    return {
+      ok: true,
+      message: details.length ? details.join(" ") : state === "ignore" ? "今日已签到" : "签到完成"
+    };
+  }
+  return {
+    ok: false,
+    message: apiFailureMessage(finalPayload, state || "签到状态未确认")
+  };
+}
+
+async function executeSharePost(account, task) {
+  const feeds = await appGet(account, PATH_FEEDS, {
+    pull: "1",
+    last_pull: "1",
+    is_first: "0",
+    list_ver: "2",
+    has_cache: "1",
+    netmode: "wifi"
+  });
+  requireOk(feeds, "拉取帖子流");
+  const posts = extractFeeds(feeds);
+  if (!posts.length) return { ok: false, message: "没有可用帖子" };
+  const post = posts[0];
+  await sleep(1000);
+
+  const viewPayload = await postEncryptedForm(
+    account,
+    PATH_VIEW_TIME,
+    JSON.stringify({
+      duration: [
+        {
+          id: Number(post.linkId),
+          duration: 5,
+          duration_ms: 5000,
+          type: "link",
+          time: Math.floor(Date.now() / 1000),
+          h_src: post.hSrc
+        }
+      ],
+      shows: [],
+      disappear: []
+    }),
+    {},
+    DATA_BASE
+  );
+  requireOk(viewPayload, "帖子浏览时长上报");
+  await sendShareEvents(account, "link", {
+    link_id: post.linkId,
+    h_src: post.hSrc
+  });
+  return settleTask(account, task, "link_id=" + post.linkId);
+}
+
+async function executeShareGameDetail(account, task) {
+  const payload = await appGet(account, PATH_GAME_RECOMMEND, {
+    offset: "0",
+    limit: "1"
+  });
+  requireOk(payload, "拉取推荐游戏");
+  const games = extractGames(payload);
+  if (!games.length) return { ok: false, message: "没有可用游戏" };
+  const game = games[0];
+  await sleep(1000);
+  await sendShareEvents(account, "game_detail", {
+    app_id: game.appid,
+    h_src: game.hSrc
+  });
+  return settleTask(account, task, "appid=" + game.appid);
+}
+
+async function executeShareGameComment(account, task) {
+  const recommend = await appGet(account, PATH_GAME_RECOMMEND, {
+    offset: "0",
+    limit: "1"
+  });
+  requireOk(recommend, "拉取推荐游戏");
+  const games = extractGames(recommend);
+  if (!games.length) return { ok: false, message: "没有可用游戏" };
+  const game = games[0];
+  const comments = await appGet(account, PATH_GAME_COMMENTS, {
+    api_version: "4",
+    offset: "0",
+    limit: "30",
+    appid: game.appid
+  });
+  requireOk(comments, "拉取游戏评价");
+  const comment = extractComment(comments);
+  if (!comment) return { ok: false, message: "游戏评价缺少关键字段" };
+  await sendShareEvents(account, "game_comment", {
+    link_id: comment.linkId
+  });
+  return settleTask(account, task, "appid=" + game.appid);
+}
+
+function extractTopicId(maxjia) {
+  if (!maxjia) return "";
+  try {
+    const json = decodeURIComponent(String(maxjia).replace(/^heybox:\/\//, ""));
+    const parsed = JSON.parse(json);
+    return toText(parsed && parsed.params && parsed.params.topic_id);
+  } catch (_) {
+    return "";
+  }
+}
+
+async function executePublishTask(account, task) {
+  const topicId = extractTopicId(task.maxjia);
+  if (!topicId) return { ok: false, message: "发布任务缺少 topic_id" };
+  const title = "前面忘了中间忘了后面也忘了";
+  const content = "孩子很爱用，很好吃，会复购";
+  const payload = await appPostForm(
+    account,
+    PATH_BBS_POST,
+    {},
+    {
+      draft: "0",
+      topic_ids: topicId,
+      link_tag: "27",
+      text: JSON.stringify([{ checked: false, text: content, type: "text" }]),
+      title,
+      desc: content
+    },
+    API_BASE
+  );
+  requireOk(payload, "发布内容");
+  const linkId = toText(payload.result && payload.result.link_id);
+  if (!linkId) return { ok: false, message: "发帖成功但未返回 link_id" };
+  await sleep(3000);
+  const deletePayload = await appPostForm(
+    account,
+    PATH_BBS_DELETE,
+    {},
+    { link_id: linkId },
+    API_BASE
+  );
+  if (toText(deletePayload && deletePayload.status) !== OK_STATE) {
+    console.log("[警告] 自动删除帖子失败 link_id=" + linkId);
+  }
+  return settleTask(account, task, "link_id=" + linkId);
+}
+
+async function executeTask(account, task, options) {
+  try {
+    if (isSignTask(task)) return await executeSign(account);
+    if (task.taskId === "1") return await executeSharePost(account, task);
+    if (task.taskId === "19") return await executeShareGameDetail(account, task);
+    if (task.taskId === "31") return await executeShareGameComment(account, task);
+    if (task.taskId === "33" && options.publishTask) {
+      return await executePublishTask(account, task);
+    }
+    return {
+      ok: false,
+      unsupported: true,
+      message:
+        task.taskId === "33"
+          ? "自动发帖任务已关闭"
+          : "暂不支持 task_id=" + (task.taskId || "未知")
+    };
+  } catch (error) {
+    return { ok: false, message: String(error.message || error) };
+  }
+}
+
+async function runAccount(account, index, options, lines) {
+  let snapshot = await fetchSnapshot(account);
+  lines.push(
+    "",
+    "账号 " +
+      (index + 1) +
+      "（" +
+      maskId(account.heyboxId) +
+      "）" +
+      (snapshot.nickname ? " " + snapshot.nickname : "")
+  );
+
+  const relevant = snapshot.tasks.filter((task) => {
+    if (isSignTask(task)) return true;
+    if (!options.dailyTasks) return false;
+    return isDailyTask(task) || (options.publishTask && task.taskId === "33");
+  });
+
+  for (let i = 0; i < relevant.length; i += 1) {
+    const task = relevant[i];
+    if (task.state === FINISH_STATE) {
+      lines.push(
+        "✅ " +
+          task.title +
+          "：已完成" +
+          (task.awardText ? "（" + task.awardText + "）" : "")
+      );
+      continue;
+    }
+    if (task.state !== WAITING_STATE) {
+      lines.push("⚠️ " + task.title + "：" + (task.stateDesc || task.state || "状态未知"));
+      continue;
+    }
+
+    snapshot = await fetchSnapshot(account);
+    const latest = findTask(snapshot, taskKey(task));
+    if (!latest || latest.state !== WAITING_STATE) continue;
+    const result = await executeTask(account, latest, options);
+    if (result.unsupported) {
+      lines.push("⚠️ " + latest.title + "：" + result.message);
+      continue;
+    }
+
+    snapshot = result.snapshot || (await fetchSnapshot(account));
+    const after = findTask(snapshot, taskKey(latest));
+    if (result.ok && after && after.state === FINISH_STATE) {
+      lines.push(
+        "✅ " +
+          after.title +
+          "：服务器已确认完成" +
+          (latest.awardText ? "（" + latest.awardText + "）" : "")
+      );
+    } else {
+      lines.push("❌ " + latest.title + "：" + result.message);
+    }
+    await sleep(800);
+  }
+
+  const finalSnapshot = await fetchSnapshot(account);
+  lines.push("💰 当前H币：" + (finalSnapshot.coin || "未知"));
+  const waiting = finalSnapshot.tasks.filter((task) => {
+    if (!isDailyTask(task) && !(options.publishTask && task.taskId === "33")) return false;
+    if (!options.dailyTasks && !isSignTask(task)) return false;
+    return task.state === WAITING_STATE;
+  });
+  if (waiting.length) {
+    lines.push("▫️ 仍待完成：" + waiting.map((task) => task.title).join("、"));
+  }
+  return waiting.length === 0;
 }
 
 async function runAutomation() {
@@ -751,60 +1084,30 @@ async function runAutomation() {
     notify(
       SCRIPT_NAME,
       "⚠️ 尚未获取账号",
-      "请打开小黑盒 App，进入“我的”页面或刷新一次。"
+      "请打开小黑盒 App，进入“我的”页面并刷新一次。"
     );
     return;
   }
 
   const lines = ["📌 签到与任务结果"];
-  let successCount = 0;
+  let okCount = 0;
   for (let i = 0; i < accounts.length; i += 1) {
-    const account = accounts[i];
-    const accountTitle = "账号 " + (i + 1) + "（" + maskId(account.heyboxId) + "）";
-    lines.push("", accountTitle);
     try {
-      const result = await signAccount(account, options.taskService);
-      if (result.ok) successCount += 1;
-      lines.push((result.ok ? "✅ " : "❌ ") + "签到：" + result.text);
+      if (await runAccount(accounts[i], i, options, lines)) okCount += 1;
     } catch (error) {
-      lines.push("❌ 签到：" + String(error.message || error));
+      lines.push(
+        "",
+        "账号 " + (i + 1) + "（" + maskId(accounts[i].heyboxId) + "）",
+        "❌ 执行失败：" + String(error.message || error)
+      );
     }
-
-    if (options.dailyTasks) {
-      for (let j = 0; j < DAILY_TASKS.length; j += 1) {
-        const task = DAILY_TASKS[j];
-        try {
-          const result = await reportDailyTask(account, task, options.taskService);
-          lines.push((result.ok ? "✅ " : "❌ ") + task.label + "：" + result.text);
-        } catch (error) {
-          lines.push("❌ " + task.label + "：" + String(error.message || error));
-        }
-        await sleep(800);
-      }
-
-      try {
-        const taskList = await getTaskList(account, options.taskService);
-        const states = taskList.ok ? flattenTaskList(taskList.data) : [];
-        if (states.length) {
-          lines.push("📋 服务器任务状态");
-          Array.prototype.push.apply(lines, states);
-        } else {
-          lines.push("⚠️ 任务状态：" + taskList.text);
-        }
-      } catch (error) {
-        lines.push("⚠️ 任务状态读取失败：" + String(error.message || error));
-      }
-    } else {
-      lines.push("⏭️ 日常任务：已在插件参数中关闭");
-    }
-
     if (i < accounts.length - 1) await sleep(1200);
   }
 
-  lines.push("", "成功：" + successCount + "/" + accounts.length, "版本：" + SCRIPT_VERSION);
+  lines.push("", "完成账号：" + okCount + "/" + accounts.length, "版本：" + SCRIPT_VERSION);
   notify(
     "===小黑盒===",
-    successCount === accounts.length ? "✅ 执行完成" : "⚠️ 执行存在失败",
+    okCount === accounts.length ? "✅ 服务器已确认完成" : "⚠️ 存在未完成任务",
     lines.join("\n")
   );
 }
@@ -817,21 +1120,29 @@ async function main() {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     md5,
-    createSignature,
-    parseSignResult,
-    parseJsonResponse,
-    flattenTaskList,
-    buildSignRequest,
-    buildSignedRequest
+    buildAppCookie,
+    decodePkeyUserId,
+    makeImei,
+    encodeQuery,
+    runtimeOptions,
+    unwrapHkeyPayload,
+    extractTaskList,
+    extractFeeds,
+    extractGames,
+    extractComment,
+    buildShareReport,
+    extractTopicId,
+    taskKey,
+    isDailyTask,
+    requestHkey,
+    requestReportData,
+    appGet,
+    postEncryptedForm
   };
 } else {
   main()
     .catch((error) => {
-      notify(
-        SCRIPT_NAME,
-        "❌ 脚本异常",
-        String((error && error.stack) || error)
-      );
+      notify(SCRIPT_NAME, "❌ 脚本异常", String((error && error.stack) || error));
     })
     .then(() => $done());
 }
