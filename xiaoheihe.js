@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "小黑盒签到与任务";
-const SCRIPT_VERSION = "2.0.2";
+const SCRIPT_VERSION = "2.0.3";
 const STORAGE_KEY = "xhh_sign_accounts_v1";
 const CAPTURE_NOTICE_KEY = "xhh_sign_capture_notice_v1";
 const SIGN_PATH = "/task/sign/";
@@ -9,6 +9,8 @@ const DATA_REPORT_PATH = "/account/data_report/";
 const API_BASE = "https://api.xiaoheihe.cn";
 const DATA_BASE = "https://data.xiaoheihe.cn";
 const DEFAULT_TASK_SERVICE = "http://47.120.39.109:9900/hkey";
+const API_NONCE = "tb6e1k7WqQCIHToyzWzI8Ogq9d0EIgpb";
+const DATA_NONCE = "fSz04CwxvcWzG737aFNKKxNeGZDFOqJ1";
 const MAX_ACCOUNTS = 10;
 const DAILY_TASKS = [
   { key: "shareArticle", label: "分享帖子" },
@@ -432,38 +434,26 @@ function runtimeOptions() {
 }
 
 function buildClientParams(account, signature) {
-  const captured = account.client || {};
-  const defaults = {
+  return {
+    heybox_id: account.heyboxId,
     imei: "4187fb55b1be198a",
-    device_info: "XiaoMi 13",
+    device_info: "XiaoMi 13私人定制版",
+    nonce: signature.nonce || API_NONCE,
+    hkey: signature.hkey,
     os_type: "Android",
     x_os_type: "Android",
     x_client_type: "mobile",
     os_version: "9",
     version: "1.3.332",
     build: "871",
+    _time: signature.time || signature.timestamp,
     dw: "428",
     channel: "heybox_xiaomi",
     x_app: "heybox"
   };
-  const params = Object.assign({}, defaults, captured || {}, {
-    heybox_id: account.heyboxId,
-    hkey: signature.hkey,
-    nonce:
-      signature.nonce ||
-      md5(String(signature.time) + String(Math.random())).slice(0, 32),
-    _time: signature.time || signature.timestamp,
-    _notip: "true"
-  });
-  delete params.userAgent;
-  delete params.app;
-  delete params.client_type;
-  delete params.web_version;
-  return params;
 }
 
 function commonHeaders(account, host) {
-  const captured = account.client || {};
   return {
     Cookie: account.cookie,
     Referer: "http://api.maxjia.com/",
@@ -471,8 +461,7 @@ function commonHeaders(account, host) {
     Connection: "Keep-Alive",
     "Accept-Encoding": "gzip",
     "User-Agent":
-      captured.userAgent ||
-      "Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 Mobile ApiMaxJia/1.0"
+      "Mozilla/5.0 AppleWebKit/537.36 (KHTML like Gecko) Chrome/41.0.2272.118 Safari/537.36 ApiMaxJia/1.0"
   };
 }
 
@@ -539,30 +528,48 @@ async function getTaskSignature(account, type, taskName, serviceUrl) {
   if (!/^https?:\/\/[^/]+/i.test(serviceUrl || "")) {
     throw new Error("任务编码服务地址无效");
   }
-  const response = await httpPost({
-    url: serviceUrl,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      heyboxId: String(account.heyboxId),
-      type: Number(type),
-      taskName: taskName || "null"
-    }),
-    timeout: 10000
-  });
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error("编码服务 HTTP " + response.status);
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await httpPost({
+        url: serviceUrl,
+        headers: {
+          "Content-Type": "application/json",
+          Connection: "close"
+        },
+        body: JSON.stringify({
+          heyboxId: String(account.heyboxId),
+          type: Number(type),
+          taskName: taskName || "null"
+        }),
+        timeout: 15000,
+        "auto-cookie": false
+      });
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error("编码服务 HTTP " + response.status);
+      }
+      let payload;
+      try {
+        payload = JSON.parse(response.body);
+      } catch (_) {
+        throw new Error("编码服务返回内容不是 JSON");
+      }
+      if (!payload || !payload.hkey || !payload.timestamp) {
+        throw new Error(
+          String((payload && (payload.msg || payload.message)) || "编码服务缺少签名")
+        );
+      }
+      payload.time = payload.timestamp;
+      if (attempt > 1) console.log("任务编码服务第 " + attempt + " 次请求成功");
+      return payload;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) await sleep(700 * attempt);
+    }
   }
-  let payload;
-  try {
-    payload = JSON.parse(response.body);
-  } catch (_) {
-    throw new Error("编码服务返回内容不是 JSON");
-  }
-  if (!payload || !payload.hkey || !payload.timestamp) {
-    throw new Error(String((payload && (payload.msg || payload.message)) || "编码服务缺少签名"));
-  }
-  payload.time = payload.timestamp;
-  return payload;
+  throw new Error(
+    "编码服务连续 3 次请求失败：" + String(lastError.message || lastError)
+  );
 }
 
 function parseSignResult(response) {
@@ -679,7 +686,8 @@ async function reportDailyTask(account, task, serviceUrl) {
   const params = {
     type: 104,
     time_: signature.timestamp,
-    session_id: "77ee4fea-46d9-4a53-b5ce-5df9cf056b7e"
+    session_id: "77ee4fea-46d9-4a53-b5ce-5df9cf056b7e",
+    nonce: DATA_NONCE
   };
   const body = encodeQuery({
     data: signature.data,
