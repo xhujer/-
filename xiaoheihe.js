@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "小黑盒签到与任务";
-const SCRIPT_VERSION = "3.0.0";
+const SCRIPT_VERSION = "3.0.1";
 const STORAGE_KEY = "xhh_sign_accounts_v1";
 const CAPTURE_NOTICE_KEY = "xhh_sign_capture_notice_v1";
 const API_BASE = "https://api.xiaoheihe.cn";
@@ -1140,9 +1140,13 @@ if (typeof module !== "undefined" && module.exports) {
     postEncryptedForm
   };
 } else {
+  const requestMode = typeof $request !== "undefined";
   main()
     .catch((error) => {
       notify(SCRIPT_NAME, "❌ 脚本异常", String((error && error.stack) || error));
     })
-    .then(() => $done());
+    .then(() => {
+      if (requestMode) $done({});
+      else $done();
+    });
 }
