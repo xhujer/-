@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "小黑盒签到与任务";
-const SCRIPT_VERSION = "2.0.1";
+const SCRIPT_VERSION = "2.0.2";
 const STORAGE_KEY = "xhh_sign_accounts_v1";
 const CAPTURE_NOTICE_KEY = "xhh_sign_capture_notice_v1";
 const SIGN_PATH = "/task/sign/";
@@ -16,6 +16,12 @@ const DAILY_TASKS = [
   { key: "shareGameComment", label: "分享游戏评价" },
   { key: "visitGameRank", label: "访问游戏榜单" }
 ];
+
+function notify(title, subtitle, content) {
+  const detail = String(content == null ? "" : content);
+  console.log([String(title), String(subtitle), detail].join("\n"));
+  $notification.post(String(title), String(subtitle), detail);
+}
 
 function safeAdd(x, y) {
   const lsw = (x & 0xffff) + (y & 0xffff);
@@ -380,14 +386,14 @@ async function captureAccount() {
   while (accounts.length > MAX_ACCOUNTS) accounts.shift();
 
   if (!writeStore(JSON.stringify(accounts), STORAGE_KEY)) {
-    $notification.post(SCRIPT_NAME, "❌ 获取账号失败", "Loon 持久化存储写入失败");
+    notify(SCRIPT_NAME, "❌ 获取账号失败", "Loon 持久化存储写入失败");
     return;
   }
 
   const fingerprint = heyboxId + "|" + md5(cookie);
   if (readStore(CAPTURE_NOTICE_KEY, "") !== fingerprint) {
     writeStore(fingerprint, CAPTURE_NOTICE_KEY);
-    $notification.post(
+    notify(
       SCRIPT_NAME,
       "✅ 获取账号成功",
       "账号：" + maskId(heyboxId) + "\n已保存 Cookie 和当前客户端参数"
@@ -578,12 +584,24 @@ function parseSignResult(response) {
   const state = String(
     data.result && data.result.state != null ? data.result.state : ""
   );
+  const resultText = (message + " " + state).trim();
+
+  if (
+    /非法请求|失败|错误|过期|重新登录|未登录|无效|拒绝/i.test(resultText) ||
+    /\b(invalid|error|fail(?:ed|ure)?|denied|expired)\b/i.test(resultText)
+  ) {
+    return {
+      ok: false,
+      text: message || state || "服务器返回签到失败"
+    };
+  }
+
   if (
     data.status === "ok" ||
     data.success === true ||
     data.code === 0 ||
     /^(signed|success|ok)$/i.test(state) ||
-    (data.result && !/失败|错误|过期|重新登录/.test(message))
+    /签到成功|^成功$/.test(message)
   ) {
     return {
       ok: true,
@@ -722,7 +740,7 @@ async function runAutomation() {
   const accounts = loadAccounts();
   const options = runtimeOptions();
   if (!accounts.length) {
-    $notification.post(
+    notify(
       SCRIPT_NAME,
       "⚠️ 尚未获取账号",
       "请打开小黑盒 App，进入“我的”页面或刷新一次。"
@@ -776,7 +794,7 @@ async function runAutomation() {
   }
 
   lines.push("", "成功：" + successCount + "/" + accounts.length, "版本：" + SCRIPT_VERSION);
-  $notification.post(
+  notify(
     "===小黑盒===",
     successCount === accounts.length ? "✅ 执行完成" : "⚠️ 执行存在失败",
     lines.join("\n")
@@ -801,7 +819,7 @@ if (typeof module !== "undefined" && module.exports) {
 } else {
   main()
     .catch((error) => {
-      $notification.post(
+      notify(
         SCRIPT_NAME,
         "❌ 脚本异常",
         String((error && error.stack) || error)
