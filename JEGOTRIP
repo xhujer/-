@@ -1,5 +1,5 @@
-#!name=无忧行去广告
-#!desc=移除签到任务、动态助手、社区动态、广告推广；保留登录、用户信息、会员、VoIP电话托管、来电短信提醒
+#!name=无忧行精简净化版
+#!desc=精准移除签到、任务、动态助手、社区内容与推广；保留登录、用户信息、会员、VoIP电话托管、来电短信提醒
 #!author=Ming
 #!date=2026-07-29
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -14,56 +14,54 @@
 # 社区网页
 DOMAIN,cp.jegotrip.com.cn,REJECT
 
-# 社区动态静态资源
+# 社区动态 CDN
 DOMAIN,cdn.jegotrip.com.cn,REJECT
 
-# 商品推广素材
+# 商品推广资源
 DOMAIN,jegotrip3.jegotrip.com.cn,REJECT
 
-# 动态推广图片
+# 视频动态资源
 DOMAIN,video.jegotrip.com.cn,REJECT
 
-# 日志
-DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com,REJECT
+# 阿里日志
+DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.cn-hangzhou.log.aliyuncs.com,REJECT
 
 
 [Rewrite]
 
 
-# 第三方日志
-^https?:\/\/analysis\.tratao\.com\/api\/log(?:\?.*)?$ url reject
-
-
 # 无忧行事件日志
-^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/api\/business\/event\/api\/log\/upload(?:\?.*)?$ url reject
+^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/api\/business\/event\/api\/log\/upload.* url reject
 
 
-# 点击日志
-^https?:\/\/app-product\.jegotrip\.com\.cn\/logstores\/clickevent_ios_v5\/shards\/lb(?:\?.*)?$ url reject
+# 点击行为日志
+^https?:\/\/app-product\.jegotrip\.com\.cn\/logstores\/clickevent_ios_v5\/shards\/lb.* url reject
 
 
 
-# ==========================
-# 签到/任务/福利入口
-# ==========================
+# ======================
+# 签到 / 任务 / 福利
+# ======================
 
 ^https?:\/\/app\.jegotrip\.com\.cn\/api\/service\/v1\/mission\/.* url reject
 
-
-
-# ==========================
-# 动态悬浮助手
-# ==========================
-
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/message\/recommend(?:\?.*)?$ url reject
-
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/alertV2(?:\?.*)?$ url reject
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/service\/v1\/mission\/.* url reject
 
 
 
-# ==========================
-# 社区动态图片
-# ==========================
+# ======================
+# 动态助手
+# ======================
+
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/message\/recommend.* url reject
+
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/alertV2.* url reject
+
+
+
+# ======================
+# 社区动态资源
+# ======================
 
 ^https?:\/\/cdn\.jegotrip\.com\.cn\/socialcontact\/.* url reject
 
