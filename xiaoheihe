@@ -2,7 +2,7 @@
 #!desc=自动获取账号并执行签到、分享帖子、分享游戏详情、分享游戏评价；所有任务均以服务器回查状态为准。
 #!author=Ming
 #!date=2026-07-29
-#!version=3.0.0
+#!version=3.0.1
 #!icon=https://api.xiaoheihe.cn/favicon.ico
 #!system=iOS,iPadOS
 #!tag=小黑盒,签到,任务
