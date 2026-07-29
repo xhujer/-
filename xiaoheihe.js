@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "小黑盒签到与任务";
-const SCRIPT_VERSION = "2.0.0";
+const SCRIPT_VERSION = "2.0.1";
 const STORAGE_KEY = "xhh_sign_accounts_v1";
 const CAPTURE_NOTICE_KEY = "xhh_sign_capture_notice_v1";
 const SIGN_PATH = "/task/sign/";
@@ -480,7 +480,7 @@ function buildSignedRequest(account, base, path, signature, extraParams, method,
   const request = {
     url: base + path + "?" + encodeQuery(params),
     headers: commonHeaders(account, host),
-    timeout: 15
+    timeout: 15000
   };
   if (String(method || "GET").toUpperCase() === "POST") {
     request.headers["Content-Type"] = "application/x-www-form-urlencoded";
@@ -501,7 +501,16 @@ function httpRequest(method, options) {
     const fn = String(method).toUpperCase() === "POST" ? "post" : "get";
     $httpClient[fn](options, (error, response, data) => {
       if (error) {
-        reject(new Error(String(error)));
+        const host = String(options.url || "").match(/^https?:\/\/([^/?#]+)/i);
+        reject(
+          new Error(
+            fn.toUpperCase() +
+              " " +
+              (host ? host[1] : "网络请求") +
+              "：" +
+              String(error)
+          )
+        );
         return;
       }
       resolve({
@@ -532,7 +541,7 @@ async function getTaskSignature(account, type, taskName, serviceUrl) {
       type: Number(type),
       taskName: taskName || "null"
     }),
-    timeout: 10
+    timeout: 10000
   });
   if (response.status < 200 || response.status >= 300) {
     throw new Error("编码服务 HTTP " + response.status);
@@ -620,15 +629,27 @@ function parseJsonResponse(response, action) {
 }
 
 async function signAccount(account, serviceUrl) {
+  let serviceError;
   try {
     const signature = await getTaskSignature(account, 1, "null", serviceUrl);
     return parseSignResult(await httpGet(buildSignRequest(account, signature)));
-  } catch (serviceError) {
+  } catch (error) {
+    serviceError = error;
+  }
+
+  try {
     const fallback = parseSignResult(await httpGet(buildSignRequest(account)));
     if (!fallback.ok) {
       fallback.text += "\n任务编码服务：" + String(serviceError.message || serviceError);
     }
     return fallback;
+  } catch (fallbackError) {
+    throw new Error(
+      "任务编码服务：" +
+        String(serviceError.message || serviceError) +
+        "\n官方签到请求：" +
+        String(fallbackError.message || fallbackError)
+    );
   }
 }
 
