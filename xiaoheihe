@@ -9,7 +9,7 @@
 
 [Argument]
 
-cron = input,"00 8 * * *",tag=签到时间,desc=默认每天凌晨 00:15 执行
+cron = input,"00 8 * * *",tag=签到时间,
 
 cookieCapture = switch,true,tag=自动获取账号,desc=打开小黑盒并进入“我的”页面或刷新时自动保存账号凭据
 
