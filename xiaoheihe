@@ -1,6 +1,6 @@
 #!name=小黑盒签到与任务
 #!desc=自动获取账号并执行签到、分享帖子、分享游戏详情、分享游戏评价、访问游戏榜单，最后读取服务器任务状态。任务加密数据由可配置编码服务生成，仅向其提交盒号和任务名，不提交 Cookie。
-#!author=tianbian
+#!author=Ming
 #!date=2026-07-29
 #!version=2.0.0
 #!icon=https://api.xiaoheihe.cn/favicon.ico
