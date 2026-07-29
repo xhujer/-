@@ -1,5 +1,5 @@
 #!name=无忧行精准净化版
-#!desc=精准移除首页内容流、动态推荐、签到任务、助手推广；保留登录、用户信息、会员、VoIP电话托管、来电短信提醒
+#!desc=精准移除广告、信息流、动态、签到任务、助手推广；保留登录、用户信息、会员、VoIP电话托管、来电短信提醒、基础目的地
 #!author=Ming
 #!date=2026-07-29
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -11,21 +11,17 @@
 
 [Rule]
 
-# 社区网页入口
+# 社区网页
 DOMAIN,cp.jegotrip.com.cn,REJECT
 
-# 社区动态图片资源
-DOMAIN,cdn.jegotrip.com.cn,REJECT
-
-# 商品推广素材
+# 商品/推广素材
 DOMAIN,jegotrip3.jegotrip.com.cn,REJECT
 
-# 视频动态素材
+# 视频推广素材
 DOMAIN,video.jegotrip.com.cn,REJECT
 
 # 日志服务器
 DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com,REJECT
-
 
 
 [Rewrite]
@@ -54,7 +50,7 @@ DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com
 
 
 # =====================
-# 动态助手 / 悬浮组件
+# 动态助手 / 悬浮入口
 # =====================
 
 ^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/message\/recommend.* url reject
@@ -67,28 +63,16 @@ DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com
 # app3 首页内容流
 # =====================
 
-# 首页文章列表
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/content\/v1\/home\/list.* url reject
-
-
-# 文章详情
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/content\/v1\/pub\/queryDetail.* url reject
+# 首页文章/动态列表
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/content\/v1\/.* url reject
 
 
 # 推荐头条
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/guessLike\/.* url reject
 
 
-# 评论
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/socialcontact\/v1\/comment\/.* url reject
-
-
 # 相关文章
 ^https?:\/\/app3\.jegotrip\.com\.cn\/api\/ls\/v1\/content\/.* url reject
-
-
-# 点赞列表
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/v1\/post\/.* url reject
 
 
 # 搜索热词
@@ -97,7 +81,41 @@ DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com
 
 
 # =====================
-# 社区图片
+# app3 社区互动
+# =====================
+
+# 评论
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/socialcontact\/v1\/comment\/.* url reject
+
+
+# 点赞列表
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/v1\/post\/.* url reject
+
+
+
+# =====================
+# 目的地运营内容
+# =====================
+
+# Banner推广
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners.* url reject
+
+
+# 攻略内容
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/queryGlobalStrategyData.* url reject
+
+
+# 目的地推荐
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/.* url reject
+
+
+# 目的地运营布局
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel.* url reject
+
+
+
+# =====================
+# 社区图片资源
 # =====================
 
 ^https?:\/\/cdn\.jegotrip\.com\.cn\/socialcontact\/.* url reject
