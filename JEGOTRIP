@@ -1,5 +1,5 @@
 #!name=无忧行精准净化版
-#!desc=精准移除广告、信息流、动态、签到任务、助手推广；保留登录、用户信息、会员、VoIP电话托管、来电短信提醒、通知配置、基础目的地
+#!desc=自适应移除首页品宣、运营活动、推荐瀑布流、活动弹窗与助手入口；保留登录、会员、境外流量/语音、VoIP电话托管、来电短信提醒和基础目的地
 #!author=Ming
 #!date=2026-07-30
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -8,156 +8,38 @@
 #!system=iOS,iPadOS
 #!loon_version=3.2.4
 
-
 [Rule]
 
-# 社区及活动网页
-DOMAIN,cp.jegotrip.com.cn,REJECT
-
-# 商品推广素材
-DOMAIN,jegotrip3.jegotrip.com.cn,REJECT
-
-# 社区及推广视频
-DOMAIN,video.jegotrip.com.cn,REJECT
-
-# 友盟DSP广告
+# 第三方广告与归因
 DOMAIN,dsp.ads.umeng.com,REJECT
-
-# Apple广告归因
+DOMAIN,a.gdt.qq.com,REJECT
+DOMAIN,report.huatuo.qq.com,REJECT
 DOMAIN,api-adservices.apple.com,REJECT
 
-# 阿里云日志
+# 独立日志主机
 DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com,REJECT
-
 
 [Rewrite]
 
-
-# =====================
-# 日志、埋点与广告归因
-# =====================
-
+# 日志统计
 ^https?:\/\/analysis\.tratao\.com\/api\/log(?:\/|\?|$).* url reject
+^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/api\/business\/event\/api\/log\/upload(?:\/|\?|$).* url reject
+^https?:\/\/app-product\.jegotrip\.com\.cn\/logstores\/clickevent_ios_v5\/shards\/lb(?:\/|\?|$).* url reject
+^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/device\/v1\/advertisingAttribution(?:\/|\?|$).* url reject-dict
 
-^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/api\/business\/event\/api\/log\/upload(?:\?|$).* url reject
+# 友盟广告消息；保留同域推送、解析与上行链路
+^https?:\/\/msg\.umengcloud\.com\/admsg\/v[23]\/(?:launch|getmsg|stats)(?:\/|\?|$).* url reject-dict
 
-^https?:\/\/app-product\.jegotrip\.com\.cn\/logstores\/clickevent_ios_v5\/shards\/lb(?:\?|$).* url reject
+# 签到、任务与福利
+^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/service\/v1\/mission\/.* url reject-dict
 
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/device\/v1\/advertisingAttribution(?:\?|$).* url reject
+# 助手推荐与悬浮提醒
+^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/assistant\/(?:message\/recommend|alertV2)(?:\/|\?|$).* url reject-dict
 
+[Script]
 
-# =====================
-# 友盟启动广告与卡片广告
-# 只处理广告路径，不影响推送注册
-# =====================
-
-^https?:\/\/msg\.umengcloud\.com\/admsg\/v[23]\/(?:launch|getmsg|stats)(?:\?|$).* url reject
-
-
-# =====================
-# 首页广告、运营位与Banner
-# =====================
-
-# 首页运营位
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/layout\/v1\/home\/operation\/space(?:\?|$).* url reject-dict
-
-# 首页宣传位
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/layout\/v1\/home\/publicity(?:\?|$).* url reject-dict
-
-# 通用页面Banner
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/banner\/v1\/sync(?:\?|$).* url reject-dict
-
-# 品牌广告
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/content\/v1\/brandAdvertising\/findListByPage(?:\?|$).* url reject-dict
-
-# Banner聚合列表
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/(?:service\/)?ls\/v1\/bannerpolymerize\/(?:list|typeList|recommendBannerList)(?:\?|$).* url reject-dict
-
-# 目的地推荐Banner
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/ls\/v1\/destination\/bannerRecommend(?:\?|$).* url reject-dict
-
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/(?:getDestinationBanner|getDestBanners)(?:\?|$).* url reject-dict
-
-
-# =====================
-# 猜你喜欢与推荐信息流
-# =====================
-
-# 场景化推荐查询与行为反馈
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/service\/layout\/recommend\/v1\/(?:query|update)(?:\?|$).* url reject-dict
-
-# 猜你喜欢标签及内容
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/layout\/v1\/guessLike\/(?:guessLikeTab|guessLikeTabData|guessLikeCityAroundTabData|guessLikeMoreHeadlines)(?:\?|$).* url reject-dict
-
-# 目的地猜你喜欢
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/destination\/v1\/(?:rec|recommend)\/guessYouLike(?:\?|$).* url reject-dict
-
-# 场景推荐数据
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData(?:\?|$).* url reject-dict
-
-# 推荐文章
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/destination\/v1\/recommend\/recommendArticle(?:\?|$).* url reject-dict
-
-
-# =====================
-# 首页文章与社区动态
-# 保留文章详情及基础目的地内容
-# =====================
-
-# 公共信息流、动态列表、排行榜
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/content\/v1\/(?:content\/list|home\/list|pub\/list|pub\/topList)(?:\?|$).* url reject-dict
-
-# 社区信息流查询
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/v1\/bi\/queryPost(?:\?|$).* url reject-dict
-
-# 社区帖子列表与推荐
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/(?:service\/)?community\/v1\/post\/(?:list|recentUpdate|hotRecommend|queryFine|queryQuestion|topList)(?:\?|$).* url reject-dict
-
-# 搜索框运营热词
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/ls\/v1\/opensearch\/hotsearchword(?:\?|$).* url reject-dict
-
-
-# =====================
-# 签到、任务、红包及福利
-# =====================
-
-# 任务红点及任务事件
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/service\/v1\/mission\/task\/(?:queryRedDot|sendEvent)(?:\?|$).* url reject-dict
-
-# 活动入口配置
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/activity\/v1\/getActivityInfo(?:\?|$).* url reject-dict
-
-# 运营组件奖励领取
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/service\/layout\/v1\/receiveReward(?:\?|$).* url reject-dict
-
-# 优惠券领取
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/service\/marketing\/v1\/getCoupon(?:\?|$).* url reject-dict
-
-# 红包及分享奖励
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/service\/notify\/v1\/(?:getRedPacketList|shareCallback|wechatShare|shareCallbackReward)(?:\?|$).* url reject-dict
-
-
-# =====================
-# 动态助手与快捷入口推广
-# =====================
-
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/message\/recommend(?:\?|$).* url reject-dict
-
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/alertV2(?:\?|$).* url reject-dict
-
-# 快捷入口促销角标
-^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/layout\/v1\/quickEntrance\/footTag(?:\?|$).* url reject-dict
-
-
-# =====================
-# 社区图片资源
-# 不拦截用户头像及普通商品资源
-# =====================
-
-^https?:\/\/cdn\.jegotrip\.com\.cn\/socialcontact\/.* url reject
-
-^https?:\/\/cdn\.jegotrip\.com\.cn\/material\/userAlbum\/.* url reject
-
+# 根据静态楼层标识递归净化，兼容正常首页与抓包检测后的替代组件
+http-response ^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/(?:assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)|activity\/v1\/getActivityInfo|layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/guessLike\/(?:guessLikeTab|guessLikeTabData|guessLikeCityAroundTabData)|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/bi\/queryPost|content\/v1\/content\/list|destination\/v1\/(?:rec\/(?:guessYouLike|queryData)|recommend\/guessYouLike))(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js, requires-body=true, timeout=20, tag=无忧行首页自适应净化
 
 [MITM]
 
