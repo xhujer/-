@@ -1,5 +1,5 @@
-#!name=无忧行去广告
-#!desc=V2.1网络净化版：补全文章列表、文章详情、相关推荐、社区动态与评论接口；移除首页品宣、运营活动、推荐瀑布流、活动弹窗、签到任务和助手推广；保留登录、用户、会员、境外流量/语音、VoIP电话托管、来电短信提醒及基础目的地
+#!name=无忧行精准净化版 V2.2
+#!desc=V2.2目的地空白版：进入目的地页面不加载Banner、攻略、热门目的地、推荐或其他内容；同时移除首页品宣、运营活动、文章动态、活动弹窗、签到任务和助手推广；保留登录、用户、会员、境外流量/语音、VoIP电话托管及来电短信提醒
 #!author=Ming
 #!date=2026-07-30
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -33,7 +33,7 @@ DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com
 
 [Script]
 
-http-response ^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/(?:assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)|activity\/v1\/getActivityInfo|layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/guessLike\/.*|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/(?:bi\/queryPost|post\/.*)|socialcontact\/v1\/comment\/.*|content\/v1\/.*|ls\/v1\/content\/.*|ls\/v1\/opensearch\/hotsearchword.*|destination\/v1\/(?:rec\/(?:guessYouLike|queryData|columnListByRegion)|recommend\/guessYouLike)|service\/v1\/mission\/.*|assistant\/(?:message\/recommend|alertV2))(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js?v=2.1,requires-body=true,timeout=20,tag=无忧行首页自适应净化V2.1,enable=true
+http-response ^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/(?:assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)|activity\/v1\/getActivityInfo|layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/init\/destinationModel|layout\/v1\/guessLike\/.*|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/(?:bi\/queryPost|post\/.*)|socialcontact\/v1\/comment\/.*|content\/v1\/.*|ls\/v1\/content\/.*|ls\/v1\/opensearch\/hotsearchword.*|destination\/v1\/.*|service\/v1\/mission\/.*|assistant\/(?:message\/recommend|alertV2))(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js?v=2.2,requires-body=true,timeout=20,tag=无忧行精准净化V2.2,enable=true
 
 [MITM]
 hostname = app.jegotrip.com.cn,app3.jegotrip.com.cn,app-product.jegotrip.com.cn,analysis.tratao.com,msg.umengcloud.com
