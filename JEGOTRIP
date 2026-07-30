@@ -1,7 +1,7 @@
 #!name=无忧行精准净化版
-#!desc=精准移除广告、信息流、动态、签到任务、助手推广；保留登录、用户信息、会员、VoIP电话托管、来电短信提醒、基础目的地
+#!desc=精准移除广告、信息流、动态、签到任务、助手推广；保留登录、用户信息、会员、VoIP电话托管、来电短信提醒、通知配置、基础目的地
 #!author=Ming
-#!date=2026-07-29
+#!date=2026-07-30
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
@@ -11,16 +11,22 @@
 
 [Rule]
 
-# 社区网页
+# 社区及活动网页
 DOMAIN,cp.jegotrip.com.cn,REJECT
 
-# 商品/推广素材
+# 商品推广素材
 DOMAIN,jegotrip3.jegotrip.com.cn,REJECT
 
-# 视频推广素材
+# 社区及推广视频
 DOMAIN,video.jegotrip.com.cn,REJECT
 
-# 日志服务器
+# 友盟DSP广告
+DOMAIN,dsp.ads.umeng.com,REJECT
+
+# Apple广告归因
+DOMAIN,api-adservices.apple.com,REJECT
+
+# 阿里云日志
 DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com,REJECT
 
 
@@ -28,94 +34,124 @@ DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com
 
 
 # =====================
-# 日志统计
+# 日志、埋点与广告归因
 # =====================
 
-^https?:\/\/analysis\.tratao\.com\/api\/log.* url reject
+^https?:\/\/analysis\.tratao\.com\/api\/log(?:\/|\?|$).* url reject
 
-^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/api\/business\/event\/api\/log\/upload.* url reject
+^https?:\/\/app\.jegotrip\.com\.cn\/eventtracking\/api\/business\/event\/api\/log\/upload(?:\?|$).* url reject
 
-^https?:\/\/app-product\.jegotrip\.com\.cn\/logstores\/clickevent_ios_v5\/shards\/lb.* url reject
+^https?:\/\/app-product\.jegotrip\.com\.cn\/logstores\/clickevent_ios_v5\/shards\/lb(?:\?|$).* url reject
 
-
-
-# =====================
-# 签到 / 任务 / 福利
-# =====================
-
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/service\/v1\/mission\/.* url reject
-
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/service\/v1\/mission\/.* url reject
-
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/device\/v1\/advertisingAttribution(?:\?|$).* url reject
 
 
 # =====================
-# 动态助手 / 悬浮入口
+# 友盟启动广告与卡片广告
+# 只处理广告路径，不影响推送注册
 # =====================
 
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/message\/recommend.* url reject
-
-^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/alertV2.* url reject
-
+^https?:\/\/msg\.umengcloud\.com\/admsg\/v[23]\/(?:launch|getmsg|stats)(?:\?|$).* url reject
 
 
 # =====================
-# app3 首页内容流
+# 首页广告、运营位与Banner
 # =====================
 
-# 首页文章/动态列表
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/content\/v1\/.* url reject
+# 首页运营位
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/layout\/v1\/home\/operation\/space(?:\?|$).* url reject-dict
 
+# 首页宣传位
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/layout\/v1\/home\/publicity(?:\?|$).* url reject-dict
 
-# 推荐头条
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/guessLike\/.* url reject
+# 通用页面Banner
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/banner\/v1\/sync(?:\?|$).* url reject-dict
 
+# 品牌广告
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/content\/v1\/brandAdvertising\/findListByPage(?:\?|$).* url reject-dict
 
-# 相关文章
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/ls\/v1\/content\/.* url reject
+# Banner聚合列表
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/(?:service\/)?ls\/v1\/bannerpolymerize\/(?:list|typeList|recommendBannerList)(?:\?|$).* url reject-dict
 
+# 目的地推荐Banner
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/ls\/v1\/destination\/bannerRecommend(?:\?|$).* url reject-dict
 
-# 搜索热词
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/ls\/v1\/opensearch\/hotsearchword.* url reject
-
-
-
-# =====================
-# app3 社区互动
-# =====================
-
-# 评论
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/socialcontact\/v1\/comment\/.* url reject
-
-
-# 点赞列表
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/v1\/post\/.* url reject
-
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/(?:getDestinationBanner|getDestBanners)(?:\?|$).* url reject-dict
 
 
 # =====================
-# 目的地运营内容
+# 猜你喜欢与推荐信息流
 # =====================
 
-# Banner推广
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/banner\/getDestBanners.* url reject
+# 场景化推荐查询与行为反馈
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/service\/layout\/recommend\/v1\/(?:query|update)(?:\?|$).* url reject-dict
+
+# 猜你喜欢标签及内容
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/layout\/v1\/guessLike\/(?:guessLikeTab|guessLikeTabData|guessLikeCityAroundTabData|guessLikeMoreHeadlines)(?:\?|$).* url reject-dict
+
+# 目的地猜你喜欢
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/destination\/v1\/(?:rec|recommend)\/guessYouLike(?:\?|$).* url reject-dict
+
+# 场景推荐数据
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/queryData(?:\?|$).* url reject-dict
+
+# 推荐文章
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/destination\/v1\/recommend\/recommendArticle(?:\?|$).* url reject-dict
 
 
-# 攻略内容
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/queryGlobalStrategyData.* url reject
+# =====================
+# 首页文章与社区动态
+# 保留文章详情及基础目的地内容
+# =====================
+
+# 公共信息流、动态列表、排行榜
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/content\/v1\/(?:content\/list|home\/list|pub\/list|pub\/topList)(?:\?|$).* url reject-dict
+
+# 社区信息流查询
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/community\/v1\/bi\/queryPost(?:\?|$).* url reject-dict
+
+# 社区帖子列表与推荐
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/(?:service\/)?community\/v1\/post\/(?:list|recentUpdate|hotRecommend|queryFine|queryQuestion|topList)(?:\?|$).* url reject-dict
+
+# 搜索框运营热词
+^https?:\/\/app3\.jegotrip\.com\.cn\/api\/ls\/v1\/opensearch\/hotsearchword(?:\?|$).* url reject-dict
 
 
-# 目的地推荐
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/destination\/v1\/rec\/.* url reject
+# =====================
+# 签到、任务、红包及福利
+# =====================
+
+# 任务红点及任务事件
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/service\/v1\/mission\/task\/(?:queryRedDot|sendEvent)(?:\?|$).* url reject-dict
+
+# 活动入口配置
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/activity\/v1\/getActivityInfo(?:\?|$).* url reject-dict
+
+# 运营组件奖励领取
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/service\/layout\/v1\/receiveReward(?:\?|$).* url reject-dict
+
+# 优惠券领取
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/service\/marketing\/v1\/getCoupon(?:\?|$).* url reject-dict
+
+# 红包及分享奖励
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/service\/notify\/v1\/(?:getRedPacketList|shareCallback|wechatShare|shareCallbackReward)(?:\?|$).* url reject-dict
 
 
-# 目的地运营布局
-^https?:\/\/app3\.jegotrip\.com\.cn\/api\/layout\/v1\/init\/destinationModel.* url reject
+# =====================
+# 动态助手与快捷入口推广
+# =====================
 
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/message\/recommend(?:\?|$).* url reject-dict
+
+^https?:\/\/app\.jegotrip\.com\.cn\/api\/assistant\/alertV2(?:\?|$).* url reject-dict
+
+# 快捷入口促销角标
+^https?:\/\/(?:app|app3)\.jegotrip\.com\.cn\/api\/layout\/v1\/quickEntrance\/footTag(?:\?|$).* url reject-dict
 
 
 # =====================
 # 社区图片资源
+# 不拦截用户头像及普通商品资源
 # =====================
 
 ^https?:\/\/cdn\.jegotrip\.com\.cn\/socialcontact\/.* url reject
@@ -123,10 +159,11 @@ DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com
 ^https?:\/\/cdn\.jegotrip\.com\.cn\/material\/userAlbum\/.* url reject
 
 
-
 [MITM]
 
 hostname =
 app.jegotrip.com.cn,
+app3.jegotrip.com.cn,
 app-product.jegotrip.com.cn,
-analysis.tratao.com
+analysis.tratao.com,
+msg.umengcloud.com
