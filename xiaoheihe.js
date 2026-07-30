@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "小黑盒签到与任务";
-const SCRIPT_VERSION = "3.0.1";
+const SCRIPT_VERSION = "3.0.2";
 const STORAGE_KEY = "xhh_sign_accounts_v1";
 const CAPTURE_NOTICE_KEY = "xhh_sign_capture_notice_v1";
 const API_BASE = "https://api.xiaoheihe.cn";
@@ -986,7 +986,6 @@ async function executePublishTask(account, task) {
 
 async function executeTask(account, task, options) {
   try {
-    if (isSignTask(task)) return await executeSign(account);
     if (task.taskId === "1") return await executeSharePost(account, task);
     if (task.taskId === "19") return await executeShareGameDetail(account, task);
     if (task.taskId === "31") return await executeShareGameComment(account, task);
@@ -1018,8 +1017,18 @@ async function runAccount(account, index, options, lines) {
       (snapshot.nickname ? " " + snapshot.nickname : "")
   );
 
+  let signOk = false;
+  try {
+    const signResult = await executeSign(account);
+    signOk = signResult.ok;
+    lines.push((signResult.ok ? "✅ " : "❌ ") + "签到：" + signResult.message);
+  } catch (error) {
+    lines.push("❌ 签到：" + String(error.message || error));
+  }
+
+  snapshot = await fetchSnapshot(account);
   const relevant = snapshot.tasks.filter((task) => {
-    if (isSignTask(task)) return true;
+    if (isSignTask(task)) return false;
     if (!options.dailyTasks) return false;
     return isDailyTask(task) || (options.publishTask && task.taskId === "33");
   });
@@ -1074,7 +1083,7 @@ async function runAccount(account, index, options, lines) {
   if (waiting.length) {
     lines.push("▫️ 仍待完成：" + waiting.map((task) => task.title).join("、"));
   }
-  return waiting.length === 0;
+  return signOk && waiting.length === 0;
 }
 
 async function runAutomation() {
