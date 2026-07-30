@@ -1,222 +1,392 @@
-var url = ($request && $request.url) || "";
-var source = ($response && $response.body) || "";
+(function () {
+  "use strict";
 
-function hasOwn(object, key) {
-  return Object.prototype.hasOwnProperty.call(object, key);
-}
+  var url = typeof $request !== "undefined" && $request.url ? $request.url : "";
+  var body = typeof $response !== "undefined" && typeof $response.body === "string"
+    ? $response.body
+    : "";
+  var REMOVE = {};
 
-function lower(value) {
-  return String(value == null ? "" : value).toLowerCase();
-}
-
-function numberValue(value) {
-  if (typeof value === "number") return value;
-  if (typeof value === "string" && /^-?\d+$/.test(value)) return parseInt(value, 10);
-  return NaN;
-}
-
-function contains(value, pattern) {
-  return lower(value).indexOf(lower(pattern)) !== -1;
-}
-
-function firstValue(object, keys) {
-  var i;
-  for (i = 0; i < keys.length; i += 1) {
-    if (hasOwn(object, keys[i]) && object[keys[i]] != null) return object[keys[i]];
+  function hasOwn(object, key) {
+    return Object.prototype.hasOwnProperty.call(object, key);
   }
-  return "";
-}
 
-function isCommunicationNode(node) {
-  var floorName = lower(firstValue(node, ["floorName", "name", "title"]));
-  var className = lower(firstValue(node, ["className", "cellClassName", "viewClassName"]));
-  var moduleType = numberValue(firstValue(node, ["moduleType", "floorModuleType"]));
-  var showCommunication = firstValue(node, ["isShowCommunicationFloor", "showCommunicationFloor"]);
-  var action = lower(firstValue(node, ["action", "actionUrl", "jumpUrl", "linkUrl", "url", "scheme"]));
+  function text(value) {
+    return String(value == null ? "" : value).toLowerCase();
+  }
 
-  return moduleType === 2 ||
-    showCommunication === 1 ||
-    showCommunication === true ||
-    showCommunication === "1" ||
-    floorName.indexOf("快捷入口") !== -1 ||
-    floorName.indexOf("境外流量") !== -1 ||
-    floorName.indexOf("境外语音") !== -1 ||
-    className.indexOf("communication") !== -1 ||
-    action.indexOf("native://flowhome") !== -1 ||
-    action.indexOf("native://call") !== -1;
-}
+  function numberValue(value) {
+    if (typeof value === "number") return value;
+    if (typeof value === "string" && /^-?\d+$/.test(value)) return parseInt(value, 10);
+    return NaN;
+  }
 
-function hasAssistantMarker(node) {
-  var keys = [
-    "name", "title", "subTitle", "floorName", "componentName", "action",
-    "actionUrl", "jumpUrl", "linkUrl", "url", "scheme", "targetUrl"
-  ];
-  var i;
-  var value;
+  function firstValue(object, keys) {
+    var i;
+    for (i = 0; i < keys.length; i += 1) {
+      if (hasOwn(object, keys[i]) && object[keys[i]] != null) return object[keys[i]];
+    }
+    return "";
+  }
 
-  for (i = 0; i < keys.length; i += 1) {
-    if (!hasOwn(node, keys[i]) || node[keys[i]] == null) continue;
-    value = lower(node[keys[i]]);
+  function includesAny(value, words) {
+    var source = text(value);
+    var i;
+    for (i = 0; i < words.length; i += 1) {
+      if (source.indexOf(text(words[i])) !== -1) return true;
+    }
+    return false;
+  }
+
+  function isCommunicationNode(node) {
+    var floorName = firstValue(node, ["floorName", "name", "title", "componentName"]);
+    var className = firstValue(node, ["className", "cellClassName", "viewClassName"]);
+    var moduleType = numberValue(firstValue(node, ["moduleType", "floorModuleType"]));
+    var showCommunication = firstValue(node, [
+      "isShowCommunicationFloor",
+      "showCommunicationFloor"
+    ]);
+    var action = firstValue(node, [
+      "action",
+      "actionUrl",
+      "jumpUrl",
+      "link",
+      "linkUrl",
+      "url",
+      "scheme",
+      "htmlLink",
+      "rnLink"
+    ]);
+
+    return moduleType === 2 ||
+      showCommunication === 1 ||
+      showCommunication === true ||
+      showCommunication === "1" ||
+      includesAny(floorName, [
+        "快捷入口",
+        "境外流量",
+        "境外语音",
+        "当地电话卡",
+        "电话/消息",
+        "电话托管",
+        "来电提醒",
+        "短信提醒"
+      ]) ||
+      includesAny(className, ["communication", "voip"]) ||
+      includesAny(action, [
+        "native://flowhome",
+        "native://call",
+        "native://voip",
+        "communication",
+        "callhosting"
+      ]);
+  }
+
+  function hasAssistantMarker(node) {
+    var values = [
+      firstValue(node, ["name", "title", "subTitle", "subHeading"]),
+      firstValue(node, ["floorName", "componentName"]),
+      firstValue(node, [
+        "action",
+        "actionUrl",
+        "jumpUrl",
+        "link",
+        "linkUrl",
+        "url",
+        "scheme",
+        "targetUrl",
+        "htmlLink",
+        "rnLink"
+      ])
+    ].join(" ");
+
+    return includesAny(values, [
+      "aiassistant",
+      "ai-assistant",
+      "ai助手",
+      "智能助手",
+      "旅行助手"
+    ]);
+  }
+
+  function hasMissionMarker(node) {
+    var name = [
+      firstValue(node, ["name", "title", "subTitle", "subHeading"]),
+      firstValue(node, ["floorName", "componentName"])
+    ].join(" ");
+    var action = firstValue(node, [
+      "action",
+      "actionUrl",
+      "jumpUrl",
+      "link",
+      "linkUrl",
+      "url",
+      "scheme",
+      "targetUrl",
+      "htmlLink",
+      "rnLink"
+    ]);
+
+    return includesAny(action, [
+      "/mission/",
+      "/task/",
+      "signin",
+      "checkin",
+      "welfare"
+    ]) || includesAny(name, [
+      "签到任务",
+      "任务中心",
+      "福利中心",
+      "签到有礼"
+    ]);
+  }
+
+  function componentId(node) {
+    var explicit = firstValue(node, ["componentId", "componentID"]);
+    if (explicit !== "") return numberValue(explicit);
+
     if (
-      value.indexOf("aiassistant") !== -1 ||
-      value.indexOf("ai-assistant") !== -1 ||
-      value.indexOf("ai助手") !== -1 ||
-      value.indexOf("智能助手") !== -1 ||
-      value.indexOf("旅行助手") !== -1
+      hasOwn(node, "componentName") ||
+      hasOwn(node, "componentType") ||
+      hasOwn(node, "resourceDataCode") ||
+      hasOwn(node, "componentParamVo")
+    ) {
+      return numberValue(node.id);
+    }
+    return NaN;
+  }
+
+  function shouldRemoveNode(node) {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return false;
+    if (hasAssistantMarker(node) || hasMissionMarker(node)) return true;
+    if (isCommunicationNode(node)) return false;
+
+    var floorName = firstValue(node, ["floorName", "floorTitle"]);
+    var className = text(firstValue(node, [
+      "className",
+      "cellClassName",
+      "viewClassName"
+    ]));
+    var componentName = firstValue(node, ["componentName", "componentTitle"]);
+    var resourceCode = text(firstValue(node, [
+      "resourceDataCode",
+      "resourceCode",
+      "dataCode"
+    ]));
+    var moduleId = numberValue(firstValue(node, ["moduleId", "floorId"]));
+    var currentComponentId = componentId(node);
+    var moduleType = numberValue(firstValue(node, [
+      "moduleType",
+      "floorModuleType"
+    ]));
+    var floorLike = hasOwn(node, "floorName") ||
+      hasOwn(node, "moduleId") ||
+      hasOwn(node, "moduleType") ||
+      hasOwn(node, "resourceComponents") ||
+      hasOwn(node, "componentParamVo") ||
+      hasOwn(node, "componentVos");
+    var blockedComponentIds = {
+      104: true,
+      113: true,
+      122: true,
+      123: true,
+      124: true,
+      125: true,
+      816: true,
+      837: true,
+      859: true,
+      860: true,
+      861: true,
+      862: true,
+      863: true,
+      864: true,
+      865: true,
+      866: true,
+      867: true,
+      894: true,
+      900: true
+    };
+
+    if (className === "tripoperatingadcell" || className === "tbrecommendedcell") {
+      return true;
+    }
+
+    if (includesAny(floorName, [
+      "品宣位",
+      "品宣图",
+      "运营位",
+      "瀑布流",
+      "热门商品",
+      "商品推荐",
+      "精选推荐",
+      "优惠券",
+      "活动推广",
+      "活动专区",
+      "商城推荐",
+      "商城专区"
+    ])) {
+      return true;
+    }
+
+    if (
+      resourceCode.indexOf("narrowpublicity010503") !== -1 ||
+      resourceCode.indexOf("promotionmodel010503") !== -1 ||
+      /^newhomeapptype050[1-4]$/.test(resourceCode)
     ) {
       return true;
     }
-  }
-  return false;
-}
 
-function shouldRemoveNode(node) {
-  if (!node || typeof node !== "object" || Array.isArray(node)) return false;
-  if (isCommunicationNode(node)) return false;
+    if (moduleId === 104 || moduleId === 113 || moduleId === 122) return true;
+    if (blockedComponentIds[currentComponentId]) return true;
 
-  var floorName = lower(firstValue(node, ["floorName", "floorTitle"]));
-  var className = lower(firstValue(node, ["className", "cellClassName", "viewClassName"]));
-  var componentName = lower(firstValue(node, ["componentName", "componentTitle"]));
-  var resourceCode = lower(firstValue(node, ["resourceDataCode", "resourceCode", "dataCode"]));
-  var moduleId = numberValue(firstValue(node, ["moduleId", "floorId"]));
-  var componentId = numberValue(firstValue(node, ["componentId", "componentID"]));
-  var moduleType = numberValue(firstValue(node, ["moduleType", "floorModuleType"]));
-  var floorLike = hasOwn(node, "floorName") ||
-    hasOwn(node, "moduleId") ||
-    hasOwn(node, "moduleType") ||
-    hasOwn(node, "resourceComponents") ||
-    hasOwn(node, "componentParamVo") ||
-    hasOwn(node, "componentVos");
-
-  if (className === "tripoperatingadcell" || className === "tbrecommendedcell") return true;
-  if (floorName.indexOf("品宣位") !== -1 ||
-      floorName.indexOf("运营位") !== -1 ||
-      floorName.indexOf("瀑布流") !== -1) return true;
-  if (resourceCode.indexOf("narrowpublicity010503") !== -1 ||
-      resourceCode.indexOf("promotionmodel010503") !== -1 ||
-      /^newhomeapptype050[1-4]$/.test(resourceCode)) return true;
-  if (moduleId === 104 || moduleId === 113 || moduleId === 122) return true;
-  if (componentId === 104 || componentId === 113 ||
-      componentId === 122 || componentId === 123 ||
-      componentId === 124 || componentId === 125) return true;
-  if (componentName.indexOf("广告位") !== -1 && floorLike) return true;
-  if ((moduleType === 1 || moduleType === 3 || moduleType === 4) &&
+    if (
       floorLike &&
-      (componentName.indexOf("广告") !== -1 ||
-       componentName.indexOf("推荐") !== -1 ||
-       hasOwn(node, "isShowPromotion"))) return true;
-  if (hasAssistantMarker(node)) return true;
-
-  return false;
-}
-
-var REMOVE = {};
-
-function cleanTree(value, depth) {
-  var i;
-  var key;
-  var child;
-  var output;
-
-  if (depth > 80) return value;
-
-  if (Array.isArray(value)) {
-    output = [];
-    for (i = 0; i < value.length; i += 1) {
-      child = cleanTree(value[i], depth + 1);
-      if (child !== REMOVE) output.push(child);
+      includesAny(componentName, [
+        "广告位",
+        "热门商品",
+        "商品推荐",
+        "精选推荐",
+        "优惠券",
+        "瀑布流",
+        "营销",
+        "活动推广",
+        "商城推荐"
+      ])
+    ) {
+      return true;
     }
-    return output;
+
+    if (
+      (moduleType === 1 || moduleType === 3 || moduleType === 4) &&
+      floorLike &&
+      (
+        includesAny(componentName, ["广告", "推荐", "营销", "优惠"]) ||
+        hasOwn(node, "isShowPromotion")
+      )
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
-  if (!value || typeof value !== "object") return value;
-  if (shouldRemoveNode(value)) return REMOVE;
+  function cleanTree(value, depth) {
+    var i;
+    var key;
+    var child;
+    var output;
 
-  for (key in value) {
-    if (!hasOwn(value, key)) continue;
-    child = cleanTree(value[key], depth + 1);
-    if (child === REMOVE) {
-      delete value[key];
-    } else {
-      value[key] = child;
+    if (depth > 80) return value;
+
+    if (Array.isArray(value)) {
+      output = [];
+      for (i = 0; i < value.length; i += 1) {
+        child = cleanTree(value[i], depth + 1);
+        if (child !== REMOVE) output.push(child);
+      }
+      return output;
     }
-  }
-  return value;
-}
 
-function emptyPayloadTemplate(kind) {
-  if (kind === "activity") {
+    if (!value || typeof value !== "object") return value;
+    if (shouldRemoveNode(value)) return REMOVE;
+
+    for (key in value) {
+      if (!hasOwn(value, key)) continue;
+      child = cleanTree(value[key], depth + 1);
+      if (child === REMOVE) {
+        delete value[key];
+      } else {
+        value[key] = child;
+      }
+    }
+    return value;
+  }
+
+  function emptyPayload(kind) {
+    if (kind === "activity") {
+      return {
+        activityList: [],
+        activities: [],
+        advertisementBaseVos: [],
+        banners: [],
+        isShow: false,
+        showPopup: false,
+        popNeedDisplay: false,
+        total: 0
+      };
+    }
+
     return {
-      activityList: [],
-      activities: [],
-      advertisementBaseVos: [],
-      banners: [],
-      isShow: false,
-      showPopup: false,
-      popNeedDisplay: false,
-      total: 0
+      items: [],
+      list: [],
+      rows: [],
+      records: [],
+      dataList: [],
+      models: [],
+      contents: [],
+      columns: [],
+      total: 0,
+      totalCount: 0,
+      totalPages: 0,
+      hasMore: false,
+      haveMore: false
     };
   }
-  return {
-    items: [],
-    list: [],
-    rows: [],
-    records: [],
-    dataList: [],
-    models: [],
-    contents: [],
-    total: 0,
-    totalCount: 0,
-    totalPages: 0,
-    hasMore: false,
-    haveMore: false
-  };
-}
 
-function neutralizeEnvelope(root, kind) {
-  var payloadKeys = ["body", "data", "result", "results"];
-  var i;
-  var key;
-  var changed = false;
+  function neutralizeEnvelope(root, kind) {
+    var payloadKeys = ["body", "data", "result", "results"];
+    var i;
+    var key;
+    var changed = false;
 
-  if (Array.isArray(root)) return [];
-  if (!root || typeof root !== "object") return root;
+    if (Array.isArray(root)) return [];
+    if (!root || typeof root !== "object") return root;
 
-  for (i = 0; i < payloadKeys.length; i += 1) {
-    key = payloadKeys[i];
-    if (!hasOwn(root, key)) continue;
-    root[key] = Array.isArray(root[key]) ? [] : emptyPayloadTemplate(kind);
-    changed = true;
-  }
-
-  if (!changed) {
-    root.items = [];
-    root.list = [];
-    root.rows = [];
-    root.records = [];
-    root.total = 0;
-    if (kind === "activity") {
-      root.activities = [];
-      root.activityList = [];
-      root.advertisementBaseVos = [];
-      root.isShow = false;
-      root.showPopup = false;
-      root.popNeedDisplay = false;
+    for (i = 0; i < payloadKeys.length; i += 1) {
+      key = payloadKeys[i];
+      if (!hasOwn(root, key)) continue;
+      root[key] = Array.isArray(root[key]) ? [] : emptyPayload(kind);
+      changed = true;
     }
+
+    if (!changed) {
+      root.items = [];
+      root.list = [];
+      root.rows = [];
+      root.records = [];
+      root.dataList = [];
+      root.columns = [];
+      root.total = 0;
+      root.totalCount = 0;
+      root.totalPages = 0;
+      root.hasMore = false;
+      root.haveMore = false;
+
+      if (kind === "activity") {
+        root.activities = [];
+        root.activityList = [];
+        root.advertisementBaseVos = [];
+        root.banners = [];
+        root.isShow = false;
+        root.showPopup = false;
+        root.popNeedDisplay = false;
+      }
+    }
+
+    return root;
   }
 
-  return root;
-}
+  function matches(expression) {
+    return expression.test(url);
+  }
 
-function matches(expression) {
-  return expression.test(url);
-}
-
-try {
-  if (!source) {
+  if (!body) {
     $done({});
-  } else {
-    var json = JSON.parse(source);
+    return;
+  }
+
+  try {
+    var json = JSON.parse(body);
     var output = json;
 
     if (matches(/\/api\/assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)(?:\?|$)/i)) {
@@ -224,12 +394,12 @@ try {
       if (output === REMOVE) output = {};
     } else if (matches(/\/api\/activity\/v1\/getActivityInfo(?:\?|$)/i)) {
       output = neutralizeEnvelope(json, "activity");
-    } else if (matches(/\/api\/(?:layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/guessLike\/(?:guessLikeTab|guessLikeTabData|guessLikeCityAroundTabData)|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/bi\/queryPost|content\/v1\/content\/list|destination\/v1\/(?:rec\/(?:guessYouLike|queryData)|recommend\/guessYouLike))(?:\?|$)/i)) {
+    } else if (matches(/\/api\/(?:layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/guessLike\/.*|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/(?:bi\/queryPost|post\/.*)|socialcontact\/v1\/comment\/.*|content\/v1\/.*|ls\/v1\/content\/.*|ls\/v1\/opensearch\/hotsearchword.*|destination\/v1\/(?:rec\/(?:guessYouLike|queryData|columnListByRegion)|recommend\/guessYouLike)|service\/v1\/mission\/.*|assistant\/(?:message\/recommend|alertV2))(?:\?|$)/i)) {
       output = neutralizeEnvelope(json, "list");
     }
 
     $done({ body: JSON.stringify(output) });
+  } catch (error) {
+    $done({});
   }
-} catch (error) {
-  $done({});
-}
+})();
