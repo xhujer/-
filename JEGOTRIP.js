@@ -379,6 +379,82 @@
     return root;
   }
 
+  function blankDestinationValue(value, keyName, depth) {
+    var key;
+    var normalizedKey = text(keyName);
+
+    if (depth > 80) return value;
+    if (Array.isArray(value)) return [];
+    if (value == null) return value;
+
+    if (typeof value === "object") {
+      for (key in value) {
+        if (!hasOwn(value, key)) continue;
+        value[key] = blankDestinationValue(value[key], key, depth + 1);
+      }
+      return value;
+    }
+
+    if (typeof value === "boolean") {
+      if (/^(?:finished|isfinished|loadfinished|nomoredata|end|isend)$/.test(normalizedKey)) {
+        return true;
+      }
+      if (
+        /^(?:loading|isloading|showloading|hasmore|havemore|more|isshow|show|visible|display)$/.test(
+          normalizedKey
+        )
+      ) {
+        return false;
+      }
+      return value;
+    }
+
+    if (typeof value === "number") {
+      if (
+        /^(?:total|totalcount|totalpages|count|recordcount|itemcount|floorcount)$/.test(
+          normalizedKey
+        )
+      ) {
+        return 0;
+      }
+      return value;
+    }
+
+    if (
+      typeof value === "string" &&
+      /(?:title|subtitle|name|desc|description|content|text|image|img|icon|cover|photo|picture|url|link|scheme|html|address)/.test(
+        normalizedKey
+      )
+    ) {
+      return "";
+    }
+
+    return value;
+  }
+
+  function neutralizeDestination(root) {
+    var payloadKeys = ["body", "data", "result", "results"];
+    var changed = false;
+    var i;
+    var key;
+
+    if (Array.isArray(root)) return [];
+    if (!root || typeof root !== "object") return root;
+
+    for (i = 0; i < payloadKeys.length; i += 1) {
+      key = payloadKeys[i];
+      if (!hasOwn(root, key)) continue;
+      root[key] = blankDestinationValue(root[key], key, 0);
+      changed = true;
+    }
+
+    if (!changed) {
+      root = blankDestinationValue(root, "", 0);
+    }
+
+    return root;
+  }
+
   function matches(expression) {
     return expression.test(url);
   }
@@ -400,14 +476,16 @@
 
     if (matches(/\/api\/assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)(?:\?|$)/i)) {
       if (isDestinationRequest()) {
-        output = neutralizeEnvelope(json, "list");
+        output = neutralizeDestination(json);
       } else {
         output = cleanTree(json, 0);
         if (output === REMOVE) output = {};
       }
     } else if (matches(/\/api\/activity\/v1\/getActivityInfo(?:\?|$)/i)) {
       output = neutralizeEnvelope(json, "activity");
-    } else if (matches(/\/api\/(?:layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/init\/destinationModel|layout\/v1\/guessLike\/.*|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/(?:bi\/queryPost|post\/.*)|socialcontact\/v1\/comment\/.*|content\/v1\/.*|ls\/v1\/content\/.*|ls\/v1\/opensearch\/hotsearchword.*|destination\/v1\/.*|service\/v1\/mission\/.*|assistant\/(?:message\/recommend|alertV2))(?:\?|$)/i)) {
+    } else if (matches(/\/api\/(?:layout\/v1\/init\/destinationModel|destination\/v1\/.*)(?:\?|$)/i)) {
+      output = neutralizeDestination(json);
+    } else if (matches(/\/api\/(?:layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/guessLike\/.*|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/(?:bi\/queryPost|post\/.*)|socialcontact\/v1\/comment\/.*|content\/v1\/.*|ls\/v1\/content\/.*|ls\/v1\/opensearch\/hotsearchword.*|service\/v1\/mission\/.*|assistant\/(?:message\/recommend|alertV2))(?:\?|$)/i)) {
       output = neutralizeEnvelope(json, "list");
     }
 
