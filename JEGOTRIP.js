@@ -5,6 +5,9 @@
   var body = typeof $response !== "undefined" && typeof $response.body === "string"
     ? $response.body
     : "";
+  var requestBody = typeof $request !== "undefined" && typeof $request.body === "string"
+    ? $request.body
+    : "";
   var REMOVE = {};
 
   function hasOwn(object, key) {
@@ -380,6 +383,12 @@
     return expression.test(url);
   }
 
+  function isDestinationRequest() {
+    return /destination(?:model)?|destinationpage|destpage|目的地/i.test(
+      url + " " + requestBody
+    );
+  }
+
   if (!body) {
     $done({});
     return;
@@ -390,11 +399,15 @@
     var output = json;
 
     if (matches(/\/api\/assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)(?:\?|$)/i)) {
-      output = cleanTree(json, 0);
-      if (output === REMOVE) output = {};
+      if (isDestinationRequest()) {
+        output = neutralizeEnvelope(json, "list");
+      } else {
+        output = cleanTree(json, 0);
+        if (output === REMOVE) output = {};
+      }
     } else if (matches(/\/api\/activity\/v1\/getActivityInfo(?:\?|$)/i)) {
       output = neutralizeEnvelope(json, "activity");
-    } else if (matches(/\/api\/(?:layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/guessLike\/.*|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/(?:bi\/queryPost|post\/.*)|socialcontact\/v1\/comment\/.*|content\/v1\/.*|ls\/v1\/content\/.*|ls\/v1\/opensearch\/hotsearchword.*|destination\/v1\/(?:rec\/(?:guessYouLike|queryData|columnListByRegion)|recommend\/guessYouLike)|service\/v1\/mission\/.*|assistant\/(?:message\/recommend|alertV2))(?:\?|$)/i)) {
+    } else if (matches(/\/api\/(?:layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/init\/destinationModel|layout\/v1\/guessLike\/.*|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/(?:bi\/queryPost|post\/.*)|socialcontact\/v1\/comment\/.*|content\/v1\/.*|ls\/v1\/content\/.*|ls\/v1\/opensearch\/hotsearchword.*|destination\/v1\/.*|service\/v1\/mission\/.*|assistant\/(?:message\/recommend|alertV2))(?:\?|$)/i)) {
       output = neutralizeEnvelope(json, "list");
     }
 
