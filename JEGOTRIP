@@ -1,12 +1,13 @@
-#!name=无忧行精准净化版
-#!desc=自适应移除首页品宣、运营活动、推荐瀑布流、活动弹窗与助手入口；保留登录、会员、境外流量/语音、VoIP电话托管、来电短信提醒和基础目的地
+#!name=无忧行精准净化版 V2
+#!desc=V2网络净化版：移除服务器下发的首页品宣、运营活动、推荐瀑布流、文章动态、活动弹窗、签到任务与助手推广；保留登录、用户、会员、境外流量/语音、VoIP电话托管、来电短信提醒及基础目的地
 #!author=Ming
 #!date=2026-07-30
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
 #!openUrl=https://apps.apple.com/app/id1037589370
 #!bundleId=com.cmi.jegotrip
 #!system=iOS,iPadOS
-#!loon_version=3.2.4
+#!loon_version=3.2.4(787)
+#!tag=无忧行,去广告
 
 [Rule]
 
@@ -27,25 +28,12 @@ DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com
 ^https?:\/\/app-product\.jegotrip\.com\.cn\/logstores\/clickevent_ios_v5\/shards\/lb(?:\/|\?|$).* url reject
 ^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/device\/v1\/advertisingAttribution(?:\/|\?|$).* url reject-dict
 
-# 友盟广告消息；保留同域推送、解析与上行链路
+# 仅拦截友盟广告消息，保留同域正常推送链路
 ^https?:\/\/msg\.umengcloud\.com\/admsg\/v[23]\/(?:launch|getmsg|stats)(?:\/|\?|$).* url reject-dict
-
-# 签到、任务与福利
-^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/service\/v1\/mission\/.* url reject-dict
-
-# 助手推荐与悬浮提醒
-^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/assistant\/(?:message\/recommend|alertV2)(?:\/|\?|$).* url reject-dict
 
 [Script]
 
-# 根据静态楼层标识递归净化，兼容正常首页与抓包检测后的替代组件
-http-response ^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/(?:assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)|activity\/v1\/getActivityInfo|layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/guessLike\/(?:guessLikeTab|guessLikeTabData|guessLikeCityAroundTabData)|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/bi\/queryPost|content\/v1\/content\/list|destination\/v1\/(?:rec\/(?:guessYouLike|queryData)|recommend\/guessYouLike))(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js, requires-body=true, timeout=20, tag=无忧行首页自适应净化
+http-response ^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/(?:assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)|activity\/v1\/getActivityInfo|layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/guessLike\/(?:guessLikeTab|guessLikeTabData|guessLikeCityAroundTabData)|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/bi\/queryPost|content\/v1\/content\/list|destination\/v1\/(?:rec\/(?:guessYouLike|queryData|columnListByRegion)|recommend\/guessYouLike)|service\/v1\/mission\/.*|assistant\/(?:message\/recommend|alertV2))(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js,requires-body=true,timeout=20,tag=无忧行首页自适应净化,enable=true
 
 [MITM]
-
-hostname =
-app.jegotrip.com.cn,
-app3.jegotrip.com.cn,
-app-product.jegotrip.com.cn,
-analysis.tratao.com,
-msg.umengcloud.com
+hostname = app.jegotrip.com.cn,app3.jegotrip.com.cn,app-product.jegotrip.com.cn,analysis.tratao.com,msg.umengcloud.com
