@@ -519,7 +519,7 @@ function analyze(response) {
 
   if (
     /"success"\s*:\s*true/i.test(text) ||
-    /签到成功|签到奖励|获得.{0,20}(积分|蜂蜜)/.test(text)
+    /签到成功|签到奖励|获得.{0,20}积分/.test(text)
   ) {
     return {
       ok: true,
