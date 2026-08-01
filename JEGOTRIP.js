@@ -8,6 +8,7 @@
   var requestBody = typeof $request !== "undefined" && typeof $request.body === "string"
     ? $request.body
     : "";
+  var isRequestPhase = typeof $response === "undefined";
   var REMOVE = {};
 
   function hasOwn(object, key) {
@@ -463,6 +464,43 @@
     return /destination(?:model)?|destinationpage|destpage|目的地/i.test(
       url + " " + requestBody
     );
+  }
+
+  function isAssemblyRequest() {
+    return /\/api\/assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)(?:\?|$)/i.test(
+      url
+    );
+  }
+
+  function isDirectDestinationRequest() {
+    return /\/api\/(?:layout\/v1\/init\/destinationModel|destination\/v1\/.*)(?:\?|$)/i.test(
+      url
+    );
+  }
+
+  function hardBlankResponse() {
+    return {
+      response: {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store"
+        },
+        body: "{}"
+      }
+    };
+  }
+
+  if (isRequestPhase) {
+    if (
+      isDirectDestinationRequest() ||
+      (isAssemblyRequest() && isDestinationRequest())
+    ) {
+      $done(hardBlankResponse());
+    } else {
+      $done({});
+    }
+    return;
   }
 
   if (!body) {
