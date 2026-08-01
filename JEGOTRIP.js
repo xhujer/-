@@ -478,6 +478,12 @@
     );
   }
 
+  function isLegacyFloorDataRequest() {
+    return /^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData(?:\?|$)/i.test(
+      url
+    );
+  }
+
   function hardBlankResponse() {
     return {
       response: {
@@ -493,6 +499,7 @@
 
   if (isRequestPhase) {
     if (
+      isLegacyFloorDataRequest() ||
       isDirectDestinationRequest() ||
       (isAssemblyRequest() && isDestinationRequest())
     ) {
