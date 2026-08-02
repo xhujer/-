@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "小黑盒签到与任务";
-const SCRIPT_VERSION = "3.0.3";
+const SCRIPT_VERSION = "3.0.4";
 const STORAGE_KEY = "xhh_sign_accounts_v1";
 const CAPTURE_NOTICE_KEY = "xhh_sign_capture_notice_v1";
 const API_BASE = "https://api.xiaoheihe.cn";
@@ -325,6 +325,12 @@ async function captureAccount() {
     updatedAt: Date.now()
   };
   const index = accounts.findIndex((item) => String(item.heyboxId) === String(heyboxId));
+  const previousAccount = index >= 0 ? accounts[index] : null;
+  const previousPkey = previousAccount
+    ? pickCookieValue(previousAccount.cookie, "pkey")
+    : "";
+  const currentPkey = pickCookieValue(cookie, "pkey");
+  const shouldNotify = !previousAccount || previousPkey !== currentPkey;
   if (index >= 0) accounts[index] = account;
   else accounts.push(account);
   while (accounts.length > MAX_ACCOUNTS) accounts.shift();
@@ -334,9 +340,9 @@ async function captureAccount() {
     return;
   }
 
-  const fingerprint = heyboxId + "|" + md5(cookie);
-  if (readStore(CAPTURE_NOTICE_KEY, "") !== fingerprint) {
-    writeStore(fingerprint, CAPTURE_NOTICE_KEY);
+  const fingerprint = heyboxId + "|" + md5(currentPkey);
+  writeStore(fingerprint, CAPTURE_NOTICE_KEY);
+  if (shouldNotify) {
     notify(
       SCRIPT_NAME,
       "✅ 获取账号成功",
