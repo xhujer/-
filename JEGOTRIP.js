@@ -8,7 +8,6 @@
   var requestBody = typeof $request !== "undefined" && typeof $request.body === "string"
     ? $request.body
     : "";
-  var isRequestPhase = typeof $response === "undefined";
   var REMOVE = {};
 
   function hasOwn(object, key) {
@@ -195,20 +194,7 @@
       122: true,
       123: true,
       124: true,
-      125: true,
-      816: true,
-      837: true,
-      859: true,
-      860: true,
-      861: true,
-      862: true,
-      863: true,
-      864: true,
-      865: true,
-      866: true,
-      867: true,
-      894: true,
-      900: true
+      125: true
     };
 
     if (className === "tripoperatingadcell" || className === "tbrecommendedcell") {
@@ -244,9 +230,10 @@
     if (blockedComponentIds[currentComponentId]) return true;
 
     if (
-      floorLike &&
+      (floorLike || hasOwn(node, "componentName")) &&
       includesAny(componentName, [
         "广告位",
+        "品宣图",
         "热门商品",
         "商品推荐",
         "精选推荐",
@@ -464,50 +451,6 @@
     return /destination(?:model)?|destinationpage|destpage|目的地/i.test(
       url + " " + requestBody
     );
-  }
-
-  function isAssemblyRequest() {
-    return /\/api\/assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)(?:\?|$)/i.test(
-      url
-    );
-  }
-
-  function isDirectDestinationRequest() {
-    return /\/api\/(?:layout\/v1\/init\/destinationModel|destination\/v1\/.*)(?:\?|$)/i.test(
-      url
-    );
-  }
-
-  function isLegacyFloorDataRequest() {
-    return /^https?:\/\/app\.jegotrip\.com\.cn\/api\/assembly\/v1\/queryFloorData(?:\?|$)/i.test(
-      url
-    );
-  }
-
-  function hardBlankResponse() {
-    return {
-      response: {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "Cache-Control": "no-store"
-        },
-        body: "{}"
-      }
-    };
-  }
-
-  if (isRequestPhase) {
-    if (
-      isLegacyFloorDataRequest() ||
-      isDirectDestinationRequest() ||
-      (isAssemblyRequest() && isDestinationRequest())
-    ) {
-      $done(hardBlankResponse());
-    } else {
-      $done({});
-    }
-    return;
   }
 
   if (!body) {
