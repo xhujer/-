@@ -41,6 +41,57 @@
     return false;
   }
 
+  function decodedRequestBody() {
+    var decoded = requestBody;
+
+    try {
+      decoded = decodeURIComponent(requestBody.replace(/\+/g, "%20"));
+    } catch (error) {}
+
+    return requestBody + " " + decoded;
+  }
+
+  function requestHasMarker(markerNames, identifierNames) {
+    var source = text(decodedRequestBody());
+    var markerMatched = false;
+    var identifierMatched = false;
+    var i;
+
+    for (i = 0; i < markerNames.length; i += 1) {
+      if (source.indexOf(text(markerNames[i])) !== -1) {
+        markerMatched = true;
+        break;
+      }
+    }
+
+    for (i = 0; i < identifierNames.length; i += 1) {
+      if (source.indexOf(text(identifierNames[i])) !== -1) {
+        identifierMatched = true;
+        break;
+      }
+    }
+
+    return markerMatched && identifierMatched;
+  }
+
+  function isConfirmedCommonAdRequest() {
+    return requestHasMarker(
+      ["advertiseId"],
+      [
+        "WYBafterpayBanner",
+        "N1mine#privilege010501",
+        "N2mine#privilege010501"
+      ]
+    );
+  }
+
+  function isConfirmedHotelAdRequest() {
+    return requestHasMarker(
+      ["advertisementId"],
+      ["HomestayTopAd", "HotelMidAd", "HotelTopAd"]
+    );
+  }
+
   function isCommunicationNode(node) {
     var floorName = firstValue(node, ["floorName", "name", "title", "componentName"]);
     var className = firstValue(node, ["className", "cellClassName", "viewClassName"]);
@@ -367,6 +418,46 @@
     return root;
   }
 
+  function neutralizeAdImages(root) {
+    var payloadKeys = ["body", "data", "result", "results"];
+    var i;
+    var key;
+    var payload;
+    var changed = false;
+
+    if (Array.isArray(root)) return [];
+    if (!root || typeof root !== "object") return root;
+
+    for (i = 0; i < payloadKeys.length; i += 1) {
+      key = payloadKeys[i];
+      if (!hasOwn(root, key)) continue;
+
+      payload = root[key];
+      if (Array.isArray(payload)) {
+        root[key] = [];
+      } else if (payload && typeof payload === "object") {
+        payload.images = [];
+        if (hasOwn(payload, "imageList")) payload.imageList = [];
+        if (hasOwn(payload, "banners")) payload.banners = [];
+        if (hasOwn(payload, "advertisements")) payload.advertisements = [];
+        if (hasOwn(payload, "total")) payload.total = 0;
+      } else {
+        root[key] = { images: [] };
+      }
+      changed = true;
+    }
+
+    if (!changed) {
+      root.images = [];
+      if (hasOwn(root, "imageList")) root.imageList = [];
+      if (hasOwn(root, "banners")) root.banners = [];
+      if (hasOwn(root, "advertisements")) root.advertisements = [];
+      if (hasOwn(root, "total")) root.total = 0;
+    }
+
+    return root;
+  }
+
   function blankDestinationValue(value, keyName, depth) {
     var key;
     var normalizedKey = text(keyName);
@@ -462,7 +553,13 @@
     var json = JSON.parse(body);
     var output = json;
 
-    if (matches(/\/api\/assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)(?:\?|$)/i)) {
+    if (matches(/\/api\/banner\/v1\/sync(?:\?|$)/i)) {
+      if (isConfirmedCommonAdRequest()) output = neutralizeAdImages(json);
+    } else if (matches(/\/api\/layout\/v1\/sync(?:\?|$)/i)) {
+      if (isConfirmedHotelAdRequest()) output = neutralizeEnvelope(json, "list");
+    } else if (matches(/\/api\/(?:service\/)?ls\/v1\/bannerpolymerize\/(?:list|typeList|recommendBannerList)(?:\?|$)/i)) {
+      output = neutralizeEnvelope(json, "list");
+    } else if (matches(/\/api\/assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)(?:\?|$)/i)) {
       if (isDestinationRequest()) {
         output = neutralizeDestination(json);
       } else {
