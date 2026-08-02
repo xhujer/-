@@ -1,15 +1,15 @@
 #!name=小黑盒签到与任务
 #!desc=自动获取账号并执行签到、分享帖子、分享游戏详情、分享游戏评价；所有任务均以服务器回查状态为准。
 #!author=Ming
-#!date=2026-07-29
-#!version=3.0.2
+#!date=2026-08-02
+#!version=3.0.3
 #!icon=https://api.xiaoheihe.cn/favicon.ico
 #!system=iOS,iPadOS
 #!tag=小黑盒,签到,任务
 
 [Argument]
 
-cron = input,"00 8 * * *",tag=签到时间,desc=默认每天凌晨 00:15 执行
+cron = input,"15 0 * * *",tag=签到时间,desc=默认每天凌晨 00:15 执行
 
 cookieCapture = switch,true,tag=自动获取账号,desc=打开小黑盒并进入“我的”页面或刷新时自动保存账号凭据
 
@@ -21,7 +21,7 @@ publishTask = switch,false,tag=执行发布内容任务,desc=存在公开发帖�
 
 http-request ^https:\/\/api\.xiaoheihe\.cn\/.*[?&](?:heybox_id|user_id)= script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/xiaoheihe.js,timeout=10,tag=小黑盒获取账号,enable={cookieCapture}
 
-cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/xiaoheihe.js,timeout=300,tag=小黑盒签到与任务,argument=[{dailyTasks},{publishTask}],enable=true
+cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/xiaoheihe.js,timeout=600,tag=小黑盒签到与任务,argument=[{dailyTasks},{publishTask}],enable=true
 
 [MITM]
 
