@@ -1,5 +1,5 @@
-#!name=无忧行去广告
-#!desc=V3.0逆向精简稳定版：按IPA确认的组件标识移除首页品宣、运营位、推荐瀑布流、文章社区、活动弹窗、签到任务、助手推广和目的地远程内容；保留登录、用户、会员、境外流量/语音、VoIP电话托管、来电短信提醒及正常推送
+#!name=无忧行精准净化版 V3.1
+#!desc=V3.1广告ID精确过滤版：在V3.0稳定逻辑上增加已确认广告ID与Banner聚合接口过滤；保留登录、用户、会员、境外流量/语音、VoIP电话托管、来电短信提醒及正常推送
 #!author=Ming
 #!date=2026-08-02
 #!icon=https://imgtolinkx.com/i/CO0eIFoS
@@ -27,7 +27,7 @@ DOMAIN,proj-xtrace-3d408a16b0f9bb39e477e8c4c494514e-cn-hangzhou.log.aliyuncs.com
 
 [Script]
 
-http-response ^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/(?:assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)|activity\/v1\/getActivityInfo|layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/init\/destinationModel|layout\/v1\/guessLike\/.*|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/(?:bi\/queryPost|post\/.*)|socialcontact\/v1\/comment\/.*|content\/v1\/.*|ls\/v1\/content\/.*|ls\/v1\/opensearch\/hotsearchword.*|destination\/v1\/.*|service\/v1\/mission\/.*|assistant\/(?:message\/recommend|alertV2))(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js?v=3.0,requires-body=true,timeout=20,tag=无忧行精准净化V3.0,enable=true
+http-response ^https?:\/\/app(?:3)?\.jegotrip\.com\.cn\/api\/(?:banner\/v1\/sync|layout\/v1\/sync|(?:service\/)?ls\/v1\/bannerpolymerize\/(?:list|typeList|recommendBannerList)|assembly\/v1\/(?:findByPageCode|queryExtendDataSources|queryDataSources)|activity\/v1\/getActivityInfo|layout\/v1\/home\/(?:publicity|operation\/space)|layout\/v1\/init\/destinationModel|layout\/v1\/guessLike\/.*|service\/layout\/recommend\/v1\/(?:query|update)|community\/v1\/(?:bi\/queryPost|post\/.*)|socialcontact\/v1\/comment\/.*|content\/v1\/.*|ls\/v1\/content\/.*|ls\/v1\/opensearch\/hotsearchword.*|destination\/v1\/.*|service\/v1\/mission\/.*|assistant\/(?:message\/recommend|alertV2))(?:\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/JEGOTRIP.js?v=3.1,requires-body=true,timeout=20,tag=无忧行精准净化V3.1,enable=true
 
 [MITM]
 hostname = app.jegotrip.com.cn,app3.jegotrip.com.cn,app-product.jegotrip.com.cn,analysis.tratao.com,msg.umengcloud.com
