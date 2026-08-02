@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "小黑盒签到与任务";
-const SCRIPT_VERSION = "3.0.2";
+const SCRIPT_VERSION = "3.0.3";
 const STORAGE_KEY = "xhh_sign_accounts_v1";
 const CAPTURE_NOTICE_KEY = "xhh_sign_capture_notice_v1";
 const API_BASE = "https://api.xiaoheihe.cn";
@@ -466,76 +466,110 @@ function unwrapHkeyPayload(payload) {
   return payload;
 }
 
+async function withRetry(action, handler) {
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const result = await handler(attempt);
+      if (attempt > 1) {
+        console.log("[重试成功] " + action + " 第" + attempt + "次");
+      }
+      return result;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) {
+        console.log(
+          "[准备重试] " +
+            action +
+            " 第" +
+            attempt +
+            "次失败：" +
+            String(error.message || error)
+        );
+        await sleep(700 * attempt);
+      }
+    }
+  }
+  throw new Error(
+    action + "连续3次失败：" + String((lastError && lastError.message) || lastError)
+  );
+}
+
 async function requestHkey(account, path, timeSec) {
-  const time = String(timeSec || Math.floor(Date.now() / 1000));
-  const payload = await getJsonRequest(
-    {
-      url:
-        HKEY_API +
-        "?" +
-        encodeQuery({
-          mode: "request",
+  return withRetry("GET hkey " + path, async () => {
+    const time = String(timeSec || Math.floor(Date.now() / 1000));
+    const payload = await getJsonRequest(
+      {
+        url:
+          HKEY_API +
+          "?" +
+          encodeQuery({
+            mode: "request",
+            path,
+            time,
+            imei: account.imei,
+            heybox_id: account.heyboxId
+          }),
+        headers: { "User-Agent": APP_UA, Accept: "application/json" },
+        "auto-cookie": false
+      },
+      "hkey请求"
+    );
+    if (payload && payload.status && toText(payload.status) !== OK_STATE) {
+      throw new Error("hkey接口：" + apiFailureMessage(payload, "签名失败"));
+    }
+    const result = unwrapHkeyPayload(payload);
+    if (!result.hkey || !result.version || !/^\d+$/.test(toText(result.build))) {
+      throw new Error("hkey接口缺少 hkey/version/build");
+    }
+    return {
+      hkey: toText(result.hkey),
+      version: toText(result.version),
+      build: toText(result.build),
+      time
+    };
+  });
+}
+
+async function requestReportData(account, path, textPayload) {
+  return withRetry("POST hkey " + path, async () => {
+    const time = String(Math.floor(Date.now() / 1000));
+    const payload = await postJsonRequest(
+      {
+        url: HKEY_API,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify({
+          mode: "report",
           path,
+          text: textPayload,
           time,
           imei: account.imei,
           heybox_id: account.heyboxId
         }),
-      headers: { "User-Agent": APP_UA, Accept: "application/json" }
-    },
-    "hkey请求"
-  );
-  if (payload && payload.status && toText(payload.status) !== OK_STATE) {
-    throw new Error("hkey接口：" + apiFailureMessage(payload, "签名失败"));
-  }
-  const result = unwrapHkeyPayload(payload);
-  if (!result.hkey || !result.version || !/^\d+$/.test(toText(result.build))) {
-    throw new Error("hkey接口缺少 hkey/version/build");
-  }
-  return {
-    hkey: toText(result.hkey),
-    version: toText(result.version),
-    build: toText(result.build),
-    time
-  };
-}
-
-async function requestReportData(account, path, textPayload) {
-  const time = String(Math.floor(Date.now() / 1000));
-  const payload = await postJsonRequest(
-    {
-      url: HKEY_API,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json"
+        "auto-cookie": false
       },
-      body: JSON.stringify({
-        mode: "report",
-        path,
-        text: textPayload,
-        time,
-        imei: account.imei,
-        heybox_id: account.heyboxId
-      }),
-      "auto-cookie": false
-    },
-    "任务数据编码"
-  );
-  if (payload && payload.status && toText(payload.status) !== OK_STATE) {
-    throw new Error("任务数据编码：" + apiFailureMessage(payload, "编码失败"));
-  }
-  const result = unwrapHkeyPayload(payload);
-  if (
-    !result.hkey ||
-    !result.version ||
-    !/^\d+$/.test(toText(result.build)) ||
-    !result.time ||
-    !result.data ||
-    !result.key ||
-    !result.sid
-  ) {
-    throw new Error("任务数据编码返回字段不完整");
-  }
-  return result;
+      "任务数据编码"
+    );
+    if (payload && payload.status && toText(payload.status) !== OK_STATE) {
+      throw new Error("任务数据编码：" + apiFailureMessage(payload, "编码失败"));
+    }
+    const result = unwrapHkeyPayload(payload);
+    if (
+      !result.hkey ||
+      !result.version ||
+      !/^\d+$/.test(toText(result.build)) ||
+      !result.time ||
+      !result.data ||
+      !result.key ||
+      !result.sid
+    ) {
+      throw new Error("任务数据编码返回字段不完整");
+    }
+    return result;
+  });
 }
 
 function appHeaders(account, hasBody) {
@@ -824,7 +858,11 @@ async function settleTask(account, task, detail) {
 
 async function executeSign(account) {
   const first = await appGet(account, PATH_SIGN);
-  if (first && first.status && toText(first.status) !== OK_STATE) {
+  const firstStatus = toText(first && first.status);
+  const firstResult =
+    first && first.result && typeof first.result === "object" ? first.result : {};
+  const firstState = toText(firstResult.state || firstResult.sign_state);
+  if (firstStatus !== OK_STATE) {
     return { ok: false, message: apiFailureMessage(first, "签到失败") };
   }
   await sleep(800);
@@ -833,23 +871,52 @@ async function executeSign(account) {
     finalPayload && finalPayload.result && typeof finalPayload.result === "object"
       ? finalPayload.result
       : {};
-  const state = toText(result.state);
-  if (
-    (toText(finalPayload && finalPayload.status) === OK_STATE && state === OK_STATE) ||
-    state === "ignore"
-  ) {
-    const details = [];
-    if (result.sign_in_coin) details.push("+" + result.sign_in_coin + "H币");
-    if (result.sign_in_exp) details.push("+" + result.sign_in_exp + "经验");
-    if (result.sign_in_streak) details.push("连签" + result.sign_in_streak + "天");
+  const finalStatus = toText(finalPayload && finalPayload.status);
+  const state = toText(result.state || result.sign_state || result.sign_status);
+  const message = toText(finalPayload && (finalPayload.msg || finalPayload.message));
+  console.log(
+    "[签到状态详情] " +
+      JSON.stringify({
+        firstStatus,
+        firstState,
+        finalStatus,
+        state,
+        message,
+        isSigned:
+          result.is_signed !== undefined
+            ? result.is_signed
+            : result.isSigned !== undefined
+              ? result.isSigned
+              : ""
+      })
+  );
+
+  const failureText = (message + " " + state).trim();
+  const explicitlyFailed =
+    /失败|错误|非法|无效|未签到|待签到|验证参数/i.test(failureText) ||
+    /^(fail|failed|error|invalid|waiting|unsigned)$/i.test(state);
+  if (finalStatus !== OK_STATE || explicitlyFailed) {
     return {
-      ok: true,
-      message: details.length ? details.join(" ") : state === "ignore" ? "今日已签到" : "签到完成"
+      ok: false,
+      message: message || state || "签到状态未确认"
     };
   }
+
+  const details = [];
+  if (result.sign_in_coin) details.push("+" + result.sign_in_coin + "H币");
+  if (result.sign_in_exp) details.push("+" + result.sign_in_exp + "经验");
+  if (result.sign_in_streak) details.push("连签" + result.sign_in_streak + "天");
+  const alreadySigned =
+    firstState === "ignore" ||
+    state === "ignore" ||
+    /已签到|已经签到|重复签到/.test(message);
   return {
-    ok: false,
-    message: apiFailureMessage(finalPayload, state || "签到状态未确认")
+    ok: true,
+    message: details.length
+      ? details.join(" ")
+      : alreadySigned
+        ? "今日已签到"
+        : message || "签到状态接口已确认"
   };
 }
 
@@ -1145,6 +1212,8 @@ if (typeof module !== "undefined" && module.exports) {
     isDailyTask,
     requestHkey,
     requestReportData,
+    withRetry,
+    executeSign,
     appGet,
     postEncryptedForm
   };
