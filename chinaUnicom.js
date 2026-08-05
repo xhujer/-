@@ -5202,7 +5202,7 @@
 
   // chinaUnicom.source.js
   var CryptoJS = require_crypto_js();
-  var VERSION = "v1.1.1-loon.2";
+  var VERSION = "v1.1.1-loon.3";
   var STORE_KEY = "cu_accounts_v2";
   var DEVICE_KEY = "cu_device_ids_v2";
   var UA = "Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}";
@@ -5379,6 +5379,37 @@
     const k = Object.keys(headers || {}).find((x) => x.toLowerCase() === name.toLowerCase());
     return k ? headers[k] : "";
   }
+  function findNestedValue(value, names, depth = 0) {
+    if (depth > 5 || value === null || value === void 0) return "";
+    if (typeof value !== "object") return "";
+    for (const key of Object.keys(value)) {
+      if (names.some((name) => key.toLowerCase() === name.toLowerCase())) {
+        const found = value[key];
+        if (found !== null && found !== void 0 && typeof found !== "object") return String(found);
+      }
+    }
+    for (const key of Object.keys(value)) {
+      const found = findNestedValue(value[key], names, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+  function parseCapturedBody(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return {};
+    const json = safeJSON(text, null);
+    if (json && typeof json === "object") return json;
+    const parsed = parseForm(text);
+    if (Object.keys(parsed).length) return parsed;
+    try {
+      const decoded = decodeURIComponent(text);
+      const decodedJSON = safeJSON(decoded, null);
+      if (decodedJSON && typeof decodedJSON === "object") return decodedJSON;
+      return parseForm(decoded);
+    } catch (_) {
+      return {};
+    }
+  }
   function http(method, url, options = {}) {
     return new Promise((resolve) => {
       const params = { url, timeout: options.timeout || 15e3, headers: options.headers || {}, "auto-redirect": options.redirect !== false, "auto-cookie": options.cookie !== false, alpn: options.alpn || "h2" };
@@ -5389,14 +5420,18 @@
     });
   }
   async function captureAccount() {
-    const body = parseForm($request.body || "");
+    const body = parseCapturedBody($request.body || "");
     const query = qs($request.url);
     const cookie = getHeader($request.headers, "Cookie");
     const cookieObj = parseForm(cookie.replace(/;\s*/g, "&"));
-    const token = String(body.token_online || query.token_online || cookieObj.token_online || "").trim();
-    const appId = String(body.appId || query.appId || cookieObj.appId || "").trim();
+    const token = String(findNestedValue(body, ["token_online", "tokenOnline"]) || query.token_online || query.tokenOnline || cookieObj.token_online || cookieObj.tokenOnline || getHeader($request.headers, "token_online") || getHeader($request.headers, "tokenOnline") || "").trim();
+    const appId = String(findNestedValue(body, ["appId", "appid", "app_id"]) || query.appId || query.appid || query.app_id || cookieObj.appId || cookieObj.appid || getHeader($request.headers, "appId") || getHeader($request.headers, "appid") || "").trim();
     if (!token) {
-      console.log("[\u4E2D\u56FD\u8054\u901A] \u672A\u5728\u8BF7\u6C42\u4E2D\u627E\u5230 token_online");
+      const bodyType = String(getHeader($request.headers, "Content-Type") || "\u672A\u77E5");
+      console.log(`[\u4E2D\u56FD\u8054\u901A] \u6293\u53D6\u89C4\u5219\u5DF2\u89E6\u53D1\uFF0C\u4F46\u672A\u5728\u8BF7\u6C42\u4E2D\u627E\u5230 token_online\uFF1BContent-Type=${bodyType}\uFF0CBodyLength=${String($request.body || "").length}`);
+      $notification.post("\u4E2D\u56FD\u8054\u901A\u8D26\u53F7\u6293\u53D6\u5931\u8D25", "\u89C4\u5219\u5DF2\u89E6\u53D1\uFF0C\u4F46\u672A\u627E\u5230 token_online", `\u8BF7\u786E\u8BA4\u662F\u5728\u8054\u901A App \u4E2D\u201C\u9000\u51FA\u767B\u5F55\u2192\u91CD\u65B0\u767B\u5F55\u201D\u3002
+\u8BF7\u6C42\u7C7B\u578B\uFF1A${bodyType}
+\u8BF7\u6C42\u4F53\u957F\u5EA6\uFF1A${String($request.body || "").length}`);
       $done({});
       return;
     }
