@@ -5401,6 +5401,16 @@
     if (json && typeof json === "object") return json;
     const parsed = parseForm(text);
     if (Object.keys(parsed).length) return parsed;
+    // v1.1.2: 兼容联通App v12.14+ Base64编码body
+    try {
+      const b64 = b64urlDecode(text);
+      if (b64 && b64 !== text && b64.includes("=")) {
+        const b64parsed = parseForm(b64);
+        if (Object.keys(b64parsed).length) return b64parsed;
+        const b64json = safeJSON(b64, null);
+        if (b64json && typeof b64json === "object") return b64json;
+      }
+    } catch (_) {}
     try {
       const decoded = decodeURIComponent(text);
       const decodedJSON = safeJSON(decoded, null);
