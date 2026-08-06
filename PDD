@@ -1,21 +1,30 @@
 #!name=拼多多果园
-#!desc=拼多多果园自动浇水/签到/任务领取/偷水（Loon 移植版）。内置双模式自动捕获：App 流量(http-request 捕获 AccessToken/pdduid) 或 网页/小程序流量(http-response 捕获 Set-Cookie)，打开果园页面即自动保存身份，无需手动复制。也支持 YYB Go code 登录。
+#!desc=拼多多果园自动浇水/签到/任务领取/偷水（
 #!author=LO
-#!version=1.3.0
+#!version=2.0.0
 #!date=2026-08-07
+#!icon = https://static.yangkeduo.com/favicon.ico
 #!system=ios
 #!supported=Loon
-#!homepage=
+
+[Argument]
+
+cron = input,"0 8 * * *",tag=执行时间,desc=每天自动执行时间（cron 表达式，默认每天 08:00）
+
+cookieCapture = switch,true,tag=自动获取 Cookie,desc=开启后，打开拼多多 App 果园页面时自动捕获登录身份（AccessToken/pdduid/api_uid）并保存，无需手动复制
+
+water = input,20,tag=浇水次数,desc=每次运行最多浇水次数（默认 20）
+
+steal = switch,true,tag=偷水,desc=是否执行偷水（好友/机器人）
 
 [Script]
-# 每天 08:00 自动执行，调用远程脚本（浇水/签到/任务/偷水）
-cron "0 8 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/PDF.js, tag=拼多多果园-自动浇水, enabled=true
-# 捕获 App 登录身份（AccessToken 请求头 + pdduid 参数，适用于拼多多 App）
-http-request ^https?:\/\/api\.pinduoduo\.com\/.* script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/PDF.js, requires-body=false, tag=拼多多果园-捕获App身份, enabled=true
-# 捕获网页/小程序 Cookie（Set-Cookie，适用于网页版果园；App 用户可关闭）
-http-response ^https?:\/\/mobile\.yangkeduo\.com\/.* script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/PDF.js, requires-body=false, tag=拼多多果园-捕获Cookie, enabled=false
+
+# 定时执行：浇水/签到/任务/偷水
+cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/PDF.js, timeout=300, tag=拼多多果园-自动浇水, argument=water={water},steal={steal}
+
+# 捕获 App 登录身份（拼多多 App 果园流量），由开关控制
+http-request ^https?:\/\/api\.pinduoduo\.com\/.* script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/PDF.js, timeout=10, tag=拼多多果园-捕获App身份, enable={cookieCapture}
 
 [MITM]
-# 注意：只保留 api.pinduoduo.com！
-# 脚本的任务 API 走 mobile.yangkeduo.com，若该域名被 MITM 会拦截脚本自身请求导致失败
+
 hostname = %APPEND% api.pinduoduo.com
