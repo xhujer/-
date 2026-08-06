@@ -34,7 +34,7 @@ const CONFIG = {
   PDD_STEAL: true,
   PDD_ANTI_MODE: "always",
   PDD_DEBUG_ANTI: false,
-  PDD_DEBUG_HTTP: true,     // 调试开关（默认开，定位问题用，修好后可改回 false）
+  PDD_DEBUG_HTTP: false,    // 调试开关（排查 HTTP 问题用，平时关闭）
   PDD_HTTP_TEST: false,     // 设为 true 只做 HTTP 环境自检（4 种请求组合），不发业务请求
 };
 
@@ -52,7 +52,7 @@ try {
 const PDD_MINI_APP_ID = "wx32540bd863b27570";
 const PDD_XCX_VERSION = "v8.6.21";
 const PDD_APP_ID = 33;
-const SCRIPT_BUILD = "loon-20260807.10-ms-timeout";
+const SCRIPT_BUILD = "loon-20260807.11-final";
 
 const MANOR_BASE = "https://mobile.yangkeduo.com/proxy/api/api";
 const LOGIN_BASE = "https://api.pinduoduo.com";
@@ -1003,7 +1003,12 @@ function stealFromFriends(pdduid, cookieStr, tubetoken) {
 
       if (!allTargets.length) { log("  [偷水] 没有可偷的目标"); return; }
 
-      const maxSteals = restChance > 0 ? Math.min(restChance, allTargets.length) : allTargets.length;
+      if (restChance <= 0) {
+        log("  [偷水] 今日偷水次数已用完 (剩余 " + restChance + " 次)，跳过偷水");
+        return;
+      }
+
+      const maxSteals = Math.min(restChance, allTargets.length);
       log("  [偷水] 开始偷水, 最多 " + maxSteals + " 次...");
 
       let totalStolen = 0;
@@ -1043,7 +1048,7 @@ function stealFromFriends(pdduid, cookieStr, tubetoken) {
             stealCount++;
             log("  [偷水] uid=" + targetUid + " " + nickname + " dog=" + dog + ": +" + stolen + "滴");
           } else {
-            log("  [偷水] uid=" + targetUid + " " + nickname + " dog=" + dog + ": 未偷到(重试" + (retried + 1) + "次)");
+            log("  [偷水] uid=" + targetUid + " " + nickname + " dog=" + dog + ": 未偷到(尝试" + (retried + 1) + "次)");
           }
           return new Promise(function (res) { setTimeout(res, 200); }).then(next);
         });
