@@ -1,25 +1,3 @@
-/**
- * 拼多多果园 - Loon 自动浇水脚本
- * 移植自 pdd_manor_yyb_go.py（YYB Go code 登录 / Cookie 直连）
- *
- * 使用方法：
- *   1. Loon → 脚本 → 新建脚本，粘贴本文件内容（或托管到 GitHub/Gist 后引用）
- *   2. 配置方式二选一：
- *      a) 直接编辑下方 CONFIG 对象
- *      b) 在 Loon 脚本配置的"参数"里填 JSON，如：
- *         {"YYB_GO_URL":"http://115.190.216.15:8000","PDD_OPENID":"账号1&账号2"}
- *   3. 手动运行一次验证，再配置定时任务 cron "0 8 * * *"
- *
- * 配置项：
- *   YYB_GO_URL    YYB Go 服务地址（必填，除非用 PDD_COOKIE）
- *   PDD_OPENID    YYB Go 账号引用（ID/UIN/openid），多账号用 & 或换行分隔
- *   PDD_COOKIE    (可选) 完整 Cookie 字符串，提供则跳过登录流程
- *   PDD_WATER_MAX 单账号最多浇水次数（默认 20，原 Python 版为 50）
- *   PDD_STEAL     是否执行偷水（true/false，默认 true）
- *   PDD_ANTI_MODE anti_content 生成策略：always（默认）/ never（跳过，更快但可能触发风控）
- *   PDD_DEBUG_ANTI 设为 true 时仅测试 anti_content 生成（调试用）
- */
-
 const CONFIG = {
   YYB_GO_URL: "",
   PDD_OPENID: "",
@@ -38,10 +16,30 @@ const CONFIG = {
   PDD_HTTP_TEST: false,     // 设为 true 只做 HTTP 环境自检（4 种请求组合），不发业务请求
 };
 
-// 允许通过 Loon 脚本"参数"($arguments, JSON 字符串)覆盖配置
+// 允许通过 Loon 脚本"参数"($arguments)覆盖配置，兼容两种格式：
+//   1) JSON 字符串: {"PDD_COOKIE":"...","PDD_WATER_MAX":20}
+//   2) 插件 argument 格式: water=20,steal=true,cookieCapture=true
 try {
   if (typeof $arguments !== "undefined" && $arguments) {
-    const arg = typeof $arguments === "string" ? JSON.parse($arguments) : $arguments;
+    let arg = $arguments;
+    if (typeof arg === "string") {
+      try {
+        arg = JSON.parse(arg);
+      } catch (e2) {
+        arg = {};
+        String($arguments).split(",").forEach(function (kv) {
+          const i = kv.indexOf("=");
+          if (i > 0) {
+            const k = kv.slice(0, i).trim();
+            const v = kv.slice(i + 1).trim();
+            if (v === "true") arg[k] = true;
+            else if (v === "false") arg[k] = false;
+            else if (/^\d+$/.test(v)) arg[k] = parseInt(v, 10);
+            else arg[k] = v;
+          }
+        });
+      }
+    }
     Object.assign(CONFIG, arg || {});
   }
 } catch (e) {
@@ -52,7 +50,7 @@ try {
 const PDD_MINI_APP_ID = "wx32540bd863b27570";
 const PDD_XCX_VERSION = "v8.6.21";
 const PDD_APP_ID = 33;
-const SCRIPT_BUILD = "loon-20260807.11-final";
+const SCRIPT_BUILD = "loon-20260807.12-args";
 
 const MANOR_BASE = "https://mobile.yangkeduo.com/proxy/api/api";
 const LOGIN_BASE = "https://api.pinduoduo.com";
