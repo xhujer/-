@@ -24,8 +24,12 @@ const CONFIG = {
   YYB_GO_URL: "",
   PDD_OPENID: "",
   PDD_COOKIE: "",
-  PDD_COOKIE_STORE: true,  // PDD_COOKIE 为空时，自动读取 MITM 捕获的 Cookie
-  PDD_CAPTURE: true,       // 开关：是否在 http-response 触发时自动捕获 Cookie
+  PDD_COOKIE_STORE: true,  // PDD_COOKIE 为空时，自动读取捕获的身份信息
+  PDD_CAPTURE: true,       // 开关：是否在 http-request/http-response 触发时自动捕获
+  // App 抓包手动配置（从抓包提取 AccessToken / pdduid / api_uid 后填写）
+  PDD_ACCESS_TOKEN: "",
+  PDD_USER_ID: "",
+  PDD_API_UID: "",
   PDD_WATER_MAX: 20,
   PDD_STEAL: true,
   PDD_ANTI_MODE: "always",
@@ -1167,23 +1171,46 @@ function main() {
     });
   }
 
-  // 无手动 PDD_COOKIE 时，尝试读取 MITM 自动捕获的 Cookie
+  // 无手动 PDD_COOKIE 时，按优先级尝试自动获取：
+  // 1) 手动填写的 App 三件套 (PDD_ACCESS_TOKEN + PDD_USER_ID)
+  // 2) http-request 自动捕获的 App 身份 (persistentStore: pdd_app_identity)
+  // 3) MITM 捕获的网页 Cookie (persistentStore: pdd_cookie_direct)
   if (CONFIG.PDD_COOKIE_STORE) {
-    const captured = $persistentStore.read("pdd_cookie_direct") || "";
-    if (captured) {
-      log("[配置] 使用 MITM 自动捕获的 Cookie (persistentStore: pdd_cookie_direct)");
-      return processDirectCookie(captured).then(function (summary) {
+    let directCookie = "";
+
+    if (CONFIG.PDD_ACCESS_TOKEN && CONFIG.PDD_USER_ID) {
+      directCookie = assembleAppCookie(CONFIG.PDD_ACCESS_TOKEN, CONFIG.PDD_USER_ID, CONFIG.PDD_API_UID || "");
+      log("[配置] 使用手动配置的 App 身份 (PDD_ACCESS_TOKEN)");
+    } else {
+      const appIdent = readAppIdentity();
+      if (appIdent && appIdent.access_token && appIdent.pdd_user_id) {
+        directCookie = assembleAppCookie(appIdent.access_token, appIdent.pdd_user_id, appIdent.api_uid || "");
+        log("[配置] 使用自动捕获的 App 身份 (persistentStore: pdd_app_identity, uid=" + appIdent.pdd_user_id + ")");
+      } else {
+        const captured = $persistentStore.read("pdd_cookie_direct") || "";
+        if (captured) {
+          directCookie = captured;
+          log("[配置] 使用 MITM 自动捕获的网页 Cookie (persistentStore: pdd_cookie_direct)");
+        }
+      }
+    }
+
+    if (directCookie) {
+      return processDirectCookie(directCookie).then(function (summary) {
         notify("拼多多果园", summary || "执行完成");
       });
     }
   }
 
   if (!CONFIG.YYB_GO_URL) {
-    log("[错误] 未配置环境变量!");
-    log("  Code登录模式需要: YYB_GO_URL, PDD_OPENID");
-    log("  PDD_OPENID 可填写 YYB Go 账号的 ID、UIN 或 openid");
-    log("  Cookie直连模式需要: PDD_COOKIE (含完整 cookie)");
-    notify("拼多多果园", "未配置 YYB_GO_URL / PDD_OPENID / PDD_COOKIE");
+    log("[错误] 未配置任何登录方式!");
+    log("  方式1 (推荐): 打开拼多多果园页面自动捕获 Cookie");
+    log("    → Loon 设置中打开 MITM 并信任证书");
+    log("    → 确保插件已加载 http-response 捕获规则");
+    log("    → 打开果园页面后收到『Cookie 已捕获』通知即可");
+    log("  方式2: 手动填写 PDD_COOKIE (完整 cookie, 需含 pdd_user_id)");
+    log("  方式3: 配置 YYB_GO_URL + PDD_OPENID (YYB Go code 登录)");
+    notify("拼多多果园", "未捕获到 Cookie：请打开果园页面（需开启 Loon MITM），或配置 PDD_COOKIE / YYB_GO_URL");
     return Promise.resolve();
   }
 
@@ -1211,6 +1238,79 @@ function main() {
     log("全部账号处理完毕 (" + okCount + "/" + openids.length + " 成功)");
     notify("拼多多果园", "全部账号处理完毕 (" + okCount + "/" + openids.length + " 成功)");
   });
+}
+
+// ===== App 身份（AccessToken 体系）=====
+// 拼多多 App 的果园请求认证方式：AccessToken 请求头 + URL 的 pdduid 参数 + api_uid Cookie
+// 这些字段可组装成网页版 Cookie 使用（已实测验证）
+function assembleAppCookie(accessToken, pddUserId, apiUid) {
+  const parts = ["PDDAccessToken=" + accessToken, "pdd_user_id=" + pddUserId];
+  if (apiUid) parts.push("api_uid=" + apiUid);
+  return parts.join("; ");
+}
+
+function readAppIdentity() {
+  try {
+    const raw = $persistentStore.read("pdd_app_identity");
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveAppIdentity(ident) {
+  try {
+    ident.updatedAt = new Date().toISOString();
+    $persistentStore.write(JSON.stringify(ident), "pdd_app_identity");
+  } catch (e) {
+    log("[抓身份] 写入失败: " + e.message);
+  }
+}
+
+// 从请求对象提取 App 身份（http-request 触发）
+function extractAppIdentity(req) {
+  const ident = { access_token: "", pdd_user_id: "", api_uid: "" };
+  if (!req) return ident;
+  const headers = req.headers || {};
+  Object.keys(headers).forEach(function (k) {
+    if (k.toLowerCase() === "accesstoken") ident.access_token = headers[k];
+  });
+  const m = String(req.url || "").match(/pdduid=(\d+)/);
+  if (m) ident.pdd_user_id = m[1];
+  const ck = headers["Cookie"] || headers["cookie"] || "";
+  const m2 = String(ck).match(/api_uid=([^;]+)/);
+  if (m2) ident.api_uid = m2[1];
+  return ident;
+}
+
+// ===== Cookie 捕获模式（http-request 触发）=====
+// 由 Loon 的 http-request 规则调用：App 果园 API 请求经过时，
+// 自动提取 AccessToken / pdduid / api_uid 存入 persistentStore: pdd_app_identity
+function runRequestCapture() {
+  try {
+    if (CONFIG.PDD_CAPTURE === false) {
+      if (typeof $done === "function") $done({});
+      return;
+    }
+    const ident = extractAppIdentity($request);
+    if (!ident.access_token || !ident.pdd_user_id) {
+      if (typeof $done === "function") $done({});
+      return;
+    }
+    const prev = readAppIdentity();
+    const changed = !prev ||
+      prev.access_token !== ident.access_token ||
+      prev.pdd_user_id !== ident.pdd_user_id ||
+      (prev.api_uid || "") !== (ident.api_uid || "");
+    if (changed) {
+      saveAppIdentity(ident);
+      log("[抓身份] App 身份已更新: uid=" + ident.pdd_user_id);
+      notify("拼多多果园 - 身份已捕获", "已保存 App 登录身份，直接运行脚本即可");
+    }
+  } catch (e) {
+    log("[抓身份] 异常: " + e.message);
+  }
+  if (typeof $done === "function") $done({});
 }
 
 // ===== Cookie 捕获模式（MITM http-response 触发）=====
@@ -1258,10 +1358,13 @@ function runCookieCapture() {
 }
 
 // ===== 入口：区分触发方式 =====
-// http-response 触发（MITM 捕获 Cookie）→ runCookieCapture
+// http-request 触发（App 身份捕获）→ runRequestCapture
+// http-response 触发（网页 Cookie 捕获）→ runCookieCapture
 // cron / 手动运行 → main()
 if (typeof $response !== "undefined" && $response && $response.headers) {
   runCookieCapture();
+} else if (typeof $request !== "undefined" && $request) {
+  runRequestCapture();
 } else {
   main().catch(function (e) {
     log("[异常] " + (e && e.stack ? e.stack : e));
