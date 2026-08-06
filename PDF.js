@@ -24,6 +24,8 @@ const CONFIG = {
   YYB_GO_URL: "",
   PDD_OPENID: "",
   PDD_COOKIE: "",
+  PDD_COOKIE_STORE: true,  // PDD_COOKIE 为空时，自动读取 MITM 捕获的 Cookie
+  PDD_CAPTURE: true,       // 开关：是否在 http-response 触发时自动捕获 Cookie
   PDD_WATER_MAX: 20,
   PDD_STEAL: true,
   PDD_ANTI_MODE: "always",
@@ -1067,18 +1069,18 @@ function sleep(ms) {
 }
 
 // ===== 直接 Cookie 模式 =====
-function processDirectCookie() {
+function processDirectCookie(cookieStr) {
   log("=".repeat(48));
-  log("使用 PDD_COOKIE 环境变量");
+  log("使用 Cookie 直连模式（PDD_COOKIE / MITM 捕获）");
 
-  const pdduid = extractUid(CONFIG.PDD_COOKIE);
-  if (!pdduid) { log("[错误] PDD_COOKIE 缺少 pdd_user_id"); return Promise.resolve(); }
+  const pdduid = extractUid(cookieStr);
+  if (!pdduid) { log("[错误] Cookie 缺少 pdd_user_id"); return Promise.resolve(); }
   log("UID: " + pdduid);
 
-  const cookies = cookieStrToDict(CONFIG.PDD_COOKIE);
+  const cookies = cookieStrToDict(cookieStr);
   let tubetoken = cookies.tubetoken || "";
 
-  return getHomePage(pdduid, CONFIG.PDD_COOKIE, tubetoken).then(function (r) {
+  return getHomePage(pdduid, cookieStr, tubetoken).then(function (r) {
     const newToken = r[0];
     const water = r[1];
     if (newToken === null || newToken === undefined) {
@@ -1088,14 +1090,14 @@ function processDirectCookie() {
     if (newToken) tubetoken = newToken;
     log("当前水滴: " + water);
 
-    return dailyCheckin(pdduid, CONFIG.PDD_COOKIE, tubetoken).then(function () {
+    return dailyCheckin(pdduid, cookieStr, tubetoken).then(function () {
       return sleep(500);
     }).then(function () {
-      return waterTree(pdduid, CONFIG.PDD_COOKIE, tubetoken, CONFIG.PDD_WATER_MAX);
+      return waterTree(pdduid, cookieStr, tubetoken, CONFIG.PDD_WATER_MAX);
     }).then(function () {
       return sleep(500);
     }).then(function () {
-      return getMissionList(pdduid, CONFIG.PDD_COOKIE, tubetoken);
+      return getMissionList(pdduid, cookieStr, tubetoken);
     }).then(function (missionRes) {
       const canClaim = missionRes[0];
       const needAccept = missionRes[1];
@@ -1104,7 +1106,7 @@ function processDirectCookie() {
         log("\n  [任务] 正在接受 " + needAccept.length + " 个任务...");
         needAccept.forEach(function (t) {
           p = p.then(function () {
-            return acceptMission(pdduid, CONFIG.PDD_COOKIE, tubetoken, t.activity_id, t.mission_id);
+            return acceptMission(pdduid, cookieStr, tubetoken, t.activity_id, t.mission_id);
           }).then(function () { return sleep(400); });
         });
       }
@@ -1113,15 +1115,15 @@ function processDirectCookie() {
           log("\n  [任务] 正在领取 " + canClaim.length + " 个任务...");
           canClaim.forEach(function (t) {
             p = p.then(function () {
-              return claimMission(pdduid, CONFIG.PDD_COOKIE, tubetoken, t.activity_id, t.mission_id);
+              return claimMission(pdduid, cookieStr, tubetoken, t.activity_id, t.mission_id);
             }).then(function () { return sleep(400); });
           });
         }
         return p;
       }).then(function () {
-        if (CONFIG.PDD_STEAL) return stealFromFriends(pdduid, CONFIG.PDD_COOKIE, tubetoken);
+        if (CONFIG.PDD_STEAL) return stealFromFriends(pdduid, cookieStr, tubetoken);
       }).then(function () {
-        return getWater(pdduid, CONFIG.PDD_COOKIE).then(function (finalWater) {
+        return getWater(pdduid, cookieStr).then(function (finalWater) {
           log("\n最终水滴: " + finalWater);
           return "Cookie 模式完成，最终水滴: " + finalWater;
         });
@@ -1160,9 +1162,20 @@ function main() {
   }
 
   if (CONFIG.PDD_COOKIE) {
-    return processDirectCookie().then(function (summary) {
+    return processDirectCookie(CONFIG.PDD_COOKIE).then(function (summary) {
       notify("拼多多果园", summary || "执行完成");
     });
+  }
+
+  // 无手动 PDD_COOKIE 时，尝试读取 MITM 自动捕获的 Cookie
+  if (CONFIG.PDD_COOKIE_STORE) {
+    const captured = $persistentStore.read("pdd_cookie_direct") || "";
+    if (captured) {
+      log("[配置] 使用 MITM 自动捕获的 Cookie (persistentStore: pdd_cookie_direct)");
+      return processDirectCookie(captured).then(function (summary) {
+        notify("拼多多果园", summary || "执行完成");
+      });
+    }
   }
 
   if (!CONFIG.YYB_GO_URL) {
@@ -1200,10 +1213,61 @@ function main() {
   });
 }
 
-main().catch(function (e) {
-  log("[异常] " + (e && e.stack ? e.stack : e));
-}).then(function () {
-  if (typeof $done === "function") {
-    try { $done(); } catch (e) {}
+// ===== Cookie 捕获模式（MITM http-response 触发）=====
+// 由 Loon 的 http-response 规则调用：打开拼多多果园页面时，
+// 自动把 Set-Cookie 合并存入 persistentStore: pdd_cookie_direct
+function runCookieCapture() {
+  if (CONFIG.PDD_CAPTURE === false) {
+    // 开关关闭：不捕获，直接放行
+    if (typeof $done === "function") $done({ response: $response });
+    return;
   }
-});
+  try {
+    const resp = $response;
+    const headers = resp.headers || {};
+    let sc = headers["set-cookie"] || headers["Set-Cookie"];
+    if (!sc) {
+      if (typeof $done === "function") $done({ response: resp });
+      return;
+    }
+    const arr = Array.isArray(sc) ? sc : splitSetCookies(String(sc));
+    const dict = cookieStrToDict($persistentStore.read("pdd_cookie_direct") || "");
+    arr.forEach(function (seg) {
+      const semi = seg.indexOf(";");
+      const pair = semi >= 0 ? seg.slice(0, semi) : seg;
+      const eq = pair.indexOf("=");
+      if (eq > 0) {
+        const k = pair.slice(0, eq).trim();
+        const v = pair.slice(eq + 1).trim();
+        if (k && v) dict[k] = v;
+      }
+    });
+    const merged = cookieDictToStr(dict);
+    const prev = $persistentStore.read("pdd_cookie_direct") || "";
+    if (merged && merged !== prev) {
+      $persistentStore.write(merged, "pdd_cookie_direct");
+      log("[抓Cookie] 已更新，共 " + Object.keys(dict).length + " 项");
+      if (dict.pdd_user_id && dict.PDDAccessToken) {
+        notify("拼多多果园 - Cookie 已捕获", "已保存，直接运行脚本即可自动使用");
+      }
+    }
+  } catch (e) {
+    log("[抓Cookie] 异常: " + e.message);
+  }
+  if (typeof $done === "function") $done({ response: $response });
+}
+
+// ===== 入口：区分触发方式 =====
+// http-response 触发（MITM 捕获 Cookie）→ runCookieCapture
+// cron / 手动运行 → main()
+if (typeof $response !== "undefined" && $response && $response.headers) {
+  runCookieCapture();
+} else {
+  main().catch(function (e) {
+    log("[异常] " + (e && e.stack ? e.stack : e));
+  }).then(function () {
+    if (typeof $done === "function") {
+      try { $done(); } catch (e) {}
+    }
+  });
+}
