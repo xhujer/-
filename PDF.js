@@ -1,5 +1,5 @@
 /**
- * 拼多多果园 - 1Loon 自动浇水脚本
+ * 拼多多果园 - Loon 自动浇水脚本
  * 移植自 pdd_manor_yyb_go.py（YYB Go code 登录 / Cookie 直连）
  *
  * 使用方法：
@@ -34,7 +34,7 @@ const CONFIG = {
   PDD_STEAL: true,
   PDD_ANTI_MODE: "always",
   PDD_DEBUG_ANTI: false,
-  PDD_DEBUG_HTTP: false,    // 设为 true 打印每次 HTTP 回调的原始参数（排查用）
+  PDD_DEBUG_HTTP: true,     // 调试开关（默认开，定位问题用，修好后可改回 false）
 };
 
 // 允许通过 Loon 脚本"参数"($arguments, JSON 字符串)覆盖配置
@@ -51,7 +51,7 @@ try {
 const PDD_MINI_APP_ID = "wx32540bd863b27570";
 const PDD_XCX_VERSION = "v8.6.21";
 const PDD_APP_ID = 33;
-const SCRIPT_BUILD = "loon-20260807.3-identity-fix";
+const SCRIPT_BUILD = "loon-20260807.5-debug-on";
 
 const MANOR_BASE = "https://mobile.yangkeduo.com/proxy/api/api";
 const LOGIN_BASE = "https://api.pinduoduo.com";
@@ -153,36 +153,59 @@ function http(opts) {
 
   if (typeof $httpClient !== "undefined") {
     // 旧版 Loon / Surge 风格 $httpClient（回调风格），包装成 Promise
-    // 兼容多种回调签名：
-    //   Surge 风格: (statusCode, headers, body)
-    //   QX 风格:    (error, response, data)，response = {status, headers, body}
+    // 兼容尽可能多的回调签名变体：
+    //   Surge: (statusCode, headers, body)
+    //   QX:    (error, response, data)
+    //   单参数: (response) / (error, response)
+    // 字段名兼容 status / statusCode，body 兼容 body / data
     return new Promise(function (resolve, reject) {
+      const pickStatus = function (obj) {
+        if (!obj || typeof obj !== "object") return 0;
+        if (typeof obj.statusCode === "number") return obj.statusCode;
+        if (typeof obj.status === "number") return obj.status;
+        return 0;
+      };
+      const pickBody = function (obj) {
+        if (!obj || typeof obj !== "object") return "";
+        if (typeof obj.body === "string") return obj.body;
+        if (typeof obj.data === "string") return obj.data;
+        return "";
+      };
+      const pickHeaders = function (obj) {
+        if (!obj || typeof obj !== "object") return {};
+        return obj.headers || {};
+      };
+
       const done = function (arg1, arg2, arg3) {
         let statusCode = 0, respHeaders = {}, respBody = "";
         if (typeof arg1 === "number") {
-          // Surge: (statusCode, headers, body)
+          // Surge 风格: (statusCode, headers, body)
           statusCode = arg1;
-          if (arg2 && typeof arg2 === "object") respHeaders = arg2;
+          respHeaders = pickHeaders(arg2);
           if (typeof arg3 === "string") respBody = arg3;
-        } else if (arg1 && typeof arg1 === "object" && arg1.status !== undefined) {
+        } else if (arg1 && typeof arg1 === "object" &&
+                   (pickStatus(arg1) !== 0 || pickBody(arg1) !== "" || arg1.headers)) {
           // 单参数: (response)
-          statusCode = arg1.status;
-          respHeaders = arg1.headers || {};
-          respBody = (typeof arg1.body === "string") ? arg1.body : "";
-        } else {
-          // QX: (error, response, data)
-          const resp = (arg2 && typeof arg2 === "object") ? arg2 : {};
-          statusCode = resp.status || 0;
-          respHeaders = resp.headers || {};
-          if (typeof arg3 === "string") respBody = arg3;
-          else if (typeof resp.body === "string") respBody = resp.body;
+          statusCode = pickStatus(arg1);
+          respHeaders = pickHeaders(arg1);
+          respBody = pickBody(arg1);
+        } else if (arg2 && typeof arg2 === "object") {
+          // QX 风格: (error, response, data)
+          statusCode = pickStatus(arg2);
+          respHeaders = pickHeaders(arg2);
+          respBody = (typeof arg3 === "string") ? arg3 : pickBody(arg2);
+        } else if (arg3 !== undefined && arg3 !== null) {
+          // 兜底: 直接取最后一个参数
+          respBody = typeof arg3 === "string" ? arg3 : String(arg3);
         }
         if (CONFIG.PDD_DEBUG_HTTP) {
           log("[HTTP调试] status=" + statusCode +
             " headers=" + (Object.keys(respHeaders).length) + "项" +
             " body=" + respBody.length + "字符" +
-            " arg1=" + typeof arg1 + " arg2=" + typeof arg2 + " arg3=" + typeof arg3 +
-            " body头50: " + respBody.slice(0, 50));
+            " arg1=" + (arg1 === null ? "null" : typeof arg1) +
+            " arg2=" + (arg2 === null ? "null" : typeof arg2) +
+            " arg3=" + (arg3 === null ? "null" : typeof arg3) +
+            " body头60: " + respBody.slice(0, 60));
         }
         resolve({ statusCode: statusCode, headers: respHeaders, body: respBody });
       };
