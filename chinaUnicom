@@ -5,9 +5,7 @@
 #!system = ios
 
 #!input = chinaUnicomCookie
-#!input = UNICOM_GRAB_AMOUNT
-#!input = UNICOM_TEST_MODE
-#!input = UNICOM_AH_FRIDAY_AMOUNT
+#!select = captureCookie,关闭,开启
 
 [General]
 
