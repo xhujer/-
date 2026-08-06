@@ -1,5 +1,5 @@
 /**
- * 拼多多果园 - Loon 自动浇水脚本
+ * 拼多多果园 - Loon 1自动浇水脚本
  * 移植自 pdd_manor_yyb_go.py（YYB Go code 登录 / Cookie 直连）
  *
  * 使用方法：
@@ -146,9 +146,23 @@ function http(opts) {
 
   if (typeof $httpClient !== "undefined") {
     // 旧版 Loon / Surge 风格 $httpClient（回调风格），包装成 Promise
+    // 兼容两种回调签名：
+    //   Surge 风格: (statusCode, headers, body)
+    //   QX 风格:    (error, response, data)，其中 response = {status, headers, body}
     return new Promise(function (resolve, reject) {
-      const done = function (statusCode, respHeaders, respBody) {
-        resolve({ statusCode: statusCode, headers: respHeaders || {}, body: respBody || "" });
+      const done = function (arg1, arg2, arg3) {
+        let statusCode, respHeaders, respBody;
+        if (typeof arg1 === "number") {
+          statusCode = arg1;
+          respHeaders = arg2 || {};
+          respBody = arg3 !== undefined && arg3 !== null ? arg3 : "";
+        } else {
+          const resp = arg2 || {};
+          statusCode = resp.status || 0;
+          respHeaders = resp.headers || {};
+          respBody = (arg3 !== undefined && arg3 !== null) ? arg3 : (resp.body || "");
+        }
+        resolve({ statusCode: statusCode, headers: respHeaders, body: String(respBody || "") });
       };
       const request = { url: opts.url, headers: headers, timeout: timeout };
       if (opts.body) request.body = opts.body;
