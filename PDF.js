@@ -1,5 +1,5 @@
 /**
- * 拼多多果园 - Loon 1自动浇水脚本
+ * 拼多多果园 - Loon 自动浇水脚本
  * 移植自 pdd_manor_yyb_go.py（YYB Go code 登录 / Cookie 直连）
  *
  * 使用方法：
@@ -35,6 +35,7 @@ const CONFIG = {
   PDD_ANTI_MODE: "always",
   PDD_DEBUG_ANTI: false,
   PDD_DEBUG_HTTP: true,     // 调试开关（默认开，定位问题用，修好后可改回 false）
+  PDD_HTTP_TEST: false,     // 设为 true 只做 HTTP 环境自检（4 种请求组合），不发业务请求
 };
 
 // 允许通过 Loon 脚本"参数"($arguments, JSON 字符串)覆盖配置
@@ -51,7 +52,7 @@ try {
 const PDD_MINI_APP_ID = "wx32540bd863b27570";
 const PDD_XCX_VERSION = "v8.6.21";
 const PDD_APP_ID = 33;
-const SCRIPT_BUILD = "loon-20260807.6-single-arg";
+const SCRIPT_BUILD = "loon-20260807.10-ms-timeout";
 
 const MANOR_BASE = "https://mobile.yangkeduo.com/proxy/api/api";
 const LOGIN_BASE = "https://api.pinduoduo.com";
@@ -69,8 +70,13 @@ const ANTI_SDK_URL = "https://static.pddpic.com/assets/js/risk_control_anti_dac6
 const ANTI_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
 
 // ===== 工具函数 =====
+function pad2(n) { return n < 10 ? "0" + n : String(n); }
+
 function log(msg) {
-  const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
+  // 使用本地时区（北京时间）而非 UTC
+  const d = new Date();
+  const ts = d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) +
+    " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
   console.log("[" + ts + "] " + msg);
 }
 
@@ -153,11 +159,7 @@ function http(opts) {
 
   if (typeof $httpClient !== "undefined") {
     // 旧版 Loon / Surge 风格 $httpClient（回调风格），包装成 Promise
-    // 兼容尽可能多的回调签名变体：
-    //   Surge: (statusCode, headers, body)
-    //   QX:    (error, response, data)
-    //   单参数: (response) / (error, response)
-    // 字段名兼容 status / statusCode，body 兼容 body / data
+    // 注意：不传 timeout 字段！旧版 Loon 可能把秒当毫秒导致请求立即超时失败
     return new Promise(function (resolve, reject) {
       const pickStatus = function (obj) {
         if (!obj || typeof obj !== "object") return 0;
@@ -213,8 +215,11 @@ function http(opts) {
         }
         resolve({ statusCode: statusCode, headers: respHeaders, body: respBody });
       };
-      const request = { url: opts.url, headers: httpClientHeaders, timeout: timeout };
+      const request = { url: opts.url, headers: httpClientHeaders, timeout: timeout * 1000 };
       if (opts.body) request.body = opts.body;
+      if (CONFIG.PDD_DEBUG_HTTP) {
+        log("[HTTP调试] 发起请求: " + method + " " + String(opts.url).slice(0, 90) + " 头=" + Object.keys(httpClientHeaders).length + "项");
+      }
       const m = method.toLowerCase();
       if (m === "get") $httpClient.get(request, done);
       else if (m === "post") $httpClient.post(request, done);
@@ -1251,6 +1256,10 @@ function main() {
     });
   }
 
+  if (CONFIG.PDD_HTTP_TEST) {
+    return runHttpTest();
+  }
+
   if (CONFIG.PDD_COOKIE) {
     return processDirectCookie(CONFIG.PDD_COOKIE).then(function (summary) {
       notify("拼多多果园", summary || "执行完成");
@@ -1441,6 +1450,61 @@ function runCookieCapture() {
     log("[抓Cookie] 异常: " + e.message);
   }
   if (typeof $done === "function") $done({ response: $response });
+}
+
+// ===== HTTP 环境自检（排查 $httpClient 兼容性）=====
+function runHttpTest() {
+  log("======== HTTP 环境自检开始 ========");
+
+  // 对象参数形式
+  function httpObject(opts) {
+    return new Promise(function (resolve) {
+      const done = function (arg1, arg2, arg3) {
+        resolve({
+          arg1: typeof arg1 === "string" ? arg1.slice(0, 60) : (arg1 === null ? "null" : typeof arg1),
+          arg2: typeof arg2 === "string" ? arg2.slice(0, 60) : (arg2 === null ? "null" : typeof arg2),
+          arg3: typeof arg3 === "string" ? arg3.slice(0, 60) : (arg3 === null ? "null" : typeof arg3),
+        });
+      };
+      const req = { url: opts.url, headers: opts.headers || {}, timeout: (opts.timeout || 10) * 1000 };
+      const m = (opts.method || "GET").toLowerCase();
+      if (m === "get") $httpClient.get(req, done);
+      else if (m === "post") $httpClient.post(req, done);
+      else $httpClient.request(req, done);
+    });
+  }
+
+  // 字符串 URL 形式
+  function httpString(url) {
+    return new Promise(function (resolve) {
+      $httpClient.get(url, function (arg1, arg2, arg3) {
+        resolve({
+          arg1: typeof arg1 === "string" ? arg1.slice(0, 60) : (arg1 === null ? "null" : typeof arg1),
+          arg2: typeof arg2 === "string" ? arg2.slice(0, 60) : (arg2 === null ? "null" : typeof arg2),
+          arg3: typeof arg3 === "string" ? arg3.slice(0, 60) : (arg3 === null ? "null" : typeof arg3),
+        });
+      });
+    });
+  }
+
+  const cases = [
+    ["A 对象形式 GET baidu(无头)", httpObject({ url: "https://www.baidu.com/", method: "GET", headers: {}, timeout: 10 })],
+    ["B 字符串URL GET baidu", httpString("https://www.baidu.com/")],
+    ["C 对象形式 GET pdd/_stm(无头)", httpObject({ url: "https://api.pinduoduo.com/api/server/_stm", method: "GET", headers: {}, timeout: 10 })],
+    ["D 对象形式 GET pdd 带UA头", httpObject({ url: "https://api.pinduoduo.com/api/server/_stm", method: "GET", headers: { "User-Agent": UA }, timeout: 10 })],
+  ];
+
+  let p = Promise.resolve();
+  cases.forEach(function (c) {
+    p = p.then(function () { return c[1]; }).then(function (r) {
+      log("[自检] " + c[0] + " → " + JSON.stringify(r));
+    });
+  });
+
+  return p.then(function () {
+    log("======== HTTP 环境自检结束 ========");
+    notify("拼多多果园 - HTTP自检", "完成，详见日志");
+  });
 }
 
 // ===== 入口：区分触发方式 =====
