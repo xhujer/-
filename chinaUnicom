@@ -38,6 +38,9 @@ cloudUploadName = input,"8648",tag=云盘上传文件名
 ttxcGarbageWait = input,"28",tag=垃圾分类等待秒数
 ttxcGrowMax = input,"20",tag=单地块最大充能
 wostoreMaxDraw = input,"1",tag=沃云积分抽奖上限
+manualToken = input,"",tag=手动TokenOnline,desc=从抓包中获取的tokenOnline值
+manualAppId = input,"",tag=手动AppId,desc=从抓包中获取的appId值
+manualMobile = input,"",tag=手机号,desc=联通账号手机号(可选)
 
 [Script]
 # 抓包：本地补丁脚本（处理Base64 body + loginxx域名），token存入原版cu_accounts_v2
@@ -46,8 +49,8 @@ http-request ^https:\/\/(login[a-z0-9]*)\.10010\.com\/(mobileService\/onLine\.ht
 cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🔵中国联通自动任务,argument=[{mode},{queryOnly},{enableSign},{enableLtzf},{enableTtlxj},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{enableNotify},{marketWater},{marketTask},{marketMember},{marketDraw},{marketClaim},{grabCoupon},{grabAmount},{ahFriday},{ahAmount},{requestNode},{cloudImageFid},{cloudUploadName},{ttxcGarbageWait},{ttxcGrowMax},{wostoreMaxDraw}]
 # 手动执行：远程原版脚本（不变）
 generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🔵中国联通手动执行,argument=[{mode},{queryOnly},{enableSign},{enableLtzf},{enableTtlxj},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{enableNotify},{marketWater},{marketTask},{marketMember},{marketDraw},{marketClaim},{grabCoupon},{grabAmount},{ahFriday},{ahAmount},{requestNode},{cloudImageFid},{cloudUploadName},{ttxcGarbageWait},{ttxcGrowMax},{wostoreMaxDraw}]
-# 一次性写入Token（点一次就行）
-generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom_init.js,timeout=30,tag=⚡写入Token(一次性)
+# 一次性写入Token（在设置中填写token后点这里）
+generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom_init.js,timeout=30,tag=⚡写入Token,argument=token={manualToken}&appId={manualAppId}&mobile={manualMobile}
 
 [MITM]
 hostname = m.client.10010.com,*.10010.com,wocare.unisk.cn,backward.bol.wo.cn,contact.bol.wo.cn,m.jf.10010.com,uca.wo116114.com,ims.wo116114.com,ai.wo.cn,panservice.mail.wo.cn,s.pan.wo.cn,10010.woread.com.cn,woread.com.cn,pcc.woread.com.cn,uphone.wostore.cn,h5forphone.wostore.cn,uphone.wo-adv.cn,zy100.xj169.com,app.shangdu.com,wsm.wx.yn10010.com,weixin.linktech.hk
