@@ -123,20 +123,43 @@ function extractUid(cookieStr) {
   return m ? m[1] : "";
 }
 
-// ===== HTTP 层 (Loon $task.fetch) =====
+// ===== HTTP 层 (Loon $task.fetch / $httpClient 双兼容) =====
 function http(opts) {
   const headers = Object.assign({
     "User-Agent": UA,
     "Accept-Language": "zh-CN,zh;q=0.9",
     "Accept-Encoding": "gzip, deflate, br",
   }, opts.headers || {});
-  return $task.fetch({
-    url: opts.url,
-    method: opts.method || "GET",
-    headers: headers,
-    body: opts.body || "",
-    timeout: opts.timeout || 20,
-  });
+  const method = (opts.method || "GET").toUpperCase();
+  const timeout = opts.timeout || 20;
+
+  if (typeof $task !== "undefined" && typeof $task.fetch === "function") {
+    // 新版 Loon API（Promise 风格）
+    return $task.fetch({
+      url: opts.url,
+      method: method,
+      headers: headers,
+      body: opts.body || "",
+      timeout: timeout,
+    });
+  }
+
+  if (typeof $httpClient !== "undefined") {
+    // 旧版 Loon / Surge 风格 $httpClient（回调风格），包装成 Promise
+    return new Promise(function (resolve, reject) {
+      const done = function (statusCode, respHeaders, respBody) {
+        resolve({ statusCode: statusCode, headers: respHeaders || {}, body: respBody || "" });
+      };
+      const request = { url: opts.url, headers: headers, timeout: timeout };
+      if (opts.body) request.body = opts.body;
+      const m = method.toLowerCase();
+      if (m === "get") $httpClient.get(request, done);
+      else if (m === "post") $httpClient.post(request, done);
+      else $httpClient.request(request, done);
+    });
+  }
+
+  return Promise.reject(new Error("当前环境无 $task / $httpClient，无法发起请求"));
 }
 
 function postJson(url, body, extraHeaders, cookieStr, timeout) {
