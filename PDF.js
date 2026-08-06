@@ -1,5 +1,5 @@
 /**
- * 拼多多果园 - Loon 1自动浇水脚本
+ * 拼多多果园 - Loon 自动浇水脚本
  * 移植自 pdd_manor_yyb_go.py（YYB Go code 登录 / Cookie 直连）
  *
  * 使用方法：
@@ -34,6 +34,7 @@ const CONFIG = {
   PDD_STEAL: true,
   PDD_ANTI_MODE: "always",
   PDD_DEBUG_ANTI: false,
+  PDD_DEBUG_HTTP: false,    // 设为 true 打印每次 HTTP 回调的原始参数（排查用）
 };
 
 // 允许通过 Loon 脚本"参数"($arguments, JSON 字符串)覆盖配置
@@ -128,13 +129,19 @@ function http(opts) {
   const headers = Object.assign({
     "User-Agent": UA,
     "Accept-Language": "zh-CN,zh;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
   }, opts.headers || {});
+
+  // $task.fetch 模式下 Loon 会自动解压 gzip，可保留；
+  // $httpClient 旧版可能不解压 gzip，强制要求明文响应
+  const httpClientHeaders = Object.assign({}, headers, {
+    "Accept-Encoding": "identity",
+  });
+
   const method = (opts.method || "GET").toUpperCase();
   const timeout = opts.timeout || 20;
 
   if (typeof $task !== "undefined" && typeof $task.fetch === "function") {
-    // 新版 Loon API（Promise 风格）
+    // 新版 Loon API（Promise 风格，自动解压 gzip）
     return $task.fetch({
       url: opts.url,
       method: method,
@@ -146,25 +153,40 @@ function http(opts) {
 
   if (typeof $httpClient !== "undefined") {
     // 旧版 Loon / Surge 风格 $httpClient（回调风格），包装成 Promise
-    // 兼容两种回调签名：
+    // 兼容多种回调签名：
     //   Surge 风格: (statusCode, headers, body)
-    //   QX 风格:    (error, response, data)，其中 response = {status, headers, body}
+    //   QX 风格:    (error, response, data)，response = {status, headers, body}
     return new Promise(function (resolve, reject) {
       const done = function (arg1, arg2, arg3) {
-        let statusCode, respHeaders, respBody;
+        let statusCode = 0, respHeaders = {}, respBody = "";
         if (typeof arg1 === "number") {
+          // Surge: (statusCode, headers, body)
           statusCode = arg1;
-          respHeaders = arg2 || {};
-          respBody = arg3 !== undefined && arg3 !== null ? arg3 : "";
+          if (arg2 && typeof arg2 === "object") respHeaders = arg2;
+          if (typeof arg3 === "string") respBody = arg3;
+        } else if (arg1 && typeof arg1 === "object" && arg1.status !== undefined) {
+          // 单参数: (response)
+          statusCode = arg1.status;
+          respHeaders = arg1.headers || {};
+          respBody = (typeof arg1.body === "string") ? arg1.body : "";
         } else {
-          const resp = arg2 || {};
+          // QX: (error, response, data)
+          const resp = (arg2 && typeof arg2 === "object") ? arg2 : {};
           statusCode = resp.status || 0;
           respHeaders = resp.headers || {};
-          respBody = (arg3 !== undefined && arg3 !== null) ? arg3 : (resp.body || "");
+          if (typeof arg3 === "string") respBody = arg3;
+          else if (typeof resp.body === "string") respBody = resp.body;
         }
-        resolve({ statusCode: statusCode, headers: respHeaders, body: String(respBody || "") });
+        if (CONFIG.PDD_DEBUG_HTTP) {
+          log("[HTTP调试] status=" + statusCode +
+            " headers=" + (Object.keys(respHeaders).length) + "项" +
+            " body=" + respBody.length + "字符" +
+            " arg1=" + typeof arg1 + " arg2=" + typeof arg2 + " arg3=" + typeof arg3 +
+            " body头50: " + respBody.slice(0, 50));
+        }
+        resolve({ statusCode: statusCode, headers: respHeaders, body: respBody });
       };
-      const request = { url: opts.url, headers: headers, timeout: timeout };
+      const request = { url: opts.url, headers: httpClientHeaders, timeout: timeout };
       if (opts.body) request.body = opts.body;
       const m = method.toLowerCase();
       if (m === "get") $httpClient.get(request, done);
