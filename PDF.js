@@ -1,5 +1,5 @@
 /**
- * 拼多多果园 - Loon 自动浇水脚本
+ * 拼多多果园 - 1Loon 自动浇水脚本
  * 移植自 pdd_manor_yyb_go.py（YYB Go code 登录 / Cookie 直连）
  *
  * 使用方法：
@@ -51,7 +51,7 @@ try {
 const PDD_MINI_APP_ID = "wx32540bd863b27570";
 const PDD_XCX_VERSION = "v8.6.21";
 const PDD_APP_ID = 33;
-const SCRIPT_BUILD = "loon-20260807.1";
+const SCRIPT_BUILD = "loon-20260807.3-identity-fix";
 
 const MANOR_BASE = "https://mobile.yangkeduo.com/proxy/api/api";
 const LOGIN_BASE = "https://api.pinduoduo.com";
