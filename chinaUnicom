@@ -1,4 +1,4 @@
-#!name=中国联通自动任务 v1.1.4(修复抓包)
+#!name=中国联通自动任务 v1.1.2(修复抓包)
 #!desc=v1.1.2修复：新域名+Base64 body；抓包用本地补丁，定时任务仍用远程原版
 #!date=2026-08-05
 #!system=iOS,iPadOS
@@ -41,7 +41,7 @@ wostoreMaxDraw = input,"1",tag=沃云积分抽奖上限
 
 [Script]
 # 抓包：本地补丁脚本（处理Base64 body + loginxx域名），token存入原版cu_accounts_v2
-http-request ^https:\/\/(login[a-z0-9]*)\.10010\.com\/(mobileService\/onLine\.htm|login-web\/v1\/bindlist\/isbinded) script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom_capture_patch.js,requires-body=true,timeout=30,tag=🔵中国联通获取账号,enable={capture}
+http-request ^https:\/\/(login[a-z0-9]*)\.10010\.com\/(mobileService\/onLine\.htm|login-web\/v1\/bindlist\/isbinded) script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom_capture_patch.js,requires-body=true,binary-body-mode=true,timeout=30,tag=🔵中国联通获取账号,enable={capture}
 # 定时任务：远程原版脚本（不变）
 cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🔵中国联通自动任务,argument=[{mode},{queryOnly},{enableSign},{enableLtzf},{enableTtlxj},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{enableNotify},{marketWater},{marketTask},{marketMember},{marketDraw},{marketClaim},{grabCoupon},{grabAmount},{ahFriday},{ahAmount},{requestNode},{cloudImageFid},{cloudUploadName},{ttxcGarbageWait},{ttxcGrowMax},{wostoreMaxDraw}]
 # 手动执行：远程原版脚本（不变）
