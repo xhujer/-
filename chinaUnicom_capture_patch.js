@@ -1,94 +1,10 @@
-// 中国联通 抓取 v1.4 - 双模：String/Uint8Array都处理
-var STORE_KEY = "cu_accounts_v2";
+// 一次性Token写入 cu_accounts_v2
+$.setdata(JSON.stringify([{
+    tokenOnline: "02d68c42ca59ac5bca3141f95621e97d661beb243374ef33c9d8444c7b1cd079006b93b1437730bf5d182967638dbbb15622da5cbc527481ecb2e774e23149e5eee05e7c895bcec6fa5775719d76f1d12dab1fb866a6c8eb6cd96109ff60e536e6df03083660e2520f804e74335268ba963944e0e008c1757ec187e3c84590755585e2da6d77bb1b5cb14e680d1c1da4c042526069a411a174f33acf13086a3913e4202a0f6eb326306bae92578d7c41197ffd70dc5f245b94c1c8f99dbc983bc6554fadeb293a8ede454b9c920cdfbf4ad88803e85979e7bcb95e985c1b5a3e9397e12875e5003c32c8b413e928bf7c96b07c2ff549650880a139bddd4240620b09189824f08cdee7e7752b9415c66ca7fd2133d17996bf9a8cac73a95c9e9a59cf1da9d8e093f3e91474dd80590abd0d6b00f5b94ec2dad7f27f29b910fa3752b9d0b09568bb4b919b704dbcfa6394befe5b5a1018dcd74953aaba633386ad9d03498eaa181b240ca01d0123c78792",
+    appId: "247b001385de5cc6ce11731ba1b158356b9637f9cd504c50e2f5bfc70ba9cb5f5097f1bbcfde640c5ddc0d00979fcd957005ccca734354d0783a323f94373025b2b9e769a8002b8e658922e7c03bd21bb72d60c129bdf7c73f2bb93a6429683d",
+    mobile: "15555376557",
+    updatedAt: new Date().toISOString()
+}]), "cu_accounts_v2");
 
-function mask(s) {
-    s = String(s || "");
-    return s.length <= 8 ? "***" : s.slice(0, 4) + "****" + s.slice(-4);
-}
-function now() {
-    var d = new Date(), p = function(n) { return ("0" + n).slice(-2); };
-    return d.getFullYear() + "-" + p(d.getMonth()+1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
-}
-function utf8ToStr(bytes) {
-    var s = "", i = 0;
-    while (i < bytes.length) {
-        var c = bytes[i++];
-        if (c < 128) s += String.fromCharCode(c);
-        else if (c < 224) s += String.fromCharCode(((c & 31) << 6) | (bytes[i++] & 63));
-        else if (c < 240) s += String.fromCharCode(((c & 15) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63));
-        else s += String.fromCharCode(((c & 7) << 18) | ((bytes[i++] & 63) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63));
-    }
-    return s;
-}
-
-(function() {
-    var raw = $request.body;
-    var text = "";
-    var isArr = (raw instanceof Uint8Array);
-
-    console.log("[联通] body类型=" + (isArr ? "Uint8Array" : typeof raw));
-
-    if (isArr) {
-        text = utf8ToStr(raw);
-    } else {
-        text = String(raw || "");
-        // 如果看起来像base64，尝试解码
-        if (/^[A-Za-z0-9+/=\s]+$/.test(text) && text.length > 50) {
-            console.log("[联通] 检测到base64，尝试解码");
-            try {
-                var b64 = text.replace(/\s/g, "");
-                var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-                var bytes = [], i = 0;
-                while (i < b64.length) {
-                    if (b64[i] === "=") break;
-                    var a = chars.indexOf(b64[i++]);
-                    if (i >= b64.length) break;
-                    var bv = b64[i], b = bv === "=" ? 0 : chars.indexOf(bv); i++;
-                    if (i >= b64.length) break;
-                    var cv = b64[i], c = cv === "=" ? 64 : chars.indexOf(cv); i++;
-                    if (i >= b64.length) break;
-                    var dv = b64[i], d = dv === "=" ? 64 : chars.indexOf(dv); i++;
-                    bytes.push((a << 2) | (b >> 4));
-                    if (c !== 64) bytes.push(((b & 15) << 4) | (c >> 2));
-                    if (d !== 64) bytes.push(((c & 3) << 6) | d);
-                }
-                text = utf8ToStr(bytes);
-            } catch(e) { console.log("[联通] b64解码失败: " + e); }
-        }
-    }
-
-    console.log("[联通] 解析后文本前120: " + text.substring(0, 120));
-
-    // 提取JSON
-    var body = {};
-    try { body = JSON.parse(text); } catch(e) { console.log("[联通] JSON失败: " + e.message); }
-
-    // 提取form
-    if (!Object.keys(body).length && text.indexOf("=") > 0) {
-        text.split("&").forEach(function(p) {
-            var eq = p.indexOf("=");
-            if (eq >= 0) try { body[decodeURIComponent(p.slice(0,eq))] = decodeURIComponent(p.slice(eq+1).replace(/\+/g," ")); } catch(_){}
-        });
-    }
-
-    var token = String(body.tokenOnline || body.token_online || "").trim();
-    var appId = String(body.appId || body.app_id || "").trim();
-
-    console.log("[联通] token=" + (token ? mask(token) : "❌无") + " appId=" + (appId ? mask(appId) : "无"));
-
-    if (!token) { $done({}); return; }
-
-    var list = [];
-    try { list = JSON.parse($.getdata(STORE_KEY) || "[]"); } catch(_) {}
-    var idx = -1;
-    for (var k = 0; k < list.length; k++) {
-        if (list[k].tokenOnline === token) { idx = k; break; }
-    }
-    var item = { tokenOnline: token, appId: appId, updatedAt: now(), mobile: idx >= 0 ? (list[idx].mobile || "") : "" };
-    if (idx < 0) list.push(item); else list[idx] = item;
-    $.setdata(JSON.stringify(list), STORE_KEY);
-
-    $notification.post("🟢 联通抓取成功", "第" + (idx < 0 ? list.length : idx+1) + "个账号", "Token: " + mask(token));
-    console.log("[联通] ✅ 已保存");
-    $done({});
-})();
+$notification.post("✅ Token已写入","cu_accounts_v2 就绪","定时任务可正常使用");
+$done();
