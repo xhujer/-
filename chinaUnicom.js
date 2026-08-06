@@ -1265,6 +1265,13 @@ if (typeof $response !== "undefined") {
   // http-response 模式: 从 onLine.htm 响应中捕获 token
   (function() {
     try {
+      // 检查捕获开关 (用户可在插件设置中切换: 关闭/开启)
+      var captureEnabled = $persistentStore.read("captureCookie");
+      if (captureEnabled === "关闭" || captureEnabled === "0") {
+        console.log("[联通] Cookie 捕获已关闭");
+        $done({});
+        return;
+      }
       var body = JSON.parse($response.body);
       if ((body.code === "0" || body.code === 0) && body.token_online) {
         var cookieStr = body.token_online;
