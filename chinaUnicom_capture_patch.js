@@ -1,16 +1,26 @@
-// 中国联通 新版抓取补丁 v1.0
-// 适配：body为Base64编码 + loginxx.10010.com域名
-// token存到原版cu_accounts_v2，定时任务可直接复用
+// 中国联通 新版抓取补丁 v1.1
+// 适配：Base64 body + loginxx域名 + isbinded端点
+// token存到原版cu_accounts_v2
 
 const STORE_KEY = "cu_accounts_v2";
 
-// ===== 工具函数 =====
+// 纯JS Base64解码（不依赖CryptoJS）
 function b64Decode(s) {
     try {
         s = String(s || "").replace(/-/g, "+").replace(/_/g, "/");
-        while (s.length % 4) s += "=";
-        const words = CryptoJS.enc.Base64.parse(s);
-        return words.toString(CryptoJS.enc.Utf8);
+        var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        var out = "", i = 0;
+        while (i < s.length) {
+            if (s.charAt(i) === "=") break;
+            var a = chars.indexOf(s.charAt(i++));
+            var bv = s.charAt(i); var b = bv === "=" ? 0 : chars.indexOf(bv); i++;
+            var cv = s.charAt(i); var c = cv === "=" ? 64 : chars.indexOf(cv); i++;
+            var dv = s.charAt(i); var d = dv === "=" ? 64 : chars.indexOf(dv); i++;
+            out += String.fromCharCode((a << 2) | (b >> 4));
+            if (c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
+            if (d !== 64) out += String.fromCharCode(((c & 3) << 6) | d);
+        }
+        return out;
     } catch (_) { return ""; }
 }
 function parseForm(s) {
