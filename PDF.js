@@ -1,5 +1,5 @@
 /**
- * 拼多多果园 - Loon 自动浇水脚本
+ * 拼多多果园 - Loon 1自动浇水脚本
  * 移植自 pdd_manor_yyb_go.py（YYB Go code 登录 / Cookie 直连）
  *
  * 使用方法：
@@ -51,7 +51,7 @@ try {
 const PDD_MINI_APP_ID = "wx32540bd863b27570";
 const PDD_XCX_VERSION = "v8.6.21";
 const PDD_APP_ID = 33;
-const SCRIPT_BUILD = "loon-20260807.5-debug-on";
+const SCRIPT_BUILD = "loon-20260807.6-single-arg";
 
 const MANOR_BASE = "https://mobile.yangkeduo.com/proxy/api/api";
 const LOGIN_BASE = "https://api.pinduoduo.com";
@@ -183,6 +183,7 @@ function http(opts) {
           statusCode = arg1;
           respHeaders = pickHeaders(arg2);
           if (typeof arg3 === "string") respBody = arg3;
+          else if (typeof arg2 === "string") respBody = arg2; // (statusCode, body) 两参形式
         } else if (arg1 && typeof arg1 === "object" &&
                    (pickStatus(arg1) !== 0 || pickBody(arg1) !== "" || arg1.headers)) {
           // 单参数: (response)
@@ -194,17 +195,20 @@ function http(opts) {
           statusCode = pickStatus(arg2);
           respHeaders = pickHeaders(arg2);
           respBody = (typeof arg3 === "string") ? arg3 : pickBody(arg2);
-        } else if (arg3 !== undefined && arg3 !== null) {
-          // 兜底: 直接取最后一个参数
-          respBody = typeof arg3 === "string" ? arg3 : String(arg3);
+        } else {
+          // 兜底: 直接取字符串参数当 body（兼容只传一个字符串的 Loon 版本）
+          if (typeof arg3 === "string") respBody = arg3;
+          else if (typeof arg2 === "string") respBody = arg2;
+          else if (typeof arg1 === "string") respBody = arg1;
         }
         if (CONFIG.PDD_DEBUG_HTTP) {
+          const arg1s = typeof arg1 === "string" ? arg1.slice(0, 80) : (arg1 === null ? "null" : typeof arg1);
+          const arg2s = typeof arg2 === "string" ? arg2.slice(0, 80) : (arg2 === null ? "null" : typeof arg2);
+          const arg3s = typeof arg3 === "string" ? arg3.slice(0, 80) : (arg3 === null ? "null" : typeof arg3);
           log("[HTTP调试] status=" + statusCode +
             " headers=" + (Object.keys(respHeaders).length) + "项" +
             " body=" + respBody.length + "字符" +
-            " arg1=" + (arg1 === null ? "null" : typeof arg1) +
-            " arg2=" + (arg2 === null ? "null" : typeof arg2) +
-            " arg3=" + (arg3 === null ? "null" : typeof arg3) +
+            " arg1=" + arg1s + " | arg2=" + arg2s + " | arg3=" + arg3s +
             " body头60: " + respBody.slice(0, 60));
         }
         resolve({ statusCode: statusCode, headers: respHeaders, body: respBody });
