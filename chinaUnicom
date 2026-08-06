@@ -41,8 +41,8 @@ ttxcGrowMax = input,"20",tag=最大充能
 wostoreMaxDraw = input,"1",tag=沃云抽奖上限
 
 [Script]
-# 写入token（粘贴后点一下）
-generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom_init.js,timeout=30,tag=⚡写入Token,argument=token={my_token}&appId={my_appid}&mobile={my_mobile}
+# 写入token（填好设置后点这里）
+cron "0 0 1 1 2020" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom_init.js,timeout=30,tag=⚡写入Token,argument=token={my_token}&appId={my_appid}&mobile={my_mobile}
 # 定时任务
 cron {cron_time} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🕐定时任务,argument=[{mode},{queryOnly},{enableSign},{enableLtzf},{enableTtlxj},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{enableNotify},{marketWater},{marketTask},{marketMember},{marketDraw},{marketClaim},{grabCoupon},{grabAmount},{ahFriday},{ahAmount},{requestNode},{cloudImageFid},{cloudUploadName},{ttxcGarbageWait},{ttxcGrowMax},{wostoreMaxDraw}]
 # 手动执行
