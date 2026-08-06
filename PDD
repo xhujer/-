@@ -1,5 +1,5 @@
 #!name=拼多多果园
-#!desc=1拼多多果园自动浇水/签到/任务领取/偷水（Loon 移植版）。内置双模式自动捕获：App 流量(http-request 捕获 AccessToken/pdduid) 或 网页/小程序流量(http-response 捕获 Set-Cookie)，打开果园页面即自动保存身份，无需手动复制。也支持 YYB Go code 登录。
+#!desc=拼多多果园自动浇水/签到/任务领取/偷水（Loon 移植版）。内置双模式自动捕获：App 流量(http-request 捕获 AccessToken/pdduid) 或 网页/小程序流量(http-response 捕获 Set-Cookie)，打开果园页面即自动保存身份，无需手动复制。也支持 YYB Go code 登录。
 #!author=LO
 #!version=1.3.0
 #!date=2026-08-07
