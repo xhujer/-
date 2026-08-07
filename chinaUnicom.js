@@ -1,5 +1,5 @@
 /**
- * 中国联通 (China Unicom) — Loon JS 版 v2.0.1
+ * 中国联通 (China Unicom) — Loon JS 版 v2.0.0
  * 
  * 原始 Python 版: v1.1.1 (6784 行)
  * Loon 移植: Minis (基于 Loon 官方 script_api.md 文档)
@@ -482,6 +482,9 @@ UserService.prototype.onLine = async function() {
       step: "dingshi",
       androidId: "291a7deb1d716b5a",
       reqtime: tsMs(),
+      // 强制返回归属地信息，而非GPS定位
+      provinceCode: "036",
+      cityCode: "303",
     };
     if (this.appId) data.appId = this.appId;
     
@@ -505,10 +508,13 @@ UserService.prototype.onLine = async function() {
       this.city_info = result.list || [];
       this.ecs_token = result.ecs_token || "";
       this.t3_token = result.t3_token || "";
-      // 设置全局 Cookie，后续所有请求自动携带
+      // 设置全局 Cookie，后续所有请求自动携带（模拟 Python requests.Session）
       _globalCookie = this.cookie_string;
+      if (this.token_online) _globalCookie += "; token_online=" + this.token_online;
+      if (this.appId) _globalCookie += "; appId=" + this.appId;
       if (this.ecs_token) _globalCookie += "; ecs_token=" + this.ecs_token;
       if (this.t3_token) _globalCookie += "; t3_token=" + this.t3_token;
+      _globalCookie += "; c_version=iphone_c@12.1400; channel=GGPD";
       this.log("登录成功");
       return true;
     }
@@ -1246,18 +1252,11 @@ UserService.prototype.aiting_complete_task_api = async function(typeVal) {
    MODULE: 沃云手机 (WOSTORE) — 完整移植
    ========================================================== */
 
-UserService.prototype.wostore_cloud_get_ticket = async function() {
+UserService.prototype.wostore_cloud_login = async function() {
+  // 直接用 ecs_token 作为 ticket
+  if (!this.ecs_token) return null;
   try {
-    var url = "https://m.client.10010.com/edop_ng/getTicketByNative?appId=edop_unicom_4b80047a&token=" + (this.ecs_token || "");
-    var res = await http.get(url, { timeout: 10 });
-    var result = JSON.parse(res.body);
-    return result.ticket || null;
-  } catch (e) { return null; }
-};
-
-UserService.prototype.wostore_cloud_login = async function(ticket) {
-  try {
-    var body = JSON.stringify({ ticket: ticket, channel: "ST-Kuaidai001" });
+    var body = JSON.stringify({ ticket: this.ecs_token, channel: "ST-Kuaidai001" });
     var res = await http.post("https://uphone.wostore.cn/h5api/token-service/getTokenByTicket", {
       body: body, headers: { "Content-Type": "application/json" }, timeout: 10,
     });
@@ -1285,9 +1284,7 @@ UserService.prototype.wostore_cloud_sign = async function(cloudToken) {
 
 UserService.prototype.wostore_cloud_task = async function(isQueryOnly) {
   this.log("==== 沃云手机 ====");
-  var ticket = await this.wostore_cloud_get_ticket();
-  if (!ticket) { this.log("沃云手机: 获取 ticket 失败"); return; }
-  var cloudToken = await this.wostore_cloud_login(ticket);
+  var cloudToken = await this.wostore_cloud_login();
   if (!cloudToken) { this.log("沃云手机: 登录失败"); return; }
   this.log("沃云手机: 登录成功");
   if (!isQueryOnly) {
@@ -1479,17 +1476,33 @@ UserService.prototype.ttxc_run = async function() {
 UserService.prototype.regional_run = async function() {
   this.log("==== 区域专区 ====");
   var cityInfo = this.city_info || [];
-  var provinceCode = cityInfo.length > 0 ? (cityInfo[0].provinceCode || "030") : "030";
   
-  if (provinceCode === "030") {
-    // 浙江 - 暂无特殊任务
-    this.log("区域专区: 浙江, 暂无特殊任务");
-  } else if (provinceCode === "036") {
-    // 安徽
-    this.log("区域专区: 安徽, 支持超级星期五");
-  } else {
-    this.log("区域专区: 省份 " + provinceCode + ", 暂无特殊任务");
+  var isAnhui = false, isXinjiang = false, isHenan = false, isYunnan = false, isLiaoning = false;
+  for (var i = 0; i < cityInfo.length; i++) {
+    var proName = (cityInfo[i] || {}).proName || "";
+    if (proName.indexOf("安徽") >= 0) isAnhui = true;
+    if (proName.indexOf("新疆") >= 0) isXinjiang = true;
+    if (proName.indexOf("河南") >= 0) isHenan = true;
+    if (proName.indexOf("云南") >= 0) isYunnan = true;
+    if (proName.indexOf("辽宁") >= 0) isLiaoning = true;
   }
+  
+  // 也通过 cityCode 辅助判断
+  if (!isAnhui && !isXinjiang && !isHenan && !isYunnan && !isLiaoning && cityInfo.length > 0) {
+    var code = String((cityInfo[0] || {}).provinceCode || "");
+    if (code === "030") this.log("区域专区: 浙江 (proName=" + (cityInfo[0].proName || "未知") + ")");
+    else if (code === "036") isAnhui = true;  // 安徽
+    else this.log("区域专区: provinceCode=" + code + ", proName=" + (cityInfo[0].proName || "未知"));
+  }
+  
+  if (isAnhui) {
+    this.log("==== 安徽超级星期五 ====");
+    // ah_friday_task 待完整移植
+  }
+  if (isXinjiang) this.log("==== 新疆专区 (待移植) ====");
+  if (isHenan) this.log("==== 河南商都 (待移植) ====");
+  if (isYunnan) this.log("==== 云南生活 (待移植) ====");
+  if (isLiaoning) this.log("==== 辽宁福利魔方 (待移植) ====");
 };
 
 /* ==========================================================
