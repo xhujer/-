@@ -1,5 +1,5 @@
 /**
- * 中国联通 (China Unicom) — Loon JS 版 v2.0.1
+ * 中国联通 (China Unicom) — Loon JS 版 v3.0.0
  * 
  * 原始 Python 版: v1.1.1 (6784 行)
  * Loon 移植: Minis (基于 Loon 官方 script_api.md 文档)
@@ -1123,20 +1123,16 @@ var isLoon2 = (typeof $httpClient !== "undefined" && typeof $task === "undefined
 async function main() {
   console.log("[" + logTime() + "] [Script Start] 中国联通 " + SCRIPT_VERSION);
   
-  // 读取 Cookie: 优先从 $argument (插件 input 注入), 其次 $persistentStore (自动捕获)
+  // 读取 Cookie: 仅从 $persistentStore
+  // 手动填写: 插件设置页 input → Loon 自动存到 $persistentStore
+  // 自动捕获: http-response 脚本 → write 到 $persistentStore
   var cookieStr = "";
-  if (typeof $argument !== "undefined" && $argument) {
-    var args = $argument.split("&");
-    for (var ai = 0; ai < args.length; ai++) {
-      var kv = args[ai].split("=");
-      if (kv[0] === "chinaUnicomCookie") cookieStr = decodeURIComponent(kv.slice(1).join("="));
-    }
-  }
-  if (!cookieStr && typeof $persistentStore !== "undefined") {
+  if (typeof $persistentStore !== "undefined") {
     cookieStr = $persistentStore.read("chinaUnicomCookie") || "";
   }
   
-  console.log("[DEBUG] chinaUnicomCookie: " + (cookieStr ? cookieStr.substring(0, 20) + "..." : "(空)"));
+  console.log("[DEBUG] chinaUnicomCookie: " + (cookieStr ? cookieStr.substring(0, 30) + "..." : "(空)"));
+  console.log("[DEBUG] 是否包含#: " + (cookieStr.indexOf("#") >= 0));
   
   if (!cookieStr) {
     console.log("[-] 未找到 chinaUnicomCookie 配置");
@@ -1271,7 +1267,7 @@ async function main() {
 //   cron 触发 → main()
 
 if (typeof $response !== "undefined") {
-  // http-response 模式: 从 onLine.htm / login.htm 响应中捕获 token
+  // http-response 模式: 从 onLine/login 响应体捕获 token
   (function() {
     try {
       var captureEnabled = $persistentStore.read("cookieCapture");
@@ -1280,17 +1276,12 @@ if (typeof $response !== "undefined") {
         $done({});
         return;
       }
-      // 联通接口响应是 base64 编码，需先解码
+      // 联通接口响应可能是 base64 编码
       var raw = $response.body;
       var body;
-      try {
-        body = JSON.parse(raw);
-      } catch(e) {
-        // 不是 JSON，尝试 base64 解码
-        try {
-          body = JSON.parse(atob(raw));
-        } catch(e2) {
-          console.log("[联通] 响应体解析失败: " + e2.message);
+      try { body = JSON.parse(raw); } catch(e) {
+        try { body = JSON.parse(atob(raw)); } catch(e2) {
+          console.log("[联通] 响应体解析失败");
           $done({});
           return;
         }
@@ -1300,15 +1291,13 @@ if (typeof $response !== "undefined") {
         if (body.appId) cookieStr += "#" + body.appId;
         $persistentStore.write(cookieStr, "chinaUnicomCookie");
         var phone = body.desmobile || "";
-        if (phone && phone.length === 11 && /^\d+$/.test(phone)) {
+        if (phone.length === 11 && /^\d+$/.test(phone)) {
           phone = phone.substr(0, 3) + "****" + phone.substr(7);
-        } else if (phone && phone.startsWith("enc_")) {
+        } else if (phone.startsWith("enc_")) {
           phone = "(加密)";
         }
         console.log("[联通] Cookie 捕获成功! 账号: " + phone);
-        $notification.post("中国联通", "Cookie 捕获成功 ✅", "账号: " + phone + "\n已自动保存，无需手动填写");
-      } else {
-        console.log("[联通] 未在响应中找到 token_online, code=" + body.code);
+        $notification.post("中国联通", "Cookie 捕获成功 " + phone + "\n已自动保存");
       }
     } catch(e) {
       console.log("[联通] Cookie 捕获失败: " + e.message);
@@ -1316,8 +1305,6 @@ if (typeof $response !== "undefined") {
     $done({});
   })();
 } else {
-  // cron 模式: 执行任务
-
   main().catch(function(err) {
     console.log("[FATAL] " + err.message);
     console.log(err.stack);
