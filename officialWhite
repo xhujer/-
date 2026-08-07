@@ -1,0 +1,70 @@
+/**
+ * checkOfficialWhitePhone 请求体改写脚本 (Loon)
+ *
+ * 功能: 拦截 m.client.10010.com 的官方白名单校验接口,
+ *       将请求体清空 (或按下方配置改写), 配合插件 MITM 解密后生效。
+ *
+ * 部署: 该脚本需托管到一个可访问的 HTTPS 地址,
+ *       修改 .plugin 中 script-path 指向你的托管地址。
+ *
+ * Loon 脚本 API 说明:
+ *   - $request / $response 为已解密后的原始对象
+ *   - $done({...}) 返回修改后的请求/响应
+ *   - http-request: $done({ body: "新请求体" }) 修改请求体
+ *   - http-response: $done({ body: "新响应体" }) 修改响应体
+ */
+
+// ===== 配置区 =====
+const OPTIONS = {
+  // true  = 清空请求体 (body 置空)
+  // false = 使用 customRequestBody 作为新的请求体
+  clearRequestBody: true,
+
+  // 当 clearRequestBody=false 时使用 (占位示例, 请改成真实期望的请求体)
+  customRequestBody: "{}",
+
+  // 是否同时改写响应体 (若接口结果由响应决定, 打开它并对齐下方)
+  rewriteResponse: false,
+
+  // rewriteResponse=true 时使用的响应体
+  customResponseBody: '{"code":"0000","msg":"success","data":{"whiteStatus":"1"}}',
+
+  debug: true
+};
+
+// ===== 主逻辑 =====
+function main() {
+  const method = $request.method || "GET";
+  const url = $request.url || "";
+
+  if (OPTIONS.debug) {
+    console.log(`[officialWhite] ${method} ${url}`);
+    console.log(`[officialWhite] 原请求体: ${$request.body || "(空)"}`);
+  }
+
+  // 判断当前是请求阶段还是响应阶段
+  // Loon 插件中用 http-request 标签捕获 → 这里是请求阶段
+  if (typeof $request.body !== "undefined") {
+    // --- 请求阶段: 改写请求体 ---
+    const newBody = OPTIONS.clearRequestBody ? "" : OPTIONS.customRequestBody;
+    if (OPTIONS.debug) {
+      console.log(`[officialWhite] 改写请求体 -> "${newBody}"`);
+    }
+    $done({ body: newBody });
+  } else {
+    // --- 响应阶段: 改写响应体 ---
+    let body = $response.body ? $response.body : "";
+    if (OPTIONS.rewriteResponse) {
+      body = OPTIONS.customResponseBody;
+      if (OPTIONS.debug) console.log(`[officialWhite] 改写响应体 -> ${body}`);
+    }
+    $done({ body });
+  }
+}
+
+// 标准入口
+if (typeof $done === "function") {
+  main();
+} else {
+  console.log("[officialWhite] 需在 Loon 脚本环境运行");
+}
