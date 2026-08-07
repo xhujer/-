@@ -1263,45 +1263,63 @@ async function main() {
 
 // 启动
 // Loon 脚本入口判断:
-//   http-response 触发 → 捕获cookie
-//   cron 触发 → main()
+//   $request → http-request 捕获 Cookie
+//   $response → http-response 捕获 Cookie  
+//   无 → cron 执行任务
 
-if (typeof $response !== "undefined") {
-  // http-response 模式: 从 onLine/login 响应体捕获 token
+if (typeof $request !== "undefined") {
+  // http-request: 从 onLine/login 请求体提取 token_online
+  // 请求体格式: base64(url-encoded) 或直接 url-encoded
   (function() {
     try {
       var captureEnabled = $persistentStore.read("cookieCapture");
       if (captureEnabled === "false" || captureEnabled === "0") {
-        console.log("[联通] Cookie 捕获已关闭");
         $done({});
         return;
       }
-      // 联通接口响应可能是 base64 编码
+      var raw = $request.body || "";
+      var body = raw;
+      // 尝试 base64 解码
+      if (raw.indexOf("=") < 0 || raw.indexOf("token_online") < 0) {
+        try { body = atob(raw); } catch(e) {}
+      }
+      var token = "";
+      if (body.indexOf("token_online=") >= 0) {
+        var m = body.match(/token_online=([^&]+)/);
+        if (m) token = m[1];
+      } else {
+        try { var j = JSON.parse(body); token = j.token_online || ""; } catch(e) {}
+      }
+      if (token) {
+        $persistentStore.write(token, "chinaUnicomCookie");
+        console.log("[联通] ✅ Cookie 捕获成功!");
+        $notification.post("中国联通", "Cookie 捕获成功 ✅", "已自动保存到 chinaUnicomCookie");
+      }
+    } catch(e) { console.log("[联通] 捕获异常: " + e.message); }
+    $done({});
+  })();
+} else if (typeof $response !== "undefined") {
+  // http-response: 从响应体提取 token_online
+  (function() {
+    try {
+      var captureEnabled = $persistentStore.read("cookieCapture");
+      if (captureEnabled === "false" || captureEnabled === "0") {
+        $done({});
+        return;
+      }
       var raw = $response.body;
       var body;
       try { body = JSON.parse(raw); } catch(e) {
-        try { body = JSON.parse(atob(raw)); } catch(e2) {
-          console.log("[联通] 响应体解析失败");
-          $done({});
-          return;
-        }
+        try { body = JSON.parse(atob(raw)); } catch(e2) { $done({}); return; }
       }
       if ((body.code === "0" || body.code === 0) && body.token_online) {
         var cookieStr = body.token_online;
         if (body.appId) cookieStr += "#" + body.appId;
         $persistentStore.write(cookieStr, "chinaUnicomCookie");
-        var phone = body.desmobile || "";
-        if (phone.length === 11 && /^\d+$/.test(phone)) {
-          phone = phone.substr(0, 3) + "****" + phone.substr(7);
-        } else if (phone.startsWith("enc_")) {
-          phone = "(加密)";
-        }
-        console.log("[联通] Cookie 捕获成功! 账号: " + phone);
-        $notification.post("中国联通", "Cookie 捕获成功 " + phone + "\n已自动保存");
+        console.log("[联通] Cookie 捕获成功 (http-response)");
+        $notification.post("中国联通", "Cookie 捕获成功 ✅", "已自动保存");
       }
-    } catch(e) {
-      console.log("[联通] Cookie 捕获失败: " + e.message);
-    }
+    } catch(e) {}
     $done({});
   })();
 } else {
