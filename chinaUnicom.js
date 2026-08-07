@@ -1,5 +1,5 @@
 /**
- * 中国联通 (China Unicom) — Loon JS 版 v5.0.0
+ * 中国联通 (China Unicom) — Loon JS 版 v2.0.0
  * 
  * 原始 Python 版: v1.1.1 (6784 行)
  * Loon 移植: Minis (基于 Loon 官方 script_api.md 文档)
@@ -827,6 +827,19 @@ UserService.prototype.wocare_runAll = async function() {
 /* ==========================================================
    SECTION 7: 权益超市 (MARKET / 权益超市)
    ========================================================== */
+
+// 通用: 从 ecs_token 获取业务 ticket (各模块公用)
+UserService.prototype.getTicketByNative = async function(appId) {
+  if (!appId) appId = "edop_unicom_d67b3e30";
+  try {
+    var url = "https://m.client.10010.com/edop_ng/getTicketByNative?appId=" + appId + "&token=" + (this.ecs_token || "");
+    var res = await http.get(url, { timeout: 10 });
+    var result = JSON.parse(res.body);
+    if (result.ticket) return result.ticket;
+    this.log("getTicketByNative 失败: " + (result.code || JSON.stringify(result)));
+    return null;
+  } catch (e) { this.log("getTicketByNative 异常: " + e.message); return null; }
+};
 UserService.prototype.formatMarketTimestamp = function() {
   return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
 };
@@ -1053,22 +1066,31 @@ UserService.prototype.executeDailyTasks = async function(queryOnly) {
   // 3. 联通祝福
   if (globalConfig.enable_ltzf && !queryOnly) {
     this.log("==== 联通祝福 ====");
-    await this.wocare_runAll();
+    var wz_ticket = await this.getTicketByNative("edop_unicom_4b80047a");
+    if (wz_ticket) {
+      await this.wocare_runAll();
+    }
   }
   
   // 4. 权益超市
   if (globalConfig.enable_market && !queryOnly) {
     this.log("==== 权益超市 ====");
-    var tasks = await this.market_get_all_tasks(this.ecs_token, "");
+    // 获取业务 ticket → userToken
+    var mt_ticket = await this.getTicketByNative("edop_unicom_d67b3e30");
+    var mt_userToken = mt_ticket || "";
+    var tasks = await this.market_get_all_tasks(this.ecs_token, mt_userToken);
     if (tasks.length > 0 && mc.run_task !== false) {
-      await this.market_do_share_list(tasks, "");
+      await this.market_do_share_list(tasks, mt_userToken);
     }
   }
   
   // 5. 联通爱听
   if (globalConfig.enable_aiting && !queryOnly) {
     this.log("==== 联通爱听 ====");
-    await this.aiting_sign();
+    var at_ticket = await this.getTicketByNative("edop_unicom_3a6cc75a");
+    if (at_ticket) {
+      await this.aiting_sign();
+    }
   }
   
   // 6. 沃云手机
