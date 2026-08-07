@@ -1,0 +1,23 @@
+#!name=官方白名单校验改写
+#!desc=拦截 m.client.10010.com 的 checkOfficialWhitePhone 接口,清空/改写请求体(需配合 MITM 证书)
+#!author=Minis
+#!homepage=https://example.com
+#!version=1.0.0
+#!system=ios
+
+[MITM]
+; 仅对该域名启用 HTTPS 解密
+hostname = %APPEND% m.client.10010.com
+skip-server-cert-verify = true
+
+[Script]
+; http-request 捕获该接口请求, 交给脚本改写 body
+; ⚠️ 部署前请将 script-path 改成你的实际托管地址 (见 README)
+http-request ^https?://m\.client\.10010\.com/edopinterface/officialWhite/checkOfficialWhitePhone script-path=https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/officialWhite.js, requires-body = true, tag = 官方白名单请求改写, enabled = true
+
+; ===== 使用说明 =====
+;# 1. 将官方White.js 托管到任意 GitHub/Gist/静态托管
+;# 2. 把上方 script-path 的 YOUR_USER/YOUR_REPO 改成你的地址
+;# 3. 导入本插件到 Loon
+;# 4. 系统设置 - 通用 - 关于本机 - 证书信任设置, 开启 Loon 的根证书
+;# 5. 确保 10010 App 走 Loon 代理
