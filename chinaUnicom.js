@@ -1,5 +1,5 @@
 /**
- * 中国联通 (China Unicom) — Loon JS 版 v2.0.0
+ * 中国联通 (China Unicom) — Loon JS 版 v2.0.1
  * 
  * 原始 Python 版: v1.1.1 (6784 行)
  * Loon 移植: Minis (基于 Loon 官方 script_api.md 文档)
@@ -1123,17 +1123,26 @@ var isLoon2 = (typeof $httpClient !== "undefined" && typeof $task === "undefined
 async function main() {
   console.log("[" + logTime() + "] [Script Start] 中国联通 " + SCRIPT_VERSION);
   
-  // 读取配置: Loon 中用 $persistentStore 存储 chinaUnicomCookie
-  // 用户在插件设置页的 input 字段中填写, 脚本通过 $persistentStore.read("chinaUnicomCookie") 获取
+  // 读取 Cookie: 优先从 $argument (插件 input 注入), 其次 $persistentStore (自动捕获)
   var cookieStr = "";
-  if (typeof $persistentStore !== "undefined") {
+  if (typeof $argument !== "undefined" && $argument) {
+    var args = $argument.split("&");
+    for (var ai = 0; ai < args.length; ai++) {
+      var kv = args[ai].split("=");
+      if (kv[0] === "chinaUnicomCookie") cookieStr = decodeURIComponent(kv.slice(1).join("="));
+    }
+  }
+  if (!cookieStr && typeof $persistentStore !== "undefined") {
     cookieStr = $persistentStore.read("chinaUnicomCookie") || "";
   }
   
+  console.log("[DEBUG] chinaUnicomCookie: " + (cookieStr ? cookieStr.substring(0, 20) + "..." : "(空)"));
+  
   if (!cookieStr) {
     console.log("[-] 未找到 chinaUnicomCookie 配置");
-    console.log("    请在 Loon 插件设置中填写 chinaUnicomCookie=你的Token#AppId");
-    notify("中国联通", "配置缺失", "请设置 chinaUnicomCookie");
+    console.log("    1. 在插件设置页填写 chinaUnicomCookie");
+    console.log("    2. 或开启 cookieCapture，重新登录联通 App 自动捕获");
+    notify("中国联通", "配置缺失", "请设置 chinaUnicomCookie 或开启自动捕获");
     $done();
     return;
   }
