@@ -1,4 +1,4 @@
-#!name = 中国联通
+#!name = 中国联通1
 #!desc = 联通签到/任务/权益超市/云盘/爱听/沃云手机/区域专区
 #!author = Minis (Python→Loon 移植)
 #!version = 2.0.0
@@ -21,9 +21,9 @@ grabMode = switch,false,tag=抢兑开关,desc=开启后按抢兑时间执行抢�
 
 http-response ^https:\/\/(?:m\.client\.10010\.com\/mobileService\/onLine|loginxx\.10010\.com\/mobileService\/login)\.htm script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, requires-body=true, tag=联通Cookie捕获, enable={cookieCapture}
 
-cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通, argument=chinaUnicomCookie={chinaUnicomCookie}&grabMode={grabMode}
+cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通, argument=grabMode={grabMode}
 
-cron {grabCron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通-抢兑, argument=chinaUnicomCookie={chinaUnicomCookie}&grab_mode=true
+cron {grabCron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通-抢兑, argument=grab_mode=true
 
 [MITM]
 
