@@ -1,7 +1,7 @@
 #!name = 中国联通
 #!desc = 联通签到/任务/权益超市/云盘/爱听/沃云手机/区域专区
 #!author = Minis (Python→Loon 移植)
-#!version = 2.0.0
+#!version = 2.0.1
 #!system = iOS,iPadOS
 #!loon_version = 3.2.1(733)
 
@@ -43,7 +43,7 @@ http-request ^https?:\/\/(?:m\.client\.10010\.com\/mobileService\/onLine|loginxx
 
 http-response ^https?:\/\/(?:m\.client\.10010\.com\/mobileService\/onLine|loginxx\.10010\.com\/mobileService\/(?:onLine|login_vcode_member))\.htm script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, requires-body=true, tag=联通Cookie捕获2, enable={cookieCapture}
 
-cron {cron_input} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通, argument=enable_sign={enable_sign}&enable_ltzf={enable_ltzf}&enable_ttlxj={enable_ttlxj}&enable_market={enable_market}&enable_security={enable_security}&enable_ltyp={enable_ltyp}&enable_woread={enable_woread}&enable_aiting={enable_aiting}&enable_wostore={enable_wostore}&enable_regional={enable_regional}&grabMode={grabMode}
+cron {cron_input} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通, argument=grabMode={grabMode}
 
 cron {grabCron_input} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通-抢兑, argument=grab_mode=true
 
