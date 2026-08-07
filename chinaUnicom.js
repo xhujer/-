@@ -1690,6 +1690,15 @@ async function main() {
     grabMode = true;
   }
   
+  // 从插件开关覆盖 globalConfig
+  var funcSwitches = ["enable_sign","enable_ltzf","enable_ttlxj","enable_market","enable_security","enable_ltyp","enable_woread","enable_aiting","enable_wostore","enable_regional"];
+  for (var fi = 0; fi < funcSwitches.length; fi++) {
+    var fk = funcSwitches[fi];
+    if (typeof argMap[fk] !== "undefined") {
+      globalConfig[fk] = (argMap[fk] === "true");
+    }
+  }
+  
   // 保存 argMap 供 executeGrabMode 等使用
   _globalArgMap = argMap;
   
