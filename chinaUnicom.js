@@ -1,5 +1,5 @@
 /**
- * 中国联通 (China Unicom) — Loon JS 版 v2.0.0
+ * 中国联通 (China Unicom) — Loon JS 版 v2.0.1
  * 
  * 原始 Python 版: v1.1.1 (6784 行)
  * Loon 移植: Minis (基于 Loon 官方 script_api.md 文档)
@@ -1690,13 +1690,17 @@ async function main() {
     grabMode = true;
   }
   
-  // 从插件开关覆盖 globalConfig
+  // 从插件开关覆盖 globalConfig (开关值在 $persistentStore)
   var funcSwitches = ["enable_sign","enable_ltzf","enable_ttlxj","enable_market","enable_security","enable_ltyp","enable_woread","enable_aiting","enable_wostore","enable_regional"];
   for (var fi = 0; fi < funcSwitches.length; fi++) {
     var fk = funcSwitches[fi];
-    if (typeof argMap[fk] !== "undefined") {
-      globalConfig[fk] = (argMap[fk] === "true");
+    var val = ($persistentStore && $persistentStore.read(fk)) || "";
+    if (val === "false" || val === "0") {
+      globalConfig[fk] = false;
+    } else if (val === "true" || val === "1") {
+      globalConfig[fk] = true;
     }
+    // 如果没读到值，保留 globalConfig 默认值
   }
   
   // 保存 argMap 供 executeGrabMode 等使用
