@@ -1,29 +1,32 @@
-#!name = 中国联通1
+#!name = 中国联通
 #!desc = 联通签到/任务/权益超市/云盘/爱听/沃云手机/区域专区
 #!author = Minis (Python→Loon 移植)
 #!version = 2.0.0
 #!system = iOS,iPadOS
 #!loon_version = 3.2.1(733)
 
-[Argument]
+#!input = chinaUnicomCookie
+#!input = UNICOM_GRAB_AMOUNT
+#!input = UNICOM_TEST_MODE
+#!input = UNICOM_AH_FRIDAY_AMOUNT
 
-chinaUnicomCookie = input,"",tag=Cookie,desc=Token#AppId (多账号用 & 分隔)
+[Argument]
 
 cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录联通 App 时自动保存 Token
 
-cron = input,"0 7,20 * * *",tag=每日任务时间,
+cron_input = input,"0 7,20 * * *",tag=每日任务时间,
 
-grabCron = input,"58 9,17 * * *",tag=抢兑时间,
+grabCron_input = input,"58 9,17 * * *",tag=抢兑时间,
 
-grabMode = switch,false,tag=抢兑开关,desc=开启后按抢兑时间执行抢话费券
+grabMode = switch,false,tag=抢兑开关
 
 [Script]
 
-http-response ^https:\/\/(?:m\.client\.10010\.com\/mobileService\/onLine|loginxx\.10010\.com\/mobileService\/login)\.htm script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, requires-body=true, tag=联通Cookie捕获, enable={cookieCapture}
+http-request ^https?:\/\/(?:m\.client\.10010\.com\/mobileService\/onLine|loginxx\.10010\.com\/mobileService\/login)\.htm script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, requires-body=true, tag=联通Cookie捕获, enable={cookieCapture}
 
-cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通, argument=grabMode={grabMode}
+cron {cron_input} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通, argument=grabMode={grabMode}
 
-cron {grabCron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通-抢兑, argument=grab_mode=true
+cron {grabCron_input} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通-抢兑, argument=grab_mode=true
 
 [MITM]
 
