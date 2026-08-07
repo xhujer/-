@@ -1,5 +1,5 @@
 /**
- * 中国联通 (China Unicom) — Loon JS 版 v3.0.0
+ * 中国联通 (China Unicom) — Loon JS 版 v2.0.0
  * 
  * 原始 Python 版: v1.1.1 (6784 行)
  * Loon 移植: Minis (基于 Loon 官方 script_api.md 文档)
@@ -1268,7 +1268,7 @@ async function main() {
 //   无 → cron 执行任务
 
 if (typeof $request !== "undefined") {
-  // http-request: 从 onLine/login 请求体提取 token_online
+  // http-request: 从 onLine/login 请求体提取 token_online + appId
   // 请求体格式: base64(url-encoded) 或直接 url-encoded
   (function() {
     try {
@@ -1279,21 +1279,23 @@ if (typeof $request !== "undefined") {
       }
       var raw = $request.body || "";
       var body = raw;
-      // 尝试 base64 解码
       if (raw.indexOf("=") < 0 || raw.indexOf("token_online") < 0) {
         try { body = atob(raw); } catch(e) {}
       }
       var token = "";
+      var appid = "";
       if (body.indexOf("token_online=") >= 0) {
-        var m = body.match(/token_online=([^&]+)/);
-        if (m) token = m[1];
-      } else {
-        try { var j = JSON.parse(body); token = j.token_online || ""; } catch(e) {}
+        var mt = body.match(/token_online=([^&]+)/);
+        if (mt) token = mt[1];
+        var ma = body.match(/appId=([^&]+)/);
+        if (ma) appid = ma[1];
       }
       if (token) {
-        $persistentStore.write(token, "chinaUnicomCookie");
-        console.log("[联通] ✅ Cookie 捕获成功!");
-        $notification.post("中国联通", "Cookie 捕获成功 ✅", "已自动保存到 chinaUnicomCookie");
+        var cookieStr = token;
+        if (appid) cookieStr += "#" + appid;
+        $persistentStore.write(cookieStr, "chinaUnicomCookie");
+        console.log("[联通] ✅ Cookie 捕获成功! token=" + token.substring(0, 10) + "... appId=" + (appid ? appid.substring(0, 10) + "..." : "无"));
+        $notification.post("中国联通", "Cookie 捕获成功 ✅", "已自动保存");
       }
     } catch(e) { console.log("[联通] 捕获异常: " + e.message); }
     $done({});
@@ -1316,7 +1318,7 @@ if (typeof $request !== "undefined") {
         var cookieStr = body.token_online;
         if (body.appId) cookieStr += "#" + body.appId;
         $persistentStore.write(cookieStr, "chinaUnicomCookie");
-        console.log("[联通] Cookie 捕获成功 (http-response)");
+        console.log("[联通] ✅ Cookie 捕获成功 (http-response)");
         $notification.post("中国联通", "Cookie 捕获成功 ✅", "已自动保存");
       }
     } catch(e) {}
