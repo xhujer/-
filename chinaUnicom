@@ -5,12 +5,9 @@
 #!system = iOS,iPadOS
 #!loon_version = 3.2.1(733)
 
-#!input = chinaUnicomCookie
-#!input = UNICOM_GRAB_AMOUNT
-#!input = UNICOM_TEST_MODE
-#!input = UNICOM_AH_FRIDAY_AMOUNT
-
 [Argument]
+
+chinaUnicomCookie = input,"",tag=Cookie,desc=Token#AppId (多账号用 & 分隔)
 
 cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录联通 App 时自动保存 Token
 
@@ -20,13 +17,33 @@ grabCron_input = input,"58 9,17 * * *",tag=抢兑时间,
 
 grabMode = switch,false,tag=抢兑开关
 
+enable_sign = switch,true,tag=首页签到,desc=签到/任务/话费红包
+
+enable_ltzf = switch,true,tag=联通祝福,desc=星座配对/大转盘/盲盒抽奖
+
+enable_ttlxj = switch,true,tag=天天领现金,desc=每日打卡/立减金
+
+enable_market = switch,true,tag=权益超市,desc=任务/抽奖/浇水/领奖
+
+enable_security = switch,true,tag=安全管家,desc=日常任务/积分领取
+
+enable_ltyp = switch,true,tag=联通云盘,desc=乘风活动/签到
+
+enable_woread = switch,false,tag=联通阅读,desc=书籍/心跳阅读(默认关闭)
+
+enable_aiting = switch,true,tag=联通爱听,desc=积分任务/签到
+
+enable_wostore = switch,true,tag=沃云手机,desc=签到/任务/抽奖
+
+enable_regional = switch,true,tag=区域专区,desc=各省份特有任务
+
 [Script]
 
 http-request ^https?:\/\/(?:m\.client\.10010\.com\/mobileService\/onLine|loginxx\.10010\.com\/mobileService\/(?:onLine|login_vcode_member))\.htm script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, requires-body=true, tag=联通Cookie捕获, enable={cookieCapture}
 
 http-response ^https?:\/\/(?:m\.client\.10010\.com\/mobileService\/onLine|loginxx\.10010\.com\/mobileService\/(?:onLine|login_vcode_member))\.htm script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, requires-body=true, tag=联通Cookie捕获2, enable={cookieCapture}
 
-cron {cron_input} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通, argument=grabMode={grabMode}
+cron {cron_input} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通, argument=enable_sign={enable_sign}&enable_ltzf={enable_ltzf}&enable_ttlxj={enable_ttlxj}&enable_market={enable_market}&enable_security={enable_security}&enable_ltyp={enable_ltyp}&enable_woread={enable_woread}&enable_aiting={enable_aiting}&enable_wostore={enable_wostore}&enable_regional={enable_regional}&grabMode={grabMode}
 
 cron {grabCron_input} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js, timeout=600, tag=中国联通-抢兑, argument=grab_mode=true
 
