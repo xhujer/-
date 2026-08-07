@@ -1,5 +1,5 @@
 /**
- * 中国联通 (China Unicom) — Loon JS 版 v2.0.0
+ * 中国联通 (China Unicom) — Loon JS 版 v5.0.0
  * 
  * 原始 Python 版: v1.1.1 (6784 行)
  * Loon 移植: Minis (基于 Loon 官方 script_api.md 文档)
@@ -306,12 +306,15 @@ function logTime() {
 /* ==========================================================
    SECTION 3: LOON API WRAPPER (async)
    ========================================================== */
+// 全局活跃账号 cookie（由 UserService onLine 后设置）
+var _globalCookie = "";
+
 function httpRequest(method, url, options) {
   return new Promise(function(resolve, reject) {
     options = options || {};
     var params = {
       url: url,
-      timeout: (options.timeout || 15) * 1000, // seconds → ms
+      timeout: (options.timeout || 15) * 1000,
       headers: options.headers || {},
     };
     if (options.body) {
@@ -322,12 +325,15 @@ function httpRequest(method, url, options) {
         if (!params.headers["Content-Type"]) params.headers["Content-Type"] = "application/json";
       }
     }
+    // 构建 Cookie: 全局 + 显式传入
+    var cookieParts = [];
+    if (_globalCookie) cookieParts.push(_globalCookie);
     if (options.cookies) {
-      var cookieStr = "";
-      for (var k in options.cookies) cookieStr += k + "=" + options.cookies[k] + "; ";
-      params.headers["Cookie"] = cookieStr;
+      for (var k in options.cookies) cookieParts.push(k + "=" + options.cookies[k]);
     }
-    // Add User-Agent
+    if (cookieParts.length > 0) {
+      params.headers["Cookie"] = cookieParts.join("; ");
+    }
     if (!params.headers["User-Agent"]) params.headers["User-Agent"] = COMMON_CONSTANTS.UA;
     
     $httpClient[method.toLowerCase()](params, function(errormsg, response, data) {
@@ -493,6 +499,11 @@ UserService.prototype.onLine = async function() {
       }
       this.city_info = result.list || [];
       this.ecs_token = result.ecs_token || "";
+      this.t3_token = result.t3_token || "";
+      // 设置全局 Cookie，后续所有请求自动携带
+      _globalCookie = this.cookie_string;
+      if (this.ecs_token) _globalCookie += "; ecs_token=" + this.ecs_token;
+      if (this.t3_token) _globalCookie += "; t3_token=" + this.t3_token;
       this.log("登录成功");
       return true;
     }
