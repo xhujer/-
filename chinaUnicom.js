@@ -1262,17 +1262,30 @@ async function main() {
 //   cron 触发 → main()
 
 if (typeof $response !== "undefined") {
-  // http-response 模式: 从 onLine.htm 响应中捕获 token
+  // http-response 模式: 从 onLine.htm / login.htm 响应中捕获 token
   (function() {
     try {
-      // 检查捕获开关 (用户可在插件设置中切换: 关闭/开启)
-      var captureEnabled = $persistentStore.read("captureCookie");
-      if (captureEnabled === "关闭" || captureEnabled === "0") {
+      var captureEnabled = $persistentStore.read("cookieCapture");
+      if (captureEnabled === "false" || captureEnabled === "0") {
         console.log("[联通] Cookie 捕获已关闭");
         $done({});
         return;
       }
-      var body = JSON.parse($response.body);
+      // 联通接口响应是 base64 编码，需先解码
+      var raw = $response.body;
+      var body;
+      try {
+        body = JSON.parse(raw);
+      } catch(e) {
+        // 不是 JSON，尝试 base64 解码
+        try {
+          body = JSON.parse(atob(raw));
+        } catch(e2) {
+          console.log("[联通] 响应体解析失败: " + e2.message);
+          $done({});
+          return;
+        }
+      }
       if ((body.code === "0" || body.code === 0) && body.token_online) {
         var cookieStr = body.token_online;
         if (body.appId) cookieStr += "#" + body.appId;
@@ -1280,9 +1293,13 @@ if (typeof $response !== "undefined") {
         var phone = body.desmobile || "";
         if (phone && phone.length === 11 && /^\d+$/.test(phone)) {
           phone = phone.substr(0, 3) + "****" + phone.substr(7);
+        } else if (phone && phone.startsWith("enc_")) {
+          phone = "(加密)";
         }
         console.log("[联通] Cookie 捕获成功! 账号: " + phone);
         $notification.post("中国联通", "Cookie 捕获成功 ✅", "账号: " + phone + "\n已自动保存，无需手动填写");
+      } else {
+        console.log("[联通] 未在响应中找到 token_online, code=" + body.code);
       }
     } catch(e) {
       console.log("[联通] Cookie 捕获失败: " + e.message);
