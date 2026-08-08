@@ -1,221 +1,100 @@
-//  闲鱼去广告 JS (增强版)
-//  基于 HAR v7.27.60 分析，在 树先生 原版基础上新增:
-//  - 回收页信息流广告过滤
-//  - 圈子主tab签到/积分过滤
-//  - follow.recommend 增强处理
-//  原版作者: 树先生 (2026-05-28)
-//  增强: Minis (2026-08-08)
+#!name = 闲鱼去广告(增强版)
+#!desc = 基于 HAR v7.27.60 完善，屏蔽闪屏/悬浮球/圈子/回收/聚光灯等广告
+#!author = Minis Enhanced (基于 树先生 原版)
+#!icon = https://github.com/ishowshu/loon/raw/refs/heads/main/icon/goofish.png
 
-let url = $request.url;
-let body = $response.body;
-let obj = JSON.parse(body);
+[Rule]
+AND,((URL-REGEX,"^http:\/\/.+\/amdc\/mobileDispatch"),(USER-AGENT,"%E9%97%B2%E9%B1%BC*")),REJECT
 
-// ====== 首页下拉刷新信息流 ======
-if (url.includes("/gw/mtop.taobao.idlehome.home.nextfresh")) {
-  delete obj.data.widgetReturnDO;
-  delete obj.data.bannerReturnDO;
-  if (obj.data?.sections) {
-    obj.data.sections = obj.data.sections.filter(section => {
-      return !(section.data && (section.data.bizType === "AD" || section.data.bizType === "homepage" || section.data.bizType === "resell"));
-    });
-    // 过滤主题推荐卡片 (二手车/租房/服饰主题等)
-    obj.data.sections = obj.data.sections.filter(section => {
-      return !(section.data && section.data.cardTypeValue === "ThemeRec");
-    });
-    // 过滤带"广告"标签的商品卡片 (fishTags 中有 content=="广告" 的 tag)
-    obj.data.sections = obj.data.sections.filter(section => {
-      var tags = section.data && section.data.fishTags;
-      if (!tags) return true;
-      for (var rkey in tags) {
-        var tagList = tags[rkey].tagList || [];
-        for (var ti = 0; ti < tagList.length; ti++) {
-          if (tagList[ti].data && tagList[ti].data.content === "广告") return false;
-        }
-      }
-      return true;
-    });
-    var excludeNames = ['fish_home_yunying_card_d3', 'idlefish_seafood_market', 'fish_home_chat_room'];
-    obj.data.sections = obj.data.sections.filter(function(section) {  
-      return !excludeNames.includes(section.template.name);  
-    });
-    obj.data.sections = obj.data.sections.filter(section => {
-      return (section.data && (section.data.cardTypeValue === "Item"));
-    });
-  }
-  obj.data.homeTopList = [];
-}
+[Rewrite]
+# 搜索页多余推荐列表
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlemtopsearch\.item\.search\.activate\/2\.0 reject-dict
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlemtopsearch\.search\.discover\/1\.0 reject-dict
+# 这些宝贝超好卖
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.item\.resell\.recommendorhotcate\/1\.0 reject-dict
+# 用闲鱼币买更便宜
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlehome\.idle\.coin\.nextfresh\/1\.0 reject-dict
+# 消息页感兴趣推荐
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.playboy\.recommend\/ reject-dict
+# 开屏广告
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.ads reject-dict
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.async\.ads reject-dict
+# 广告场景恢复/启动上报/曝光上报
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.idle\.idleadv\.scene\.restore reject-dict
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.idle\.idleadv\.code\.restore reject-dict
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.idle\.idleadv\.app\.launch\.report reject-dict
+^https:\/\/g-acs\.m\.goofish\.com\/gw\/mtop\.idle\.ad\.expose reject-dict
+# 搜索页面猜你想搜
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlemtopsearch\.item\.search\.activate reject-dict
+# 同城页顶部横幅和菜单按钮
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.local\.home\.top reject-dict
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.local\.near\.by\.corner\.info reject-dict
+# 订单详情页商品横幅推荐
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.idle\.trade\.item\.recommend\.render reject-dict
+# 回收页优惠券挂件
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.idle\.recycle\.customer\.coupon\.pendant\/ reject-dict
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.idle\.recycle\.customer\.coupon\.pendant2\/ reject-dict
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.idle\.recycle\.customer\.coupon\.issue\/ reject-dict
+# 聚光灯推广消息
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.alibaba\.idle\.spotlight\.groupinfo reject-dict
+# 活动入口
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.activity\.query reject-dict
+# 商品详情页顶部搜索框提示词
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlemtopsearch\.detailpage\.search\.shade\/ reject-dict
 
-if (url.includes("/gw/mtop.taobao.idle.local.home")) {
-  if (obj.data?.sections) {
-    obj.data.sections = obj.data.sections.filter(section => {
-      return !(section.data && section.data.bizType === "AD");
-    });
-    // 过滤带"广告"标签的商品卡片
-    obj.data.sections = obj.data.sections.filter(section => {
-      var tags = section.data && section.data.fishTags;
-      if (!tags) return true;
-      for (var rkey in tags) {
-        var tagList = tags[rkey].tagList || [];
-        for (var ti = 0; ti < tagList.length; ti++) {
-          if (tagList[ti].data && tagList[ti].data.content === "广告") return false;
-        }
-      }
-      return true;
-    });
-  }
-}
 
-if (url.includes("/gw/mtop.taobao.idle.home.whale.modulet")) {
-  delete obj.data.container.sections;
-}
+# 搜索栏填充词
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlemtopsearch\.search\.shade\/ response-body-json-jq 'del(.data)'
+# 首页闲鱼币入口、底部发布球
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.user\.strategy\.list\/ response-body-json-jq 'del(.data)'
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.user\.strategy\.get\/ response-body-json-jq 'del(.data)'
+# 首页魔方频道推荐
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlehome\.magic\.home\.page\.list\/1\.0 response-body-json-jq '.data.feedsList = [] | .data.feedsCount = "0"'
+# 关注的人页面圈子横幅
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.group\.myself\.banner\/ response-body-json-jq '.data.bannerList = []'
+# 主页关注的人感兴趣推荐
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.playboy\.recommend\/2\.0 response-body-json-jq '.data.recommends = [] | .data.items = [] | .data.next = false'
+# 商品详情页底部推荐
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.item\.recommend\.list\/ response-body-json-jq '.data.cardList = []'
+# 首页关注频道常访问的圈子
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.fun\.follow\.often\.visit response-body-json-jq '.data.sections = []'
+# 主页关注页面圈子新横幅
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.circle\.myself\.banner\/1\.0 response-body-json-jq '.data.bannerList = []'
+# 主页关注页面圈子常访问
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.circle\.visited\/1\.0 response-body-json-jq '.data.visitedCircleList = []'
+# 圈子主tab签到引导/积分弹窗
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.circle\.main\.tab\/ response-body-json-jq '.data.feedsList = [] | .data.feedsCount = "0"'
+# 搜索框页面榜单
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlemtopsearch\.search\.activate\.tablist response-body-json-jq '.data.tabList = []'
+# 首页顶部图标菜单
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlehome\.widget\.refresh\.get response-body-json-jq '.data.homeTopList = []'
+# 订单详情页底部横幅
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.trade\.full\.info response-body-json-jq '.data.components |= map(select(.render != "bannerVO"))'
+# 商品详情页下单页面商品选择顺手买
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.trade\.order\.render\/ response-body-json-jq 'del(.data.bottomBarVO.benefitPointAtmosphere) | .data.components |= map(select(.render != "meanTimeBuyVO"))'
+# 用户行为策略弹窗
+^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.user\.action\.strategy\/ response-body-json-jq 'del(.data.strategyList)'
 
-if (url.includes("/gw/mtop.taobao.idlemtopsearch.search.shade") || url.includes("/gw/mtop.taobao.idle.user.strategy.list")) {
-  delete obj.data;
-}
 
-if (url.includes("/gw/mtop.taobao.idle.user.strategy.get")) {
-  delete obj.data;
-}
+[Script]
+# 商品信息流广告
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlehome\.home\.nextfresh\/ script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/goofish_enhanced.js, requires-body = true, tag = 商品信息流广告
+# 定位地区页面的信息流广告
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.local\.home\/ script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/goofish_enhanced.js, requires-body = true, tag = 定位地区页面的信息流广告
+# 个人主页
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.idle\.user\.page\.my\.adapter\/ script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/goofish_enhanced.js, requires-body = true, tag = 个人主页
+# 首页顶部频道菜单
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlehome\.home\.circle\.list\/ script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/goofish_enhanced.js, requires-body = true, tag = 首页顶部频道菜单
+# 商品详情页周边推荐
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.local\.nearby\.itemdetail\.enter\/ script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/goofish_enhanced.js, requires-body = true, tag = 商品详情页周边推荐
+# 搜索结果信息流广告
+http-response ^https:\/\/g-acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlemtopsearch\.search\/ script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/goofish_enhanced.js, requires-body = true, tag = 搜索结果信息流广告
+# 同城页横幅广告
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.local\.flow\.plat\.section script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/goofish_enhanced.js, requires-body = true, tag = 同城页横幅广告
+# 消息页推广过滤
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlemessage\.session\.sync\/ script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/goofish_enhanced.js, requires-body = true, tag = 消息页推广过滤
+# 回收页信息流广告
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.idle\.recycle\.customer\.home\.page\.entrance\/ script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/goofish_enhanced.js, requires-body = true, tag = 回收页信息流广告
 
-if (url.includes("/mtop.idle.user.page.my.adapter")) {
-  var indexArr = ["0", "1", "3"];
-  obj.data.container.sections = obj.data.container.sections.filter(item => indexArr.includes(item.index));
-  obj.data.ability = [];
-  obj.data.container.sections.forEach(section => {
-    if (section.index === "3") {
-      var targetToolTitle = ["超级擦亮", "闲鱼小法庭", "闲鱼公约", "安全中心", "帖子中心"];
-      if (section.item?.tool?.exContent) {
-        var foundElements = section.item.tool.exContent.tools
-          .flat()
-          .filter(element => 
-            element.exContent && 
-            element.exContent.title && 
-            targetToolTitle.includes(element.exContent.title)
-          );
-        section.item.tool.exContent.tools = [foundElements];
-      }
-    }
-  });
-}
-
-if (url.includes("/mtop.taobao.idlehome.home.circle.list")) {
-  obj.data.circleList = obj.data.circleList.filter(circle => circle.circleId === "1" || circle.circleId === "2");
-  if (obj.data?.next?.headList) {
-    obj.data.next.headList = obj.data.next.headList.filter(circle => circle.bizCode === "main" || circle.bizCode === "recycle");
-  }
-  obj.data.headList = obj.data.headList.filter(circle => circle.bizCode === "main" || circle.bizCode === "recycle");
-}
-
-if (url.includes("/gw/mtop.taobao.idlemtopsearch.search")) {
-    if (obj.data && Array.isArray(obj.data.resultList)) {  
-      obj.data.resultList = obj.data.resultList.filter(element => {  
-          if (element.data && element.data.item && element.data.item.main && element.data.item.main.exContent) {  
-              var isAliMaMaAD = element.data.item.main.exContent.isAliMaMaAD;  
-              return !(isAliMaMaAD === true || isAliMaMaAD === "true");  
-          }  
-          return true;  
-      }); 
-      var srchExcludeNames = ["idlefish_search_card_category_select", "idlefish_search_spu_market_publish"];
-      obj.data.resultList = obj.data.resultList.filter(element => {
-        return !srchExcludeNames.includes(element.data.template.name);
-      });
-    }
-    if (obj.data?.resultPrefixBar) {
-      delete obj.data.resultPrefixBar;
-    }
-    if (obj.data?.topList) {
-      obj.data.topList = [];
-    }
-}
-
-if (url.includes("/mtop.taobao.idle.group.myself.banner")) {
-    obj.data.bannerList = [];
-}
-
-if (url.includes("/mtop.taobao.idle.playboy.recommend")) {
-    obj.data.recommends = [];
-    obj.data.items = [];
-    obj.data.next = false;
-}
-
-if (url.includes("/mtop.taobao.idle.item.recommend.list")) {
-    obj.data.cardList = [];
-}
-
-if (url.includes("/mtop.taobao.idle.local.nearby.itemdetail.enter/1.0")) {
-   obj.data.targetUrl = "";
-   obj.data.trackParams.itemIds = "";
-   obj.data.nearbyItemInfoList = [];
-   obj.data.name = "";
-   obj.data.desc = "";
-   obj.data.poiName = "";
-}
-
-if (url.includes("/gw/mtop.taobao.idlemessage.session.sync/3.0")) {
-    // 过滤推广会话: 25=闲鱼精选(降价提醒等), 23=热门活动/服务号(卖货助手/鱼小铺等)
-    obj.data.sessions = obj.data.sessions.filter(session => {
-      var stype = session.session.sessionType;
-      return stype !== "25" && stype !== "23";
-    });
-}
-
-if (url.includes("idle.fun.follow.feed.list")) {
-    obj.data.sections = obj.data.sections.filter(session => session.cardType === 9999);
-    obj.data.sections.forEach(section => {
-    if (section.cardData?.subText) {
-        section.cardData.subText = "";
-    }
-  });
-}
-
-if (url.includes("idle.fun.follow.often.visit")) {
-    obj.data.sections = [];
-}
-
-if (url.includes("idle.circle.myself.banner/1.0")) {
-    obj.data.bannerList = [];
-}
-
-if (url.includes("idle.circle.visited/1.0")) {
-    obj.data.visitedCircleList = [];
-}
-
-if (url.includes("follow.recommend.feed.list")) {
-  obj.data.needDecryptKeys = [];
-  obj.data.nextPage = false;
-  obj.data.fitRecommendAB = true;
-}
-
-if (url.includes("/mtop.taobao.idle.local.flow.plat.section")) {
-  var keyArr = ["fish_home_activity_enter_cardV1"];
-  obj.data.data.components = obj.data.data.components.filter(item => !keyArr.includes(item.key));
-}
-
-// ====== 回收页信息流 ======
-if (url.includes("/mtop.idle.recycle.customer.home.page.entrance")) {
-  if (obj.data?.feedsList) {
-    obj.data.feedsList = obj.data.feedsList.filter(item => {
-      return !item.data?.bannerList;
-    });
-  }
-}
-
-// ====== 圈子主tab — 过滤签到/积分引导 ======
-if (url.includes("/mtop.taobao.idle.circle.main.tab")) {
-  if (obj.data?.feedsList) {
-    obj.data.feedsList = obj.data.feedsList.filter(item => {
-      return item.cardType !== "81006";
-    });
-  }
-}
-
-// ====== 魔方首页(频道推荐) ======
-if (url.includes("/mtop.taobao.idlehome.magic.home.page.list")) {
-  if (obj.data?.feedsList) {
-    obj.data.feedsList = [];
-  }
-  obj.data.feedsCount = "0";
-}
-
-body = JSON.stringify(obj);
-$done({body});
+[MitM]
+hostname = acs.m.goofish.com, g-acs.m.goofish.com
