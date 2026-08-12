@@ -1,20 +1,20 @@
-#!name = Happy Planet Tomato King V5
-#!desc = 单账号自动获取 wid/openId，定时完成任务、收取好友能量并使用能量
-#!author = Ming
-#!date = 2026-07-27
+#!name = Happy Planet Tomato King V5 (多账号)
+#!desc = 多账号自动获取 wid/openId，逐个定时完成任务、收取好友能量并使用能量
+#!author = Ming (改版)
+#!date = 2026-08-12
 #!icon = https://farmgames.ioutu.cn/favicon.ico
 #!system = iOS,iPadOS
 #!tag = 茄皇,快乐星球,任务
 
 [Argument]
-capture = switch,true,tag=自动获取账号,desc=开启后访问活动页面自动保存 wid 和 openId
+capture = switch,true,tag=自动获取账号,desc=开启后访问活动页面自动保存 wid 和 openId（每抓一次新增一个账号）
 cron = input,"25 10 * * *",tag=执行时间,desc=默认每天 10:25 执行
 notify = switch,true,tag=运行通知,desc=账号获取成功和任务结束时发送通知
 debug = switch,false,tag=调试日志,desc=开启后输出账号识别、请求及加密库加载日志
 
 [Script]
 http-request ^https:\/\/farmgames\.ioutu\.cn\/ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/happy_planet_tomato_king_v5.js, requires-body=true, timeout=20, tag=茄皇账号自动获取, argument=[{capture},{notify},{debug}], enable={capture}
-cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/happy_planet_tomato_king_v5.js, timeout=300, tag=Happy Planet Tomato King V5, argument=[{capture},{notify},{debug}], enable=true
+cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/happy_planet_tomato_king_v5.js, timeout=300, tag=Happy Planet Tomato King V5 (多账号), argument=[{capture},{notify},{debug}], enable=true
 
 [MITM]
 hostname = farmgames.ioutu.cn
