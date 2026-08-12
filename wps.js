@@ -3,7 +3,7 @@
  * 多账号版:单脚本双模式(http-request 抓 Cookie 入数组 / cron 遍历全部账号签到)
  *
  * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip> | 多账号改造 by Minis
- * @Updated: 2026-08-12
+ * @Updated: 2026-08-13
  */
 
 const $ = new Env("WPS");
