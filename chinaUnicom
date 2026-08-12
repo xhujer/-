@@ -1,12 +1,12 @@
 #!name = 中国联通自动任务
-#!desc = 青龙 Python v1.1.2 的 Loon 完整移植版：签到、联通祝福、天天领现金、通通乡村、权益超市、安全管家、云盘、阅读、爱听、沃云手机及区域专区
-#!author = YaoHuo8648 / Loon port by Minis
-#!version = 1.1.2-loon.4
+#!desc = 签到、联通祝福、天天领现金、通通乡村、权益超市、安全管家、云盘、阅读、爱听、沃云手机及区域专区
+#!author = Ming
+#!version = 1.0
 #!date = 2026-08-13
 #!system = iOS,iPadOS
 #!loon_version = 3.5.0(969)
 #!tag = 中国联通,签到,任务
-#!icon = https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/62/5a/00/625a00ea-7622-6646-5adb-d3aadb85aa7f/AppIcon-0-0-1x_U007emarketing-0-8-0-0-85-220.png/512x512bb.jpg
+#!icon = https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/a2/83/c1/a283c1df-f7f7-f4c1-6a03-bb0db7eff558/AppIcon-0-0-1x_U007epad-0-11-0-85-220.png/512x512bb.jpg
 
 [Argument]
 cron = input,"0 7,20 * * *",tag=定时执行,desc=每天07:00和20:00执行
