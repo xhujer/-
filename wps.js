@@ -8,7 +8,7 @@
 
 const $ = new Env("WPS");
 
-const CK_KEY = "wps_sid"; // 旧单账号存储 key:新账号存 wps_sid_list 数组,CK_KEY 仅用于旧数据迁移/清除/兜底
+const CK_KEY = "wps_sid"; // 兼容旧版单账号数据
 
 // ===== 多账号支持(glados 式数组存储) =====
 // 所有账号 wps_sid 存 wps_sid_list JSON 数组,cron 一次跑完;兼容旧单账号 key wps_sid(自动迁移并入)
@@ -29,10 +29,10 @@ function saveSidList(list) {
 }
 function collectAccounts() {
     const list = getSidList();
-    // 旧单账号 key 迁移:数组为空但有 wps_sid → 并入并清旧 key
+    // 兼容旧版单账号 key：迁移到数组后始终清理旧 key
     const old = $.getdata(CK_KEY);
-    if (old && !list.includes(old)) {
-        list.unshift(old);
+    if (old) {
+        if (!list.includes(old)) list.unshift(old);
         saveSidList(list);
         $.setdata("", CK_KEY);
     }
@@ -55,17 +55,20 @@ let ACTIVE_SID = "";
 // ===== http-request 抓包模式:保存 Cookie 到数组(自动追加+去重) =====
 function saveCookieFromRequest() {
     if ($request.method === "OPTIONS") return;
-    // 插件「清空全部账号」开关开启时(argument=[{清空全部账号}]),打开活动页即触发清空
+    // 开关开启时清空账号；只有首次实际清除数据时通知，避免同一页面重复弹窗
     if (shouldClearAll()) {
+        const hadAccounts = getSidList().length > 0 || !!$.getdata(CK_KEY);
         saveSidList([]);
         $.setdata("", CK_KEY);
-        $.msg("WPS", "", "✅ 全部账号 Cookie 已清除(插件开关触发),请重新抓取");
+        if (hadAccounts) {
+            $.msg("WPS", "", "✅ 全部账号 Cookie 已清除(插件开关触发),请重新抓取");
+        }
         return;
     }
     try {
         // page_info 请求头里带整套 cookie,从中只取 wps_sid(域 wps.cn 的持久登录态,不轮换、无需刷新)
         const cookie = ($request.headers["Cookie"] || $request.headers["cookie"] || "");
-        const m = cookie.match(/(?:^|;\s*)wps_sids?=([^;]+)/);
+        const m = cookie.match(/(?:^|;\s*)wps_sid=([^;]+)/);
         if (!m) {
             $.log("[WARN] 请求头里没找到 wps_sid,可能该请求未带登录态,换个活动页重试");
             return;
@@ -84,33 +87,38 @@ function saveCookieFromRequest() {
     }
 }
 
-function maskSid(s) {
-    if (!s || s.length < 12) return "已获取";
-    return s.slice(0, 6) + "***" + s.slice(-4);
-}
-
 // 插件「清空全部账号」开关:argument=[{清空全部账号}] → $argument = {"清空全部账号": true/false}
 function shouldClearAll() {
     try {
         const a = $argument;
         if (a && typeof a === "object") {
-            const v = a["清空全部账号"] ?? a.clearAll ?? false;
-            return v === true || v === "true" || v === 1 || v === "1";
+            return isTrueValue(a["清空全部账号"] ?? a.clearAll);
         }
         if (typeof a === "string" && a.trim() !== "") {
-            return /clearAll\s*=\s*(true|1)/i.test(a) || a.includes("清空全部账号");
+            const text = a.trim();
+            try {
+                const parsed = JSON.parse(text);
+                if (parsed && typeof parsed === "object") {
+                    return isTrueValue(parsed["清空全部账号"] ?? parsed.clearAll);
+                }
+            } catch (e) { /* 非 JSON 字符串继续按键值格式解析 */ }
+            return /(?:^|[,&;\s])(?:清空全部账号|clearAll)\s*=\s*(?:true|1)(?=$|[,&;\s])/i.test(text);
         }
-    } catch (e) { /* 解析失败按不开 */ }
+    } catch (e) { /* 解析失败按关闭处理 */ }
     return false;
 }
 
-// 任务开关:关闭才跳过(兼容字符串 "false"/"0" 与布尔 false,不同 BoxJS 存法都认);未设置=默认开启
+function isTrueValue(v) {
+    return v === true || v === 1 || v === "true" || v === "1";
+}
+
+// 任务开关：关闭才跳过；未设置时默认开启
 function taskOff(k) {
     const v = $.getdata(k);
     return v === false || v === 0 || v === "false" || v === "0";
 }
 
-// 调试日志:BoxJS 设 wps_debug=true 才打印接口原始响应(平时只看任务汇总)
+// 持久化存储 wps_debug=true 时输出接口原始响应
 function debug(content) {
     if (($.getdata("wps_debug") || "false") !== "true") return;
     $.log(`[DEBUG] ${typeof content === "string" ? content : JSON.stringify(content)}`);
@@ -151,7 +159,7 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/6
 // 小程序打卡走微信小程序 UA(打卡接口在 personal-bus 域,不带 APP 的 Origin/Referer)
 const MINI_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.49(0x18003123) NetType/WIFI Language/zh_CN miniProgram";
 
-// 动作间隔(秒,[最小,最大] 每步独立取随机,各不相等):10 点抢完顺手把其余做了,模拟真人手动操作避风控
+// 动作间隔：每一步在指定秒数范围内独立随机等待
 const ACTION_GAP = [5, 10];
 
 // ===== 双模式入口 =====
@@ -161,8 +169,8 @@ if (typeof $request !== "undefined") {
     $.done();
 } else {
     $.results = [];
-    // 清除 cookie 开关(BoxJS 写 wps_clear=true):清空全部账号
-    if (JSON.parse($.getdata("wps_clear") || "false")) {
+    // 兼容旧版持久化开关：wps_clear=true 时清空全部账号
+    if (isTrueValue($.getdata("wps_clear"))) {
         $.setdata("[]", LIST_KEY);
         $.setdata("", CK_KEY);
         $.setdata("false", "wps_clear");
@@ -176,7 +184,7 @@ if (typeof $request !== "undefined") {
     }
 }
 
-// 多账号入口:cron 一次跑完所有已存 Cookie 的账号位
+// 多账号入口：cron 依次执行所有已保存账号
 async function mainAll() {
     const accounts = collectAccounts();
     if (!accounts.length) {
@@ -233,7 +241,7 @@ async function mainForAccount(sid, accountNo, report) {
         return;
     }
 
-    // 任务清单(BoxJS 可单独开关):限量爆款排最前抢 10 点库存;小程序打卡排最后躲整点后端尖峰
+    // 任务清单：限量爆款排在最前；小程序打卡排在最后
     const tasks = [
         ["wps_task_hot", () => taskHot()],
         ["wps_task_trial", () => taskTrial()],
@@ -248,7 +256,7 @@ async function mainForAccount(sid, accountNo, report) {
         if (ran++ > 0) await sleep(jitter(ACTION_GAP));
         await run();
     }
-    if (!ran) $.results.push("ℹ️ 所有任务均已在 BoxJS 关闭");
+    if (!ran) $.results.push("ℹ️ 所有任务均已关闭");
 
     if (report && Array.isArray(report)) report.push(`【${LABEL}】\n${$.results.join("\n")}`);
     else $.msg("WPS 任务汇总" + TAG, "", $.results.join("\n"));
@@ -435,8 +443,16 @@ async function taskLottery() {
     const comp = COMPONENTS.lottery;
     try {
         const list = await fetchPageInfo();
+        if (!list) {
+            $.results.push(`❌ ${tag}:page_info 无响应`);
+            return;
+        }
         const node = findComp(list, comp.component_number, comp.component_node_id);
-        const lv = (node && node.lottery_v2) || {};
+        if (!node || !node.lottery_v2) {
+            $.results.push(`⚠️ ${tag}:未找到抽奖组件(可能已换期)`);
+            return;
+        }
+        const lv = node.lottery_v2;
         const sessions = lv.lottery_list || [];
         const sess = sessions.find((s) => s && s.session_status === "IN_PROGRESS") || sessions[0];
         const sessionId = (sess && sess.session_id) || comp.session_id;
