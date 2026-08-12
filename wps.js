@@ -38,6 +38,21 @@ function collectAccounts() {
     return list.map((sid, i) => ({ n: i + 1, sid }));
 }
 
+// 登录态明确失效时,把该 sid 从账号列表移除(避免每天重复报错;重抓后自动回到列表)
+function removeAccount(sid) {
+    let list = [];
+    try {
+        const v = JSON.parse($.getdata(LIST_KEY) || "[]");
+        list = Array.isArray(v) ? v : [];
+    } catch (e) { /* 损坏数据按空处理 */ }
+    const idx = list.indexOf(sid);
+    if (idx >= 0) {
+        list.splice(idx, 1);
+        $.setdata(JSON.stringify(list), LIST_KEY);
+        $.log(`[INFO] 已从账号列表移除失效的 wps_sid(原第 ${idx + 1} 个)`);
+    }
+}
+
 // 多账号:当前正在签到的账号 sid(mainForAccount 设置,httpReq/taskClockIn 优先使用;未设置时回退单账号存储)
 let ACTIVE_SID = "";
 
@@ -182,8 +197,9 @@ async function mainForAccount(sid, accountNo) {
             const r = await httpReq("GET", ISLOGIN);
             const j = JSON.parse(r.body);
             if (j.result !== "ok" || !j.userid) {
-                // 服务端明确判失效 = 真·登录态失效,不重试
-                $.msg("WPS" + TAG, "🚫 登录态失效", "wps_sid 已过期,请重新抓取(打开 WPS 进活动页)");
+                // 服务端明确判失效 = 真·登录态失效,不重试;自动从列表移除,避免每天重复报错
+                removeAccount(sid);
+                $.msg("WPS" + TAG, "🚫 登录态失效", "wps_sid 已过期,已自动从账号列表移除,请重新抓取(打开 WPS 进活动页)");
                 $.log(`[ERROR] ${TAG} islogin 非 ok: ${r.body.slice(0, 200)}`);
                 return;
             }
