@@ -5377,7 +5377,11 @@
   function responseMessage(x) {
     if (!x || typeof x !== "object") return String(x || "\u63A5\u53E3\u8FD4\u56DE\u5F02\u5E38");
     const s = x.meta && typeof x.meta === "object" ? x.meta : x;
-    return String(s.message || s.msg || s.desc || s.resultMsg || s.rsp_desc || "\u63A5\u53E3\u8FD4\u56DE\u5F02\u5E38");
+    const detail = s.message || s.msg || s.desc || s.resultMsg || s.resultDesc || s.rsp_desc || s.statusDesc || s.prizeName || s.prizeNameRed;
+    if (detail) return String(detail);
+    const code = s.code !== void 0 ? s.code : s.resultCode !== void 0 ? s.resultCode : s.rsp_code;
+    if (String(code) === "0000" || String(code) === "0" || String(code) === "200") return "成功";
+    return code !== void 0 ? `接口返回 code=${code}` : "接口返回异常";
   }
   function getHeader(headers, name) {
     const k = Object.keys(headers || {}).find((x) => x.toLowerCase() === name.toLowerCase());
@@ -5425,13 +5429,23 @@
     }
   }
   function http(method, url, options = {}) {
-    return new Promise((resolve) => {
-      const params = { url, timeout: options.timeout || 15e3, headers: options.headers || {}, "auto-redirect": options.redirect !== false, "auto-cookie": options.cookie !== false, alpn: options.alpn || "h2" };
+    const run = (attempt) => new Promise((resolve) => {
+      const params = { url, timeout: options.timeout || 15e3, headers: options.headers || {}, "auto-redirect": options.redirect !== false, "auto-cookie": options.cookie !== false, alpn: options.alpn || "h1" };
       if (CFG.requestNode) params.node = CFG.requestNode;
       if (options.body !== void 0) params.body = options.body;
       const fn = $httpClient[String(method).toLowerCase()] || $httpClient.get;
-      fn(params, (error, response, data) => resolve({ error: error || null, status: response && response.status || 0, headers: response && response.headers || {}, body: typeof data === "string" ? data : "", json: safeJSON(typeof data === "string" ? data : "", {}) }));
+      fn(params, async (error, response, data) => {
+        const body = typeof data === "string" ? data : "";
+        const result = { error: error || null, status: response && response.status || 0, headers: response && response.headers || {}, body, json: safeJSON(body, {}) };
+        if (error && attempt < (options.retries === void 0 ? 2 : options.retries)) {
+          await sleep(500 * (attempt + 1));
+          resolve(run(attempt + 1));
+          return;
+        }
+        resolve(result);
+      });
     });
+    return run(0);
   }
   async function captureAccount() {
     const body = parseCapturedBody($request.body || "");
@@ -5506,7 +5520,7 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
       const headers = this.headers(opt.headers || {});
       const r = await http(method, url, { ...opt, headers });
       if (r.error) this.log(`\u8BF7\u6C42\u5F02\u5E38 ${url}: ${r.error}`);
-      else if (r.status >= 400) this.log(`\u8BF7\u6C42 ${url} \u8FD4\u56DE HTTP ${r.status}`);
+      else if (r.status >= 400) this.log(`\u8BF7\u6C42 ${url} \u8FD4\u56DE HTTP ${r.status}${r.body ? `：${String(r.body).slice(0, 180)}` : ""}`);
       return r;
     }
     async json(method, url, opt = {}) {
@@ -5731,7 +5745,7 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
         }
         init = await this.postJSON("https://epay.10010.com/cu-ca-app-front/v1/login/ttGame?channel=225&rptId=", { unicomTokenId: this.unicomTokenId }, this.ttxcHeaders(false, true));
       }
-      if (init.code !== "0000") {
+      if (String(init.code) !== "0000" && Number(init.code) !== 0) {
         this.log(`\u901A\u901A\u4E61\u6751\u521D\u59CB\u5316\u5931\u8D25\uFF1A${responseMessage(init)}`);
         return false;
       }
@@ -6279,14 +6293,21 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
         this.log("\u67E5\u8BE2\u6A21\u5F0F\u65E0\u72EC\u7ACB\u8D44\u4EA7\u63A5\u53E3");
         return;
       }
-      const t = await this.get(`https://m.client.10010.com/edop_ng/getTicketByNative?token=${encodeURIComponent(this.ecsToken)}&appId=edop_unicom_68e8fa69`);
-      if (!t.ticket) {
-        this.log("\u83B7\u53D6\u5165\u53E3 Ticket \u5931\u8D25");
+      const cityCode = String((((this.cityInfo || [])[0] || {}).cityCode) || "");
+      const appUA = "ChinaUnicom4.x/12.11 (com.chinaunicom.mobilebusiness; build:36; iOS 16.6.0) Alamofire/4.7.3 unicom{version:iphone_c@12.1100}";
+      const appCookie = `ecs_token=${this.ecsToken};t3_token=${this.t3Token};PvSessionId=${compactTime()}${this.uuid};devicedId=${this.uuid};c_mobile=${this.accountMobile};c_version=iphone_c@12.1100;city=036|${cityCode}|90063345|-99;`;
+      const t = await this.get(`https://m.client.10010.com/edop_ng/getTicketByNative?token=${encodeURIComponent(this.ecsToken)}&appId=edop_unicom_68e8fa69`, { "User-Agent": appUA, "Accept": "*/*", "Accept-Language": "zh-Hans-CN;q=1.0, en-CN;q=0.9", "Cookie": appCookie });
+      const ticket = t.ticket || ((t.result || {}).ticket);
+      if (!ticket) {
+        this.log(`\u83B7\u53D6\u5165\u53E3 Ticket \u5931\u8D25\uFF1A${responseMessage(t)}`);
         return;
       }
-      const l = await this.postJSON("https://uphone.wostore.cn/h5api/token-service/getTokenByTicket", { ticket: t.ticket, channel: "ST-Kuaidai001" }, { channel: "ST-Kuaidai001", source: "4", os: "H5" });
+      const l = await this.postJSON("https://uphone.wostore.cn/h5api/token-service/getTokenByTicket", { ticket, channel: "ST-Kuaidai001" }, { "User-Agent": appUA, "Accept": "*/*", "Accept-Language": "zh-Hans-CN;q=1.0, en-CN;q=0.9", channel: "ST-Kuaidai001", channelCode: "ST-Kuaidai001", source: "4", os: "H5", "X-Tingyun": "c=A|uBuVhVARE0A" });
       const cloud = l.data;
-      if (!cloud) return;
+      if (!cloud) {
+        this.log(`\u83B7\u53D6\u4E91\u624B\u673A Token \u5931\u8D25\uFF1A${responseMessage(l)}`);
+        return;
+      }
       const h = { "Authorization": cloud, "Content-Type": "application/json" };
       const sign = await this.postJSON("https://h5forphone.wostore.cn/h5forphone/activity/signIn", { accesstoken: cloud }, h);
       this.log(`\u6C83\u4E91\u624B\u673A\u7B7E\u5230\uFF1A${sign.msg || "\u672A\u77E5"}`, true);
