@@ -2,8 +2,8 @@
  * WPS · 每日签到 + 福利中心(打卡/抽奖/会员试用申请/限量爆款领取)+ 小程序每日打卡,送积分与会员时长
  * 多账号版:单脚本双模式(http-request 抓 Cookie 入数组 / cron 遍历全部账号签到)
  *
- * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip> | 多账号改造 by Minis
- * @Updated: 2026-08-13
+ * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip> | 多账号改造 by Ming
+ * @Updated: 2026-08-12
  */
 
 const $ = new Env("WPS");
@@ -240,8 +240,8 @@ async function mainForAccount(sid, accountNo, report) {
                 $.log(`[ERROR] ${TAG} islogin 非 ok: ${r.body.slice(0, 200)}`);
                 return;
             }
-            uid = String(j.userid);
-            LABEL = `账号ID:${uid}`;
+            uid = j.userid;
+            LABEL = `账号ID:${String(uid)}`;
         } catch (e) {
             lastErr = e;
             $.log(`[WARN] ${TAG} islogin 网络错误(${attempt + 1}/2): ${e}`);
@@ -294,7 +294,9 @@ async function taskSignIn(uid) {
 
         // aesKey = 22 位随机 + 10 位 unix 秒;extra = AES(明文);token = RSA(aesKey)
         const aesKey = genAesKey();
-        const plain = JSON.stringify({ user_id: uid, platform: 32 }); // 32 = iPhone(平台位码,公开常量)
+        // 签到接口要求 user_id 为 JSON number；兼容 islogin 返回数字字符串的情况
+        const userId = typeof uid === "string" && /^\d+$/.test(uid) ? Number(uid) : uid;
+        const plain = JSON.stringify({ user_id: userId, platform: 32 }); // 32 = iPhone(平台位码,公开常量)
         const extra = aesEncrypt(plain, aesKey, aesKey.substr(0, 16));
         const token = rsaEncryptB64(aesKey, pubKeyB64);
 
