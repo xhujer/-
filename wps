@@ -1,5 +1,5 @@
-#!name = WPS Office 每日签到(多账号)
-#!desc = 每日签到+福利中心多项任务,支持多个账号\n送 WPS 积分与超级会员时长。\n抓 Cookie:每个账号登录 WPS 后进任意活动页停留 1 秒,自动入库,重复抓取自动去重。\ncron 每天 10:00 自动签完所有已抓账号。
+#!name = WPS Office 每日签到
+#!desc = 每日签到、福利中心多项任务
 #!author = MaYIHEI (https://github.com/MaYIHEI/paperclip) | 多账号改造 by Minis
 #!homepage = https://github.com/MaYIHEI/paperclip
 #!icon = https://raw.githubusercontent.com/BOBOLAOSHIV587/Rules/main/Icons/AppIcons/Image/App/WPS.png
