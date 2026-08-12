@@ -1,13 +1,23 @@
 #!name=小红书隐身
-#!desc=全局隐身：阻断小红书 IM 长连接（apppush），好友看不到你的在线状态
-...
+#!desc=全局隐身
+#!author=Minis
+#!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Red.png
+#!loon_version=3.0.0
+
+[Rewrite]
+^https:\/\/edith\.xiaohongshu\.com\/api\/sns\/celestial\/connect\/config.* response-body-json-jq '.data.config_list = [] | .data.ttl = 60'
+
 [Rule]
 DOMAIN,apppush-rts.xiaohongshu.com,REJECT
 DOMAIN,apppush-overseas.xiaohongshu.com,REJECT
-IP-CIDR,...REJECT,no-resolve
-
-[Script]
-http-response ^https:\/\/edith\.xiaohongshu\.com\/api\/sns\/celestial\/connect\/config script-path=xhs_invisible.js, requires-body=true, tag=小红书隐身-阻断IM长连接, timeout=10
+DOMAIN,apppush.xiaohongshu.com,REJECT
+IP-CIDR,1.13.209.99/32,REJECT,no-resolve
+IP-CIDR,1.13.208.99/32,REJECT,no-resolve
+IP-CIDR,175.27.216.99/32,REJECT,no-resolve
+IP-CIDR,1.13.150.99/32,REJECT,no-resolve
+IP-CIDR,43.134.153.130/32,REJECT,no-resolve
+IP-CIDR,49.51.67.58/32,REJECT,no-resolve
+IP-CIDR,150.109.163.176/32,REJECT,no-resolve
 
 [MITM]
 hostname = edith.xiaohongshu.com
