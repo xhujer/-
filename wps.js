@@ -11,7 +11,7 @@ const $ = new Env("WPS");
 const SCRIPT_VERSION = "2026-06-27.r1"; // 改一次 +1,确认拉到最新版
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
-const CK_KEY = "wps_sid";
+const CK_KEY = "wps_sid"; // 旧单账号存储 key:新账号存 wps_sid_list 数组,CK_KEY 仅用于旧数据迁移/清除/兜底
 
 // ===== 多账号支持(glados 式数组存储) =====
 // 所有账号 wps_sid 存 wps_sid_list JSON 数组,cron 一次跑完;兼容旧单账号 key wps_sid(自动迁移并入)
