@@ -8,9 +8,6 @@
 
 const $ = new Env("WPS");
 
-const SCRIPT_VERSION = "2026-06-27.r1"; // 改一次 +1,确认拉到最新版
-$.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
-
 const CK_KEY = "wps_sid"; // 旧单账号存储 key:新账号存 wps_sid_list 数组,CK_KEY 仅用于旧数据迁移/清除/兜底
 
 // ===== 多账号支持(glados 式数组存储) =====
@@ -19,37 +16,36 @@ const LIST_KEY = "wps_sid_list";
 function accountTag(n) {
     return `[账号${n}]`;
 }
-function collectAccounts() {
-    let list = [];
+function getSidList() {
     try {
         const v = JSON.parse($.getdata(LIST_KEY) || "[]");
-        list = Array.isArray(v) ? v : [];
+        return Array.isArray(v) ? v : [];
     } catch (e) {
-        list = [];
+        return [];
     }
+}
+function saveSidList(list) {
+    $.setdata(JSON.stringify(list), LIST_KEY);
+}
+function collectAccounts() {
+    const list = getSidList();
     // 旧单账号 key 迁移:数组为空但有 wps_sid → 并入并清旧 key
     const old = $.getdata(CK_KEY);
     if (old && !list.includes(old)) {
         list.unshift(old);
-        $.setdata(JSON.stringify(list), LIST_KEY);
+        saveSidList(list);
         $.setdata("", CK_KEY);
-        $.log("[INFO] 已把旧 wps_sid 迁移进多账号列表");
     }
     return list.map((sid, i) => ({ n: i + 1, sid }));
 }
 
 // 登录态明确失效时,把该 sid 从账号列表移除(避免每天重复报错;重抓后自动回到列表)
 function removeAccount(sid) {
-    let list = [];
-    try {
-        const v = JSON.parse($.getdata(LIST_KEY) || "[]");
-        list = Array.isArray(v) ? v : [];
-    } catch (e) { /* 损坏数据按空处理 */ }
+    const list = getSidList();
     const idx = list.indexOf(sid);
     if (idx >= 0) {
         list.splice(idx, 1);
-        $.setdata(JSON.stringify(list), LIST_KEY);
-        $.log(`[INFO] 已从账号列表移除失效的 wps_sid(原第 ${idx + 1} 个)`);
+        saveSidList(list);
     }
 }
 
@@ -61,9 +57,8 @@ function saveCookieFromRequest() {
     if ($request.method === "OPTIONS") return;
     // 插件「清空全部账号」开关开启时(argument=[{清空全部账号}]),打开活动页即触发清空
     if (shouldClearAll()) {
-        $.setdata("[]", LIST_KEY);
+        saveSidList([]);
         $.setdata("", CK_KEY);
-        $.log("[INFO] 插件开关触发:已清空全部账号 Cookie");
         $.msg("WPS", "", "✅ 全部账号 Cookie 已清除(插件开关触发),请重新抓取");
         return;
     }
@@ -77,19 +72,12 @@ function saveCookieFromRequest() {
         }
         const sid = m[1];
 
-        let list = [];
-        try {
-            const v = JSON.parse($.getdata(LIST_KEY) || "[]");
-            list = Array.isArray(v) ? v : [];
-        } catch (e) { /* 损坏数据按空处理 */ }
+        const list = getSidList();
         if (list.includes(sid)) {
-            $.log(`[INFO] wps_sid 已存在(第 ${list.indexOf(sid) + 1} 个账号),跳过`);
             return;
         }
-
         list.push(sid);
-        $.setdata(JSON.stringify(list), LIST_KEY);
-        $.log(`[INFO] 已保存第 ${list.length} 个账号 wps_sid (${maskSid(sid)})`);
+        saveSidList(list);
         $.msg("WPS", "✅ WPS Cookie 获取成功", `第 ${list.length} 个账号已保存,共 ${list.length} 个;重复抓取会自动去重`);
     } catch (e) {
         $.log("[ERROR] cookie 抓取失败: " + e);
@@ -172,8 +160,7 @@ if (typeof $request !== "undefined") {
     saveCookieFromRequest();
     $.done();
 } else {
-    $.results = []; // 各任务结果汇总,最后一条通知
-
+    $.results = [];
     // 清除 cookie 开关(BoxJS 写 wps_clear=true):清空全部账号
     if (JSON.parse($.getdata("wps_clear") || "false")) {
         $.setdata("[]", LIST_KEY);
@@ -196,15 +183,13 @@ async function mainAll() {
         $.msg("WPS", "🚫 缺少 Cookie", "请先开启 cookie 抓取脚本,打开 WPS APP 进任意活动页停留 1 秒");
         return;
     }
-    $.log(`[INFO] 发现 ${accounts.length} 个账号位: ${accounts.map(a => a.n).join(", ")}`);
-    const report = []; // 每个账号一段结果,最后合并成一条通知
+    const report = [];
     for (let i = 0; i < accounts.length; i++) {
-        if (i > 0) await sleep(3000); // 账号间间隔,避免接口尖峰
-        $.results = []; // 每个账号独立汇总
+        if (i > 0) await sleep(3000);
+        $.results = [];
         await mainForAccount(accounts[i].sid, accounts[i].n, report);
     }
     if (report.length) {
-        // 所有账号结果/状态合并成一条通知,避免多个账号弹多遍
         $.msg(`WPS 多账号签到(${accounts.length} 个账号)`, "", report.join("\n\n"));
     }
 }
@@ -212,7 +197,7 @@ async function mainAll() {
 async function mainForAccount(sid, accountNo, report) {
     const TAG = accountTag(accountNo);
     const LABEL = `账号${accountNo}`;
-    ACTIVE_SID = sid; // 当前账号 sid 供 httpReq/taskClockIn 使用
+    ACTIVE_SID = sid;
     if (!sid) {
         if (report && Array.isArray(report)) report.push(`【${LABEL}】🚫 缺少 Cookie`);
         else $.msg("WPS" + TAG, "🚫 缺少 Cookie", "请先开启 cookie 抓取脚本,打开 WPS APP 进任意活动页停留 1 秒");
@@ -235,9 +220,8 @@ async function mainForAccount(sid, accountNo, report) {
                 return;
             }
             uid = j.userid;
-            $.log(`[INFO] ${TAG} user_id 已获取(${String(uid).slice(0, 3)}***)`);
         } catch (e) {
-            lastErr = e; // 网络超时 / 连接失败 / 响应非 JSON → 值得重试
+            lastErr = e;
             $.log(`[WARN] ${TAG} islogin 网络错误(${attempt + 1}/2): ${e}`);
         }
     }
@@ -258,18 +242,14 @@ async function mainForAccount(sid, accountNo, report) {
         ["wps_task_lottery", () => taskLottery()],
         ["wps_task_clockin", () => taskClockIn()],
     ];
-    // 打印每个开关实际读到的原始值(排查 BoxJS 是否生效:null=未设置默认开)
-    $.log(`[INFO] ${TAG} 任务开关 ${tasks.map(([k]) => `${k.slice(9)}=${JSON.stringify($.getdata(k))}`).join(" ")}`);
-
     let ran = 0;
     for (const [key, run] of tasks) {
-        if (taskOff(key)) continue;                    // BoxJS 关闭该任务 → 跳过
-        if (ran++ > 0) await sleep(jitter(ACTION_GAP)); // 任务间随机间隔避风控
+        if (taskOff(key)) continue;
+        if (ran++ > 0) await sleep(jitter(ACTION_GAP));
         await run();
     }
     if (!ran) $.results.push("ℹ️ 所有任务均已在 BoxJS 关闭");
 
-    // 本账号结果并入汇总(不单独弹通知,避免多账号弹多遍)
     if (report && Array.isArray(report)) report.push(`【${LABEL}】\n${$.results.join("\n")}`);
     else $.msg("WPS 任务汇总" + TAG, "", $.results.join("\n"));
 }
@@ -279,7 +259,6 @@ async function mainForAccount(sid, accountNo, report) {
 async function taskSignIn(uid) {
     const tag = "每日签到";
     try {
-        // 已签则跳过
         const di = await httpReq("GET", DAY_INFO);
         const info = (JSON.parse(di.body).data || {}).info || {};
         if (info.has_sign) {
@@ -287,7 +266,6 @@ async function taskSignIn(uid) {
             return;
         }
 
-        // 取全局公钥
         const ek = await httpReq("GET", ENC_KEY);
         const pubKeyB64 = JSON.parse(ek.body).data;
         if (!pubKeyB64) throw new Error(`公钥获取失败: ${ek.body.slice(0, 120)}`);
@@ -347,7 +325,6 @@ async function taskHot() {
         const details = ps.privilege_select_details || [];
         if (!details.length) { $.results.push(`⚠️ ${tag}:未找到爆款组件(可能已换期,需重抓)`); return; }
 
-        // 今天这次机会已用掉
         if (ps.select_reach_limit) { $.results.push(`✅ ${tag}:已领取(今日已选)`); return; }
 
         // 按价值排序:会员优先,其次积分多的优先(hours*100 + nums,会员再加底分)
@@ -365,8 +342,7 @@ async function taskHot() {
                 },
                 component_type: comp.type,
                 component_action: "privilege_select.exec",
-                // group_id 与 privilege_id 各选项不一定相等(会员是 1/101),都取自 detail
-                privilege_select: { group_id: d.group_id, privilege_id: d.privilege_id },
+                    privilege_select: { group_id: d.group_id, privilege_id: d.privilege_id },
             };
             const r = await httpReq("POST", COMPONENT, { body: JSON.stringify(reqObj) });
             const j = safeJson(r.body);
@@ -376,7 +352,6 @@ async function taskHot() {
                 done = true;
                 break;
             }
-            // 这档没抢到(多半已秒光)→ 记一笔继续抢下一档
             debug(`${tag} ${d.title}(pid ${d.privilege_id})未中: ${(r.body || "").slice(0, 200)}`);
         }
         if (!done) $.results.push(`⚠️ ${tag}:未领到(超级会员已秒光、其余也没抢到)`);
@@ -394,7 +369,6 @@ async function taskFragment() {
     try {
         const today = beijingDate();
 
-        // 1) 取当前序列状态:page_info 返回各组件,fragment 组件挂 sign_series_id + sign_records
         const list = await fetchPageInfo();
         const node = findComp(list, comp.component_number);
         // 安全闸:page_info 没拿到 fragment 组件(网络错/换期)→ 绝不盲签,否则会被当「新序列」从头开始。
@@ -409,14 +383,12 @@ async function taskFragment() {
         const records = fc.sign_records || [];
         debug(`${tag} 读到 series_id=${seriesId || "(空)"} records=${records.map((r) => r.sign_date + ":" + r.sign_status).join(",")}`);
 
-        // 今天已签则跳过(sign_records 里今天 sign_status==signed)
         const todayRec = records.find((r) => r && r.sign_date === today);
         if (todayRec && todayRec.sign_status === "signed") {
             $.results.push(`✅ ${tag}:已打卡`);
             return;
         }
 
-        // 2) 签到:有序列就复用(is_new_sign_series=false),无序列才新建
         const isNew = !seriesId;
         const reqObj = {
             component_uniq_number: {
@@ -466,7 +438,6 @@ async function taskLottery() {
         const node = findComp(list, comp.component_number, comp.component_node_id);
         const lv = (node && node.lottery_v2) || {};
         const sessions = lv.lottery_list || [];
-        // 优先进行中的场次,取不到再退活动内置 session_id(3002)
         const sess = sessions.find((s) => s && s.session_status === "IN_PROGRESS") || sessions[0];
         const sessionId = (sess && sess.session_id) || comp.session_id;
         const times = (sess && sess.times) || 0;
@@ -494,7 +465,6 @@ async function taskLottery() {
         if (j && j.result === "ok" && inner.success === true) {
             $.results.push(`✅ ${tag}:成功${inner.reward_name ? " " + inner.reward_name : ""}`);
         } else {
-            // 极少数:刚读到次数但 exec 时已被用掉 → error_code 10005 归「次数用完」
             let reason = inner.send_msg || "";
             if (!reason && inner.error_code === 10005) reason = "次数用完";
             const st = classify(reason || (j && j.msg), "已完成");
@@ -527,17 +497,13 @@ async function taskTrial() {
         };
         const short = (t) => String(t || "奖品").replace(/超级会员/g, ""); // 7天卡 / 月卡 / 3个月卡
 
-        // preview 列出当天奖品
         const pv = await callTrial("divide_prize.preview", {});
         const details = (((pv || {}).data || {}).divide_prize || {}).divide_prize_details || [];
-        // 没明细 / 三档都已申领 → 直接收成一句(正常完成,不逐项罗列)
         if (!details.length || details.every((d) => d.has_join)) {
             $.results.push(`✅ ${tag}:全部已申请`);
             return;
         }
 
-        // 三个全领(均次日开奖),无优先;逐个申领,动作间隔避风控,每项状态单独写清。
-        // 行级图标:只有出现真问题(已领完/没资格/原文异常)才 ⚠️,否则 ✅。
         const parts = [];
         let allGood = true;
         let acted = 0;
@@ -559,7 +525,6 @@ async function taskTrial() {
                 if (st.e !== "✅") { allGood = false; debug(`${tag} ${d.title}: ${JSON.stringify(su).slice(0, 200)}`); }
             }
         }
-        // 三档全部到位(本次成功或之前已申请)→ 折叠成一句;有问题才逐项罗列
         $.results.push(allGood ? `✅ ${tag}:全部已申请` : `⚠️ ${tag}:${parts.join(" ")}`);
     } catch (e) {
         $.results.push(`❌ ${tag}:异常`);
@@ -575,10 +540,8 @@ async function taskClockIn() {
     try {
         const sid = ACTIVE_SID || $.getdata(CK_KEY);
 
-        // 整点后端尖峰 → 先错峰几秒再打首个请求
         await sleep(jitter([3, 10]));
 
-        // 动态盐 ss(CDN 配置端点,不需登录),网络抖动时重试
         let ss = "", cfBody = "";
         for (let i = 0; i < 2 && !ss; i++) {
             if (i > 0) await sleep(2000);
@@ -587,12 +550,10 @@ async function taskClockIn() {
             ss = (((safeJson(cfBody) || {}).data || {}).value || {}).ss;
         }
 
-        // 动态密钥 s_key:整点偶发 invalid connection(非 cookie 失效),重试 4 次 + 递增退避(0/3/6/9s)
         let s_key = "", infBody = "";
         const backoff = [0, 3000, 6000, 9000];
         for (let i = 0; i < backoff.length && !s_key; i++) {
             if (backoff[i]) await sleep(backoff[i]);
-            // 带与真客户端一致的分页参数,否则 reward_list 可能回空导致领奖扫不到
             const inf = await rawReq("GET", `${CLOCK_INFO}?client_type=1&page_index=0&page_size=10`, { sid });
             infBody = inf.body || "";
             s_key = ((safeJson(infBody) || {}).data || {}).s_key;
@@ -600,7 +561,6 @@ async function taskClockIn() {
         }
 
         if (!ss || !s_key) {
-            // 服务端/网络偶发错,优雅降级为接口异常(不抛 ❌,写清是 ss 还是 s_key 没拿到)
             const which = !ss ? "ss" : "s_key";
             const src = !ss ? cfBody : infBody;
             const m = ((safeJson(src) || {}).msg) || src.slice(0, 60) || `缺 ${which}`;
@@ -609,7 +569,6 @@ async function taskClockIn() {
             return;
         }
 
-        // body 键名排序后做规范 JSON,与服务端校验口径一致
         const bodyStr = canonicalJSON({ client_type: 1 });
         const date = new Date().toUTCString();
         const signature = hmacSha256Hex(s_key + md5Hex(bodyStr) + date, ss);
@@ -626,7 +585,6 @@ async function taskClockIn() {
             if (st.e !== "✅") debug(`${tag} 响应: ${r.body.slice(0, 300)}`);
         }
 
-        // 领取昨日打卡奖励(奖励次日开放、隔天作废)。与打卡无关,不论今天签没签都尝试领。
         await claimClockInRewards(infBody, sid, s_key, ss);
     } catch (e) {
         $.results.push(`❌ ${tag}:异常`);
@@ -639,10 +597,8 @@ async function claimClockInRewards(infBody, sid, s_key, ss) {
     try {
         const list = (((safeJson(infBody) || {}).data || {}).reward_list || {}).list || [];
         const pend = list.filter((rw) => rw && rw.reward_status === 1);
-        // 诊断:打印奖励表状态分布(0/1/2/3),区分「没取到列表」与「开放时机没到」
         debug(`奖励表(${list.length}): ${list.map((rw) => `${rw.reward_id}=${rw.reward_status}`).join(" ") || "空"}`);
         if (!pend.length) {
-            // 空场也报一行,避免「跑没跑、有没有可领」全靠猜;两种成因分开提示
             $.results.push(list.length ? "ℹ️ 昨日奖励:暂无可领(未到开放时间)" : "⚠️ 领奖:未取到奖励列表");
             return;
         }
@@ -655,10 +611,9 @@ async function claimClockInRewards(infBody, sid, s_key, ss) {
             const r = await rawReq("POST", CLOCK_REWARD, { sid, body, date, signature });
             const j = safeJson(r.body);
             const name = rw.sku_name || rw.mb_name || "奖励";
-            // 成功响应 data.reward_status===true
             if (j && j.result === "ok" && (j.data || {}).reward_status === true) got.push(name);
             else { fail.push(name); debug(`领奖 ${name}(${rw.reward_id}) 失败: ${(r.body || "").slice(0, 200)}`); }
-            await sleep(jitter(ACTION_GAP)); // 多个奖励之间留间隔
+            await sleep(jitter(ACTION_GAP));
         }
         if (got.length) $.results.push(`✅ 领昨日奖励:${got.join("、")}`);
         if (fail.length) $.results.push(`⚠️ 待领奖励未领成功(可去小程序手动领):${fail.join("、")}`);
@@ -722,7 +677,6 @@ function classify(msg, doneLabel) {
     if (/无.*次数|没有.*次数|次数.*(用完|不足|为0)|达到?.*上限|已达.*上限|超(出|过).*次数|reach limit|out of limit|上限/i.test(m)) return { e: "✅", t: "已达上限" };
     if (/售罄|领完|抢完|发完|抢光|领光|out of stock|库存(不足)?|no stock|sold out|stock/i.test(m)) return { e: "⚠️", t: "已领完" };
     if (/资格|不满足|未满足|不符合|无权限|没有权限|没有资格|not (match|qualified)|不在.*(范围|名单)|未达条件/i.test(m)) return { e: "⚠️", t: "没资格" };
-    // 其它服务端原文,原样写清楚(截短)
     return { e: "⚠️", t: m.length > 30 ? m.slice(0, 30) + "…" : m };
 }
 
