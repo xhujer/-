@@ -204,7 +204,7 @@ async function mainAll() {
 
 async function mainForAccount(sid, accountNo, report) {
     const TAG = accountTag(accountNo);
-    const LABEL = `账号${accountNo}`;
+    let LABEL = `账号${accountNo}`;
     ACTIVE_SID = sid;
     if (!sid) {
         if (report && Array.isArray(report)) report.push(`【${LABEL}】🚫 缺少 Cookie`);
@@ -227,7 +227,8 @@ async function mainForAccount(sid, accountNo, report) {
                 $.log(`[ERROR] ${TAG} islogin 非 ok: ${r.body.slice(0, 200)}`);
                 return;
             }
-            uid = j.userid;
+            uid = String(j.userid);
+            LABEL = `账号ID:${uid}`;
         } catch (e) {
             lastErr = e;
             $.log(`[WARN] ${TAG} islogin 网络错误(${attempt + 1}/2): ${e}`);
