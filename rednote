@@ -2,14 +2,12 @@
 #!desc=过滤信息流推广，移除图片及视频水印
 #!author=奶思
 #!homepage=https://github.com/fmz200/wool_scripts
-#!icon=https://raw.githubusercontent.com/fmz200/wool_scripts/main/icons/gif/naisi-01.gif
+#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/RedPaper.png
 #!raw-url=https://github.com/fmz200/wool_scripts/raw/main/Loon/plugin/split/partX/Xiaohongshu.lpx
 #!tg-channel=https://t.me/inaisi
-#!date=
-#############################################
 
 [Argument]
-xhs_invisible = switch,true,false,tag=小红书-全局隐身
+xhs_invisible = switch,true,false,tag=小红书隐藏在线状态 
 
 [Rule]
 DOMAIN, ads-img-qc.xhscdn.com, REJECT
@@ -31,9 +29,7 @@ AND, ((PROTOCOL, QUIC), (DOMAIN-SUFFIX, xiaohongshu.com)), REJECT
 ^https?:\/\/ci\.xiaohongshu\.com\/system_config\/watermark reject-img
 
 [Script]
-# ===== 全局隐身（受 xhs_invisible 开关控制）=====
-# 注意：script-path 请改为你自己托管的 xhs_invisible.js 完整地址
-http-response ^https:\/\/edith\.xiaohongshu\.com\/api\/sns\/celestial\/connect\/config script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/rednote.js, requires-body=true, timeout=10, tag=小红书-全局隐身, enable={xhs_invisible}
+http-response ^https:\/\/edith\.xiaohongshu\.com\/api\/sns\/celestial\/connect\/config script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/rednote.js, requires-body=true, timeout=10, tag=隐藏在线状态, enable={xhs_invisible}
 # 搜索页
 http-response ^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d+\/search\/(banner|hot)_list script-path=https://github.com/fmz200/wool_scripts/raw/main/Scripts/xiaohongshu/xiaohongshu.js, requires-body=true, timeout=60, tag=小红书搜索页
 http-response ^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d+\/search\/(hint|trending)\? script-path=https://github.com/fmz200/wool_scripts/raw/main/Scripts/xiaohongshu/xiaohongshu.js, requires-body=true, timeout=60, tag=小红书搜索页
