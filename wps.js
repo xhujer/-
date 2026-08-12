@@ -53,7 +53,7 @@ function removeAccount(sid) {
 let ACTIVE_SID = "";
 
 // ===== http-request 抓包模式:保存 Cookie 到数组(自动追加+去重) =====
-function saveCookieFromRequest() {
+async function saveCookieFromRequest() {
     if ($request.method === "OPTIONS") return;
     // 开关开启时清空账号；只有首次实际清除数据时通知，避免同一页面重复弹窗
     if (shouldClearAll()) {
@@ -81,7 +81,19 @@ function saveCookieFromRequest() {
         }
         list.push(sid);
         saveSidList(list);
-        $.msg("WPS", "✅ WPS Cookie 获取成功", `第 ${list.length} 个账号已保存,共 ${list.length} 个;重复抓取会自动去重`);
+
+        let uid = "";
+        try {
+            const r = await requestUserId(sid);
+            const j = safeJson(r.body);
+            if (j && j.result === "ok" && j.userid) uid = String(j.userid);
+            else $.log(`[WARN] Cookie 已保存,但账号 ID 获取失败: ${(r.body || "").slice(0, 200)}`);
+        } catch (e) {
+            $.log(`[WARN] Cookie 已保存,但账号 ID 请求异常: ${e}`);
+        }
+
+        const identity = uid ? `账号ID:${uid}\n` : "";
+        $.msg("WPS", "✅ WPS Cookie 获取成功", `${identity}第 ${list.length} 个账号已保存,共 ${list.length} 个;重复抓取会自动去重`);
     } catch (e) {
         $.log("[ERROR] cookie 抓取失败: " + e);
     }
@@ -165,8 +177,9 @@ const ACTION_GAP = [5, 10];
 // ===== 双模式入口 =====
 // http-request(抓包):保存 Cookie 到数组;cron(签到):遍历所有账号依次签(参考 glados 同款单脚本双模式)
 if (typeof $request !== "undefined") {
-    saveCookieFromRequest();
-    $.done();
+    saveCookieFromRequest()
+        .catch((e) => $.log(`[ERROR] Cookie 抓取流程异常: ${e}`))
+        .finally(() => $.done());
 } else {
     $.results = [];
     // 兼容旧版持久化开关：wps_clear=true 时清空全部账号
@@ -660,6 +673,21 @@ function canonicalJSON(obj) {
 }
 
 // ============ HTTP(携带 wps_sid;签到带 token 头)============
+
+function requestUserId(sid) {
+    const headers = {
+        "User-Agent": UA,
+        "Cookie": `wps_sid=${sid}; wps_sids=${sid}`,
+        "Origin": "https://personal-act.wps.cn",
+        "Referer": "https://personal-act.wps.cn/",
+    };
+    return new Promise((resolve, reject) => {
+        $.get({ url: ISLOGIN, headers }, (err, resp, data) => {
+            if (err) return reject(err);
+            resolve({ status: (resp && (resp.status || resp.statusCode)) || 0, body: data || "" });
+        });
+    });
+}
 
 function httpReq(method, url, { body, token } = {}) {
     const sid = ACTIVE_SID || $.getdata(CK_KEY);
