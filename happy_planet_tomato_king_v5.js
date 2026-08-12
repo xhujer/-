@@ -40,7 +40,7 @@ function readConfig() {
   );
 
   return {
-    account: safeStoreRead(ACCOUNT_KEY),
+    accounts: loadAccounts(),
     capture: parseBoolean(args[0], true),
     notify: parseBoolean(args[1], true),
     debug: parseBoolean(args[2], false),
@@ -141,6 +141,46 @@ function parseSingleAccount(rawValue) {
   return { account: { wid, openId }, error: "" };
 }
 
+function accountString(account) {
+  return `${account.wid}#${account.openId}`;
+}
+
+function accountsEqual(a, b) {
+  return Boolean(a && b && a.wid === b.wid && a.openId === b.openId);
+}
+
+// 读取所有已保存账号，兼容旧版单账号字符串（"wid#openId"）与新版数组格式。
+function loadAccounts() {
+  const raw = safeStoreRead(ACCOUNT_KEY);
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter(Boolean)
+        .map((item) => parseSingleAccount(typeof item === "string" ? item : ""))
+        .filter((r) => r.account)
+        .map((r) => r.account);
+    }
+  } catch (_) {}
+
+  const single = parseSingleAccount(raw);
+  return single.account ? [single.account] : [];
+}
+
+function saveAccountList(accounts) {
+  const list = accounts.filter(Boolean);
+  const value = JSON.stringify(list.map(accountString));
+  try {
+    const saved = Boolean($persistentStore.write(value, ACCOUNT_KEY));
+    if (saved) CONFIG.accounts = list;
+    return saved;
+  } catch (_) {
+    return false;
+  }
+}
+
 function getGlobalObject() {
   try {
     return Function("return this")();
@@ -213,21 +253,18 @@ function extractAccountFromRequest(request) {
 }
 
 function saveCapturedAccount(account) {
-  const value = `${account.wid}#${account.openId}`;
-  const previous = safeStoreRead(ACCOUNT_KEY);
-  if (previous === value) {
-    debugLog(`账号未变化：wid=${account.wid}`);
-    return { saved: true, changed: false, previous };
+  const current = CONFIG.accounts || loadAccounts();
+  const existing = current.find((a) => accountsEqual(a, account));
+
+  if (existing) {
+    debugLog(`账号已存在：wid=${account.wid}，index=${current.indexOf(existing)}`);
+    return { saved: true, changed: false, previous: current.length, index: current.indexOf(existing) };
   }
 
-  let saved = false;
-  try {
-    saved = Boolean($persistentStore.write(value, ACCOUNT_KEY));
-  } catch (_) {
-    saved = false;
-  }
-  if (saved) CONFIG.account = value;
-  return { saved, changed: saved, previous };
+  const number = current.length + 1;
+  const next = current.concat([account]);
+  const saved = saveAccountList(next);
+  return { saved, changed: saved, previous: current.length, index: current.length + 1 };
 }
 
 function handleCaptureMode() {
@@ -251,10 +288,12 @@ function handleCaptureMode() {
   }
   if (!result.changed) return;
 
-  const action = result.previous ? "账号已更新" : "账号获取成功";
-  const message = `wid：${account.wid}\nopenId：${shortOpenId(account.openId)}`;
+  const total = CONFIG.accounts.length;
+  let action = result.previous === 0 ? "账号获取成功" : "新账号已保存";
+  let detail = `账号 #${result.index}/${total}\nwid：${account.wid}\nopenId：${shortOpenId(account.openId)}`;
+  const message = `wid：${account.wid}\nopenId：${shortOpenId(account.openId)}\n当前共 ${total} 个账号`;
   console.log(`[${SCRIPT_NAME}] ${action}\n${message}`);
-  postNotification(SCRIPT_NAME, action, message);
+  postNotification(SCRIPT_NAME, action, detail);
 }
 
 function loonHttp(method, options) {
@@ -763,9 +802,9 @@ function postNotification(title, subtitle, body) {
 }
 
 async function main() {
-  const { account, error } = parseSingleAccount(CONFIG.account);
-  if (!account) {
-    const message = `没有可用账号：${error}。请先在微信中打开一次茄皇活动页面自动获取`;
+  const accounts = CONFIG.accounts || loadAccounts();
+  if (accounts.length === 0) {
+    const message = "没有可用账号。请先在微信中打开一次茄皇活动页面自动获取";
     console.log(message);
     postNotification(SCRIPT_NAME, "尚未获取账号", message);
     return;
@@ -773,25 +812,39 @@ async function main() {
 
   await loadForge();
 
-  const { wid, openId } = account;
-  console.log(`
-===== 开始处理账号（wid=${wid}）=====`);
+  console.log(`===== 开始处理 ${accounts.length} 个账号 =====`);
+  const allLogs = [];
 
-  let logs;
-  try {
-    logs = await processUser(wid, openId, 1);
-  } catch (error) {
-    logs = [
-      `账号（wid=${wid}，openId=${shortOpenId(openId)}）`,
-      `处理失败：${error.message || error}`,
-    ];
+  for (let i = 0; i < accounts.length; i += 1) {
+    const { wid, openId } = accounts[i];
+    const index = i + 1;
+    console.log(`\n===== 开始处理账号 ${index}/${accounts.length}（wid=${wid}）=====`);
+
+    let logs;
+    try {
+      logs = await processUser(wid, openId, index);
+    } catch (error) {
+      logs = [
+        `账号 ${index}/${accounts.length}（wid=${wid}，openId=${shortOpenId(openId)}）`,
+        `处理失败：${error.message || error}`,
+      ];
+    }
+
+    console.log(logs.join("\n"));
+    allLogs.push(logs);
+
+    // 多账号之间错峰，降低触发限流概率
+    if (i < accounts.length - 1) await randomSleep(3, 6);
   }
 
-  console.log(logs.join("\n"));
-  const report = renderReport([logs]);
+  const report = renderReport(allLogs);
   console.log(`
 ${report}`);
-  postNotification(SCRIPT_NAME, "单账号任务完成", report);
+  postNotification(
+    SCRIPT_NAME,
+    `多账号任务完成（${accounts.length} 个账号）`,
+    report
+  );
 }
 
 (async () => {
