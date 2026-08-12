@@ -11,6 +11,7 @@
 [Argument]
 cron = input,"0 7,20 * * *",tag=定时执行,desc=每天07:00和20:00执行
 capture = switch,true,tag=自动抓取账号,desc=退出并重新登录中国联通 App 后自动保存；多账号自动追加
+deleteAccount = input,"",tag=删除账号,desc=填写日志中的账号序号，如 2 或 1,3；然后手动运行一次，删除后请清空
 mode = select,"all","sign","ltzf","ttlxj","ttxc","market","security","cloud","woread","aiting","wostore","regional",tag=执行模块,desc=all 为执行全部已开启模块
 queryOnly = switch,false,tag=仅查询模式,desc=只查询资产和任务状态
 
@@ -26,6 +27,7 @@ enableWoread = switch,false,tag=联通阅读,desc=阅读、心跳和抽奖；耗
 enableAiting = switch,true,tag=联通爱听,desc=签到、积分任务和积分查询
 enableWostore = switch,true,tag=沃云手机,desc=签到、任务、抽奖和积分
 enableRegional = switch,true,tag=区域专区,desc=新疆、河南、云南、辽宁和安徽
+provinceOverride = select,"","安徽","新疆","河南","云南","辽宁",tag=号码归属地,desc=默认自动识别；识别失败时手动选择
 enableNotify = switch,true,tag=结果通知,desc=运行结束后发送一条汇总通知
 
 # 子功能
@@ -50,13 +52,16 @@ wostoreMaxDraw = input,"1",tag=沃云积分抽奖上限,desc=默认 1 次
 http-request ^https:\/\/(?:m\.client\.10010\.com\/mobileService\/(?:onLine|login|v1\/login)\.htm|loginxx\.10010\.com\/mobileService\/(?:onLine|login_vcode_member)\.htm) script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,requires-body=true,timeout=30,tag=🔵中国联通抓取账号,enable={capture}
 
 # 日常任务
-cron {cron} script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🔵中国联通自动任务,argument=[{mode},{queryOnly},{enableSign},{enableLtzf},{enableTtlxj},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{enableNotify},{marketTask},{marketMember},{marketDraw},{marketClaim},{grabCoupon},{grabAmount},{ahFriday},{ahAmount},{requestNode},{cloudImageFid},{cloudUploadName},{hometownEnable},{ttxcGarbageWait},{ttxcGrowMax},{wostoreMaxDraw}]
+cron {cron} script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🔵中国联通自动任务,argument=[{mode},{queryOnly},{enableSign},{enableLtzf},{enableTtlxj},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{provinceOverride},{enableNotify},{marketTask},{marketMember},{marketDraw},{marketClaim},{grabCoupon},{grabAmount},{ahFriday},{ahAmount},{requestNode},{cloudImageFid},{cloudUploadName},{hometownEnable},{ttxcGarbageWait},{ttxcGrowMax},{wostoreMaxDraw}]
 
 # 独立抢兑：脚本根据 tag 中“抢兑”自动进入 sign-only + grabCoupon 模式
 cron 58 9,17 * * * script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=600,tag=🔴中国联通抢兑,argument=[{grabAmount},{requestNode}]
 
+# 安徽超级星期五：周五 09:58 启动，等待 10:00 开抢；需填写安徽红包面额
+cron 58 9 * * 5 script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=600,tag=🟠安徽超级星期五,argument=[{provinceOverride},{ahAmount},{requestNode}]
+
 # Loon 脚本页可手动运行
-generic script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🔵中国联通手动执行,argument=[{mode},{queryOnly},{enableSign},{enableLtzf},{enableTtlxj},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{enableNotify},{marketTask},{marketMember},{marketDraw},{marketClaim},{grabCoupon},{grabAmount},{ahFriday},{ahAmount},{requestNode},{cloudImageFid},{cloudUploadName},{hometownEnable},{ttxcGarbageWait},{ttxcGrowMax},{wostoreMaxDraw}]
+generic script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🔵中国联通手动执行,argument=[{deleteAccount},{mode},{queryOnly},{enableSign},{enableLtzf},{enableTtlxj},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{provinceOverride},{enableNotify},{marketTask},{marketMember},{marketDraw},{marketClaim},{grabCoupon},{grabAmount},{ahFriday},{ahAmount},{requestNode},{cloudImageFid},{cloudUploadName},{hometownEnable},{ttxcGarbageWait},{ttxcGrowMax},{wostoreMaxDraw}]
 
 [Mitm]
 hostname = m.client.10010.com,loginxx.10010.com,activity.10010.com,act.10010.com,epay.10010.com,wocare.unisk.cn,backward.bol.wo.cn,contact.bol.wo.cn,m.jf.10010.com,uca.wo116114.com,ims.wo116114.com,ai.wo.cn,panservice.mail.wo.cn,s.pan.wo.cn,10010.woread.com.cn,woread.com.cn,pcc.woread.com.cn,uphone.wostore.cn,h5forphone.wostore.cn,uphone.wo-adv.cn,zy100.xj169.com,app.shangdu.com,wsm.wx.yn10010.com,weixin.linktech.hk
