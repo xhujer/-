@@ -7,7 +7,7 @@
 #!tg-channel=https://t.me/inaisi
 
 [Argument]
-xhs_invisible = switch,true,false,tag=小红书隐藏在线状态 
+xhs_invisible = switch,true,false,tag=隐藏在线状态 
 
 [Rule]
 DOMAIN, ads-img-qc.xhscdn.com, REJECT
