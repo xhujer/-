@@ -9,7 +9,7 @@
 #!type = normal
 
 [Argument]
-获取Cookie = switch,true,tag=[启用]获取Cookie,desc=关闭开关将不再抓取 Cookie
+获取Cookie = switch,true,tag=获取Cookie,desc=关闭开关将不再抓取 Cookie
 清空全部账号 = switch,false,tag=清空全部账号,desc=设为开后,打开一次 WPS 活动页即清空所有账号 Cookie(清完记得关掉)
 
 [Script]
