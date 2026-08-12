@@ -59,6 +59,14 @@ let ACTIVE_SID = "";
 // ===== http-request 抓包模式:保存 Cookie 到数组(自动追加+去重) =====
 function saveCookieFromRequest() {
     if ($request.method === "OPTIONS") return;
+    // 插件「清空全部账号」开关开启时(argument=[{清空全部账号}]),打开活动页即触发清空
+    if (shouldClearAll()) {
+        $.setdata("[]", LIST_KEY);
+        $.setdata("", CK_KEY);
+        $.log("[INFO] 插件开关触发:已清空全部账号 Cookie");
+        $.msg("WPS", "", "✅ 全部账号 Cookie 已清除(插件开关触发),请重新抓取");
+        return;
+    }
     try {
         // page_info 请求头里带整套 cookie,从中只取 wps_sid(域 wps.cn 的持久登录态,不轮换、无需刷新)
         const cookie = ($request.headers["Cookie"] || $request.headers["cookie"] || "");
@@ -91,6 +99,21 @@ function saveCookieFromRequest() {
 function maskSid(s) {
     if (!s || s.length < 12) return "已获取";
     return s.slice(0, 6) + "***" + s.slice(-4);
+}
+
+// 插件「清空全部账号」开关:argument=[{清空全部账号}] → $argument = {"清空全部账号": true/false}
+function shouldClearAll() {
+    try {
+        const a = $argument;
+        if (a && typeof a === "object") {
+            const v = a["清空全部账号"] ?? a.clearAll ?? false;
+            return v === true || v === "true" || v === 1 || v === "1";
+        }
+        if (typeof a === "string" && a.trim() !== "") {
+            return /clearAll\s*=\s*(true|1)/i.test(a) || a.includes("清空全部账号");
+        }
+    } catch (e) { /* 解析失败按不开 */ }
+    return false;
 }
 
 // 任务开关:关闭才跳过(兼容字符串 "false"/"0" 与布尔 false,不同 BoxJS 存法都认);未设置=默认开启
@@ -174,18 +197,25 @@ async function mainAll() {
         return;
     }
     $.log(`[INFO] 发现 ${accounts.length} 个账号位: ${accounts.map(a => a.n).join(", ")}`);
+    const report = []; // 每个账号一段结果,最后合并成一条通知
     for (let i = 0; i < accounts.length; i++) {
         if (i > 0) await sleep(3000); // 账号间间隔,避免接口尖峰
         $.results = []; // 每个账号独立汇总
-        await mainForAccount(accounts[i].sid, accounts[i].n);
+        await mainForAccount(accounts[i].sid, accounts[i].n, report);
+    }
+    if (report.length) {
+        // 所有账号结果/状态合并成一条通知,避免多个账号弹多遍
+        $.msg(`WPS 多账号签到(${accounts.length} 个账号)`, "", report.join("\n\n"));
     }
 }
 
-async function mainForAccount(sid, accountNo) {
+async function mainForAccount(sid, accountNo, report) {
     const TAG = accountTag(accountNo);
+    const LABEL = `账号${accountNo}`;
     ACTIVE_SID = sid; // 当前账号 sid 供 httpReq/taskClockIn 使用
     if (!sid) {
-        $.msg("WPS" + TAG, "🚫 缺少 Cookie", "请先开启 cookie 抓取脚本,打开 WPS APP 进任意活动页停留 1 秒");
+        if (report && Array.isArray(report)) report.push(`【${LABEL}】🚫 缺少 Cookie`);
+        else $.msg("WPS" + TAG, "🚫 缺少 Cookie", "请先开启 cookie 抓取脚本,打开 WPS APP 进任意活动页停留 1 秒");
         return;
     }
 
@@ -197,9 +227,10 @@ async function mainForAccount(sid, accountNo) {
             const r = await httpReq("GET", ISLOGIN);
             const j = JSON.parse(r.body);
             if (j.result !== "ok" || !j.userid) {
-                // 服务端明确判失效 = 真·登录态失效,不重试;自动从列表移除,避免每天重复报错
+                // 服务端明确判失效 = 真·登录态失效,不重试;自动从列表移除,状态并入汇总通知
                 removeAccount(sid);
-                $.msg("WPS" + TAG, "🚫 登录态失效", "wps_sid 已过期,已自动从账号列表移除,请重新抓取(打开 WPS 进活动页)");
+                if (report && Array.isArray(report)) report.push(`【${LABEL}】🚫 登录态失效,已自动从列表移除,请重新抓取`);
+                else $.msg("WPS" + TAG, "🚫 登录态失效", "wps_sid 已过期,已自动从账号列表移除,请重新抓取(打开 WPS 进活动页)");
                 $.log(`[ERROR] ${TAG} islogin 非 ok: ${r.body.slice(0, 200)}`);
                 return;
             }
@@ -212,7 +243,8 @@ async function mainForAccount(sid, accountNo) {
     }
     if (!uid) {
         // 重试后仍失败:是网络问题,不是 Cookie 失效——别误导用户去重抓
-        $.msg("WPS" + TAG, "⚠️ 网络异常", "islogin 请求超时(非 Cookie 失效),稍后会自动重试或手动运行一次");
+        if (report && Array.isArray(report)) report.push(`【${LABEL}】⚠️ 网络异常,稍后会自动重试`);
+        else $.msg("WPS" + TAG, "⚠️ 网络异常", "islogin 请求超时(非 Cookie 失效),稍后会自动重试或手动运行一次");
         $.log(`[ERROR] ${TAG} islogin 重试后仍失败: ${lastErr}`);
         return;
     }
@@ -237,7 +269,9 @@ async function mainForAccount(sid, accountNo) {
     }
     if (!ran) $.results.push("ℹ️ 所有任务均已在 BoxJS 关闭");
 
-    $.msg("WPS 任务汇总" + TAG, "", $.results.join("\n")); // $.msg 已把汇总打到日志,不再重复 $.log
+    // 本账号结果并入汇总(不单独弹通知,避免多账号弹多遍)
+    if (report && Array.isArray(report)) report.push(`【${LABEL}】\n${$.results.join("\n")}`);
+    else $.msg("WPS 任务汇总" + TAG, "", $.results.join("\n"));
 }
 
 // ============ 任务:每日签到(请求体加密)============
