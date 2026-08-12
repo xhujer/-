@@ -5233,6 +5233,8 @@
     ahAmount: "",
     queryOnly: false,
     requestNode: "",
+    provinceOverride: "",
+    deleteAccount: "",
     cloudImageFid: "",
     cloudUploadName: "8648",
     hometownEnable: false,
@@ -5241,12 +5243,14 @@
     wostoreMaxDraw: 1
   };
   var isRequest = typeof $request !== "undefined";
-  var isGrabJob = !isRequest && typeof $script !== "undefined" && /抢兑/.test(String($script.name || ""));
+  var scriptName = !isRequest && typeof $script !== "undefined" ? String($script.name || "") : "";
+  var isGrabJob = /抢兑/.test(scriptName);
+  var isAhJob = /安徽超级星期五/.test(scriptName);
   var arg = typeof $argument === "object" && $argument ? $argument : {};
   var bool = (v, d) => v === void 0 || v === null || v === "" ? d : String(v).toLowerCase() === "true";
   var num = (v, d) => Number.isFinite(Number(v)) ? Number(v) : d;
   var CFG = {
-    mode: isGrabJob ? "sign" : arg.mode || DEFAULTS.mode,
+    mode: isGrabJob ? "sign" : isAhJob ? "regional" : arg.mode || DEFAULTS.mode,
     enableSign: bool(arg.enableSign, DEFAULTS.enableSign),
     enableTtlxj: bool(arg.enableTtlxj, DEFAULTS.enableTtlxj),
     enableTtxc: bool(arg.enableTtxc, DEFAULTS.enableTtxc),
@@ -5266,10 +5270,12 @@
     marketClaim: bool(arg.marketClaim, DEFAULTS.marketClaim),
     grabCoupon: isGrabJob || bool(arg.grabCoupon, DEFAULTS.grabCoupon),
     grabAmount: String(arg.grabAmount || DEFAULTS.grabAmount),
-    ahFriday: bool(arg.ahFriday, DEFAULTS.ahFriday),
+    ahFriday: isAhJob || bool(arg.ahFriday, DEFAULTS.ahFriday),
     ahAmount: String(arg.ahAmount || DEFAULTS.ahAmount),
     queryOnly: bool(arg.queryOnly, DEFAULTS.queryOnly),
     requestNode: String(arg.requestNode || DEFAULTS.requestNode).trim(),
+    provinceOverride: String(arg.provinceOverride || DEFAULTS.provinceOverride).trim(),
+    deleteAccount: String(arg.deleteAccount || DEFAULTS.deleteAccount).trim(),
     cloudImageFid: String(arg.cloudImageFid || DEFAULTS.cloudImageFid).trim(),
     cloudUploadName: String(arg.cloudUploadName || DEFAULTS.cloudUploadName).trim(),
     hometownEnable: bool(arg.hometownEnable, DEFAULTS.hometownEnable),
@@ -5561,9 +5567,22 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
           writeJSON(STORE_KEY, list);
         }
         this.log(`\u767B\u5F55\u6210\u529F ${mask(this.mobile)}`);
+        await this.refreshCityInfo();
         return true;
       }
       this.log(`\u767B\u5F55\u5931\u8D25[${r.code}]: ${r.msg || ""}`, true);
+      return false;
+    }
+    async refreshCityInfo() {
+      if (CFG.provinceOverride) {
+        this.cityInfo = [{ proName: CFG.provinceOverride, provinceName: CFG.provinceOverride }];
+        return true;
+      }
+      const r = await this.postForm("https://m.client.10010.com/mobileService/business/get/getCity", {});
+      if (String(r.code) === "200" && Array.isArray(r.list) && r.list.length) {
+        this.cityInfo = r.list;
+        return true;
+      }
       return false;
     }
     async openPlat(toUrl) {
@@ -5698,9 +5717,17 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
         auth = await this.postJSON("https://epay.10010.com/ps-pafs-auth-front/v1/auth/check", {}, { "bizchannelinfo": this.epayBiz() });
       }
       if (auth.code !== "0000") {
-        this.log(`\u6388\u6743\u5931\u8D25\uFF1A${responseMessage(auth)}`);
+        this.ttlxjRetry = safeInt(this.ttlxjRetry) + 1;
+        if (this.ttlxjRetry < 3) {
+          this.log(`\u6388\u6743\u672A\u5C31\u7EEA\uFF1A${responseMessage(auth)}\uFF0C\u7B49\u5F85\u540E\u91CD\u8BD5(${this.ttlxjRetry}/3)`);
+          await sleep(1500);
+          return this.ttlxjTask();
+        }
+        this.log(`\u6388\u6743\u5931\u8D25[${auth.code}]\uFF1A${responseMessage(auth)}`);
+        this.ttlxjRetry = 0;
         return;
       }
+      this.ttlxjRetry = 0;
       const ai = (auth.data || {}).authInfo || {};
       this.sessionId = ai.sessionId || "";
       this.tokenId = ai.tokenId || "";
@@ -5745,8 +5772,9 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
         }
         init = await this.postJSON("https://epay.10010.com/cu-ca-app-front/v1/login/ttGame?channel=225&rptId=", { unicomTokenId: this.unicomTokenId }, this.ttxcHeaders(false, true));
       }
-      if (String(init.code) !== "0000" && Number(init.code) !== 0) {
-        this.log(`\u901A\u901A\u4E61\u6751\u521D\u59CB\u5316\u5931\u8D25\uFF1A${responseMessage(init)}`);
+      const initOK = ["0000", "0", "200"].includes(String(init.code)) || String(init.msg || init.message || "").toLowerCase() === "success" || String(init.msg || init.message || "") === "成功";
+      if (!initOK) {
+        this.log(`\u901A\u901A\u4E61\u6751\u521D\u59CB\u5316\u5931\u8D25[${init.code}]\uFF1A${responseMessage(init)}`);
         return false;
       }
       const r = await this.ttxcPost("/user/v1/login", {}, false, false, true);
@@ -6237,20 +6265,33 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
     async aitingLogin() {
       const login = await this.postJSON("https://10010.woread.com.cn/ng_woread_service/rest/account/login", { sign: this.aitingAes({ tokenOnline: this.aitingAes(this.tokenOnline, "woreadst^&*12345"), phone: this.aitingAes(this.mobile, "woreadst^&*12345"), timestamp: compactTime() }, "woreadst^&*12345") }, { accesstoken: "ODZERTZCMjA1NTg1MTFFNDNFMThDRDYw" });
       this.aitingWoread = (login.data || {}).token;
-      if (!this.aitingWoread) return false;
+      if (!this.aitingWoread) {
+        this.log(`\u7231\u542C\u767B\u5F55-\u6C83\u9605\u8BFB\u5931\u8D25\uFF1A${responseMessage(login)}`);
+        return false;
+      }
       const imei = randomString(15, "0123456789"), confirm = this.aitingAes(`android${this.mobile}${imei}`), stats = `channelid=28015001&sid=${randomString(20)}&eid=${randomString(20)}&osversion=Android12&clientallid=000000100000000000058.0.2.1225&display=2400_1080&ip=192.168.3.24&nettypename=wifi&version=802&versionname=8.0.2&terminalName=Redmi&terminalType=Redmi_K30_Pro&udid=null&woid=WOA${randomString(6)}${imei.slice(0, 8)}LOT${randomString(4)}LV${randomString(2)}&useraccount=${this.mobile}&userid=${this.mobile}&clientconfirm=${confirm}`;
       this.aitingStats = stats;
       let ts = String(nowMs());
       const appkey = md5(`clientId=android&clientSource=3&source=3&timestamp=${ts}&key=7ZxQ9rT3wE5sB2dF`);
       const jwt = await this.postJSON("https://pcc.woread.com.cn/oauth/client/appkey", { clientSource: "3", clientId: b64Utf8("395DEDE9C1D6FE11B7C9C0D82B353E74"), source: "3", timestamp: ts, sign: appkey }, { "Skip-Authorization-Check": "true", statisticsinfo: stats });
       this.aitingJwt = jwt.key;
-      if (!this.aitingJwt) return false;
-      const pass = md5(compactTime() + this.mobile + "1");
-      const u = await this.get(`https://pcc.woread.com.cn/mainrest/rest/read/user/ulogin/3/${this.mobile}/1/1/0?networktype=3&ua=Redmi+K30+Pro&isencode=false&clientversion=8.0.2&versionname=Android_1_1080x2356&channelid=28015001&userlabelisencode=0&validatecode=&sid=&timestamp=${compactTime()}&passcode=${pass}`, { AuthorizationClient: `Bearer ${this.aitingJwt}`, statisticsinfo: stats });
+      if (!this.aitingJwt) {
+        this.log(`\u7231\u542C\u767B\u5F55-JWT\u5931\u8D25\uFF1A${responseMessage(jwt)}`);
+        return false;
+      }
+      const loginTime = compactTime();
+      const pass = md5(loginTime + this.mobile + "1");
+      const nonce = randomString(6, "0123456789");
+      const reqTime = String(nowMs());
+      const reqSign = md5(`jwt=${this.aitingJwt}&nonestr=${nonce}&osversion=Android12&terminalName=Redmi&timestamp=${reqTime}&key=46iCw24ewAZbNkK6`);
+      const u = await this.get(`https://pcc.woread.com.cn/mainrest/rest/read/user/ulogin/3/${this.mobile}/1/1/0?networktype=3&ua=Redmi+K30+Pro&isencode=false&clientversion=8.0.2&versionname=Android_1_1080x2356&channelid=28015001&userlabelisencode=0&validatecode=&sid=&timestamp=${loginTime}&passcode=${pass}`, { AuthorizationClient: `Bearer ${this.aitingJwt}`, statisticsinfo: stats, requerttime: reqTime, nonestr: nonce, requertid: reqSign });
       const msg = u.message || {};
       this.aitingBizToken = (msg.accountinfo || {}).token || msg.token;
       this.aitingUser = (msg.accountinfo || {}).userid || msg.userid || this.mobile;
-      if (!this.aitingBizToken) return false;
+      if (!this.aitingBizToken) {
+        this.log(`\u7231\u542C\u767B\u5F55-\u4E1A\u52A1 API \u5931\u8D25\uFF1A${responseMessage(u)}`);
+        return false;
+      }
       ts = String(nowMs());
       const body = { token: this.aitingBizToken, timestamp: ts, userid: this.aitingUser };
       body.sign = md5(Object.keys(body).sort().map((k) => `${k}=${body[k]}`).join("&") + "&key=woread!@#qwe1234");
@@ -6344,12 +6385,22 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
       if (pi.data) this.log(`\u6C83\u4E91\u624B\u673A\u79EF\u5206\uFF1A${pi.data.balanceScoreNum || pi.data.totalPoint || pi.data.point || 0}`, true);
     }
     regions() {
-      const s = (this.cityInfo || []).map((x) => x.proName || "").join(",");
-      return { xinjiang: s.includes("\u65B0\u7586"), henan: s.includes("\u6CB3\u5357"), yunnan: s.includes("\u4E91\u5357"), liaoning: s.includes("\u8FBD\u5B81"), anhui: s.includes("\u5B89\u5FBD") };
+      const names = [];
+      const codes = [];
+      for (const x of this.cityInfo || []) {
+        names.push(x.proName, x.provinceName, x.province, x.provinceDesc, x.cityName, x.city);
+        codes.push(x.proCode, x.provinceCode, x.provinceId, x.province_id);
+      }
+      if (CFG.provinceOverride) names.push(CFG.provinceOverride);
+      const s = names.filter(Boolean).join(",");
+      const c = codes.filter((x) => x !== void 0 && x !== null).map(String).join(",");
+      return { xinjiang: s.includes("\u65B0\u7586"), henan: s.includes("\u6CB3\u5357"), yunnan: s.includes("\u4E91\u5357"), liaoning: s.includes("\u8FBD\u5B81"), anhui: s.includes("\u5B89\u5FBD") || /(^|,)17(,|$)/.test(c) };
     }
     async regionalTask() {
       this.log(`==== \u533A\u57DF\u4E13\u533A${CFG.queryOnly ? "\uFF08\u67E5\u8BE2\u6A21\u5F0F\uFF09" : ""} ====`);
       const r = this.regions();
+      const area = Object.keys(r).filter((k) => r[k]).join(",");
+      this.log(`\u5F52\u5C5E\u5730\u8BC6\u522B\uFF1A${area || "\u672A\u8BC6\u522B"}${CFG.provinceOverride ? `\uFF08\u624B\u52A8\u6307\u5B9A ${CFG.provinceOverride}\uFF09` : ""}`);
       if (!Object.values(r).some(Boolean)) {
         this.log("\u672A\u8BC6\u522B\u5230\u5DF2\u652F\u6301\u7684\u533A\u57DF\u4E13\u533A");
         return;
@@ -6358,8 +6409,10 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
       if (r.henan) await this.henanTask();
       if (r.yunnan) await this.yunnanTask();
       if (r.liaoning) await this.liaoningTask();
-      if (r.anhui && CFG.ahFriday && CFG.ahAmount) {
-        if (CFG.queryOnly) this.log(`\u5B89\u5FBD\u8D85\u7EA7\u661F\u671F\u4E94\uFF1A[\u67E5\u8BE2\u6A21\u5F0F] \u76EE\u6807\u9762\u989D${CFG.ahAmount}\u5143\uFF08\u4EC5\u5468\u4E9410\u70B9\u6267\u884C\uFF09`);
+      if (r.anhui) {
+        if (!CFG.ahFriday || !CFG.ahAmount) {
+          this.log("\u5DF2\u8BC6\u522B\u5B89\u5FBD\u53F7\u7801\uFF1B\u8D85\u7EA7\u661F\u671F\u4E94\u9700\u5F00\u542F\u5F00\u5173\u5E76\u586B\u5199\u7EA2\u5305\u9762\u989D");
+        } else if (CFG.queryOnly) this.log(`\u5B89\u5FBD\u8D85\u7EA7\u661F\u671F\u4E94\uFF1A[\u67E5\u8BE2\u6A21\u5F0F] \u76EE\u6807\u9762\u989D${CFG.ahAmount}\u5143\uFF08\u4EC5\u5468\u4E9410\u70B9\u6267\u884C\uFF09`);
         else await this.anhuiTask();
       }
     }
@@ -6658,7 +6711,25 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
     }
   };
   async function main() {
-    const accounts = readJSON(STORE_KEY, []);
+    let accounts = readJSON(STORE_KEY, []);
+    if (CFG.deleteAccount) {
+      const indexes = [...new Set(CFG.deleteAccount.split(/[,，\s]+/).map((x) => safeInt(x)).filter((x) => x > 0))].sort((a, b) => b - a);
+      const removed = [];
+      for (const index of indexes) {
+        if (index <= accounts.length) removed.push({ index, account: accounts.splice(index - 1, 1)[0] });
+      }
+      if (removed.length) {
+        writeJSON(STORE_KEY, accounts);
+        const labels = removed.sort((a, b) => a.index - b.index).map((x) => `账号${x.index}${x.account.mobile ? `(${mask(x.account.mobile)})` : ""}`);
+        const message = `已删除 ${labels.join("、")}，当前剩余 ${accounts.length} 个账号。请将“删除账号”输入框清空。`;
+        console.log(message);
+        $notification.post("中国联通账号管理", "删除成功", message);
+      } else {
+        $notification.post("中国联通账号管理", "未找到指定账号", `当前共 ${accounts.length} 个账号，请填写 1-${accounts.length} 的序号。`);
+      }
+      $done();
+      return;
+    }
     if (!accounts.length) {
       $notification.post("\u4E2D\u56FD\u8054\u901A", "\u672A\u83B7\u53D6\u8D26\u53F7", "\u8BF7\u5148\u5F00\u542F\u6293\u53D6\u5F00\u5173\uFF0C\u5728\u4E2D\u56FD\u8054\u901A App \u9000\u51FA\u540E\u91CD\u65B0\u767B\u5F55\u4E00\u6B21\u3002");
       $done();
