@@ -5234,7 +5234,7 @@
     queryOnly: false,
     requestNode: "",
     provinceOverride: "",
-    deleteAccount: "",
+    clearAllAccounts: false,
     cloudImageFid: "",
     cloudUploadName: "8648",
     hometownEnable: false,
@@ -5275,7 +5275,7 @@
     queryOnly: bool(arg.queryOnly, DEFAULTS.queryOnly),
     requestNode: String(arg.requestNode || DEFAULTS.requestNode).trim(),
     provinceOverride: String(arg.provinceOverride || DEFAULTS.provinceOverride).trim(),
-    deleteAccount: String(arg.deleteAccount || DEFAULTS.deleteAccount).trim(),
+    clearAllAccounts: bool(arg["清空全部账号"] !== void 0 ? arg["清空全部账号"] : arg.clearAllAccounts, DEFAULTS.clearAllAccounts),
     cloudImageFid: String(arg.cloudImageFid || DEFAULTS.cloudImageFid).trim(),
     cloudUploadName: String(arg.cloudUploadName || DEFAULTS.cloudUploadName).trim(),
     hometownEnable: bool(arg.hometownEnable, DEFAULTS.hometownEnable),
@@ -5454,6 +5454,16 @@
     return run(0);
   }
   async function captureAccount() {
+    if (CFG.clearAllAccounts) {
+      const accounts = readJSON(STORE_KEY, []);
+      writeJSON(STORE_KEY, []);
+      if (accounts.length) {
+        console.log(`[中国联通] 已清空全部 ${accounts.length} 个账号`);
+        $notification.post("中国联通", "全部账号已清空", `已删除 ${accounts.length} 个账号，请关闭“清空全部账号”开关后重新登录抓取。`);
+      }
+      $done({});
+      return;
+    }
     const body = parseCapturedBody($request.body || "");
     const query = qs($request.url);
     const cookie = getHeader($request.headers, "Cookie");
@@ -5470,7 +5480,8 @@
       return;
     }
     const list = readJSON(STORE_KEY, []);
-    const index = list.findIndex((x) => x.tokenOnline === token || appId && x.appId === appId);
+    // appId 是设备/安装标识，同一台设备切换号码时可能相同，不能用于账号去重。
+    const index = list.findIndex((x) => x.tokenOnline === token);
     const item = { tokenOnline: token, appId, updatedAt: dateTime(), mobile: index >= 0 ? list[index].mobile || "" : "" };
     let changed = false;
     if (index < 0) {
@@ -6711,25 +6722,7 @@ AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
     }
   };
   async function main() {
-    let accounts = readJSON(STORE_KEY, []);
-    if (CFG.deleteAccount) {
-      const indexes = [...new Set(CFG.deleteAccount.split(/[,，\s]+/).map((x) => safeInt(x)).filter((x) => x > 0))].sort((a, b) => b - a);
-      const removed = [];
-      for (const index of indexes) {
-        if (index <= accounts.length) removed.push({ index, account: accounts.splice(index - 1, 1)[0] });
-      }
-      if (removed.length) {
-        writeJSON(STORE_KEY, accounts);
-        const labels = removed.sort((a, b) => a.index - b.index).map((x) => `账号${x.index}${x.account.mobile ? `(${mask(x.account.mobile)})` : ""}`);
-        const message = `已删除 ${labels.join("、")}，当前剩余 ${accounts.length} 个账号。请将“删除账号”输入框清空。`;
-        console.log(message);
-        $notification.post("中国联通账号管理", "删除成功", message);
-      } else {
-        $notification.post("中国联通账号管理", "未找到指定账号", `当前共 ${accounts.length} 个账号，请填写 1-${accounts.length} 的序号。`);
-      }
-      $done();
-      return;
-    }
+    const accounts = readJSON(STORE_KEY, []);
     if (!accounts.length) {
       $notification.post("\u4E2D\u56FD\u8054\u901A", "\u672A\u83B7\u53D6\u8D26\u53F7", "\u8BF7\u5148\u5F00\u542F\u6293\u53D6\u5F00\u5173\uFF0C\u5728\u4E2D\u56FD\u8054\u901A App \u9000\u51FA\u540E\u91CD\u65B0\u767B\u5F55\u4E00\u6B21\u3002");
       $done();
