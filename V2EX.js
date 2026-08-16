@@ -1,4 +1,5 @@
 var COOKIE_KEY = "V2EX_Cookie";
+var READ_COUNT = 20;
 
 var COMMON_HEADERS = {
   "Accept": "*/*",
@@ -34,11 +35,54 @@ function buildHeaders(cookie) {
   return h;
 }
 
+function mergeSetCookies(currentCookie, setCookieArr) {
+  if (!setCookieArr || setCookieArr.length === 0) return currentCookie;
+  var map = {};
+  var parts = (currentCookie || "").split(";");
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i].trim();
+    if (!p) continue;
+    var idx = p.indexOf("=");
+    if (idx < 0) continue;
+    map[p.slice(0, idx).trim()] = p.slice(idx + 1).trim();
+  }
+  for (var j = 0; j < setCookieArr.length; j++) {
+    var sc = String(setCookieArr[j]);
+    var first = sc.split(";")[0];
+    var k = first.indexOf("=");
+    if (k < 0) continue;
+    var name = first.slice(0, k).trim();
+    var value = first.slice(k + 1).trim();
+    if (!name) continue;
+    if (value === "" || /^deleted$/i.test(value) || /Max-Age=0/i.test(sc)) {
+      delete map[name];
+      continue;
+    }
+    if (map[name] !== value) map[name] = value;
+  }
+  var merged = [];
+  for (var key in map) {
+    if (Object.prototype.hasOwnProperty.call(map, key)) merged.push(key + "=" + map[key]);
+  }
+  return merged.join("; ");
+}
+
 function fetchUrl(url, headers) {
   return new Promise(function (resolve, reject) {
-    $httpClient.get({ url: url, headers: headers }, function (err, _, data) {
-      if (err) reject(err);
-      else resolve(data || "");
+    $httpClient.get({ url: url, headers: headers }, function (err, resp, data) {
+      if (err) { reject(err); return; }
+      try {
+        var sc = (resp && resp.headers && (resp.headers["Set-Cookie"] || resp.headers["set-cookie"])) || [];
+        if (!Array.isArray(sc)) sc = [sc];
+        if (sc.length > 0 && headers && headers["Cookie"]) {
+          var newCookie = mergeSetCookies(headers["Cookie"], sc);
+          if (newCookie !== headers["Cookie"]) {
+            $persistentStore.write(newCookie, COOKIE_KEY);
+            console.log("🔄 Cookie 已续期");
+          }
+        }
+      } catch (e) {}
+      resolve(data || "");
     });
   });
 }
@@ -64,7 +108,7 @@ function parseProfile(html) {
     if (nickMatch) result.nickname = nickMatch[1];
 
     var parts = [];
-    var balanceBlock = html.match(/balance_area bigger[\s\S]*?<\/div>/);
+    var balanceBlock = html.match(/class="balance_area bigger"[\s\S]*?<\/div>/);
     if (balanceBlock) {
       var re = /(\d+)\s+<img[^>]+alt="([A-Z])"/g, m;
       while ((m = re.exec(balanceBlock[0])) !== null) {
@@ -99,6 +143,7 @@ function parseProfile(html) {
 function getOnce(headers) {
   return fetchUrl("https://www.v2ex.com/mission/daily", headers).then(function (html) {
     if (!html || html.indexOf("需要先登录") !== -1) return { once: "", logged_in: false, already: false, days: "?" };
+    if (/href="\/signin"/i.test(html) && !/href="\/signout"/i.test(html)) return { once: "", logged_in: false, already: false, days: "?" };
     var dm = html.match(/已连续登录\s*(\d+)\s*天/);
     var days = dm ? dm[1] : "?";
     if (html.indexOf("每日登录奖励已领取") !== -1) return { once: "", logged_in: true, already: true, days: days };
@@ -152,12 +197,21 @@ function doCheckin(attempt, maxRetry, headers) {
       return;
     }
     return fetchUrl("https://www.v2ex.com/mission/daily/redeem?once=" + info.once, headers).then(function () {
-      return queryBalance(headers);
-    }).then(function (q) {
-      var body = formatCard(info, q);
-      console.log("📌 V2EX 每日签到\n今天签到成功\n\n" + body);
-      notify("📌 V2EX 每日签到", "今天签到成功", body);
-      $done({});
+      return getOnce(headers);
+    }).then(function (checkInfo) {
+      if (!checkInfo.already) {
+        if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
+        console.log("❌ 签到失败：签到未生效");
+        notify("V2EX", "❌ 签到失败", "签到未生效，请稍后重试");
+        $done({});
+        return;
+      }
+      return queryBalance(headers).then(function (q) {
+        var body = formatCard(checkInfo, q);
+        console.log("📌 V2EX 每日签到\n今天签到成功\n\n" + body);
+        notify("📌 V2EX 每日签到", "今天签到成功", body);
+        $done({});
+      });
     });
   }).catch(function (e) {
     if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
@@ -187,6 +241,48 @@ function verifyAndSaveCookie(cookie) {
   });
 }
 
+function doRead(headers) {
+  return fetchUrl("https://www.v2ex.com/", headers).then(function (html) {
+    var topics = [];
+    var re = /href="\/t\/(\d+)/g, m;
+    while ((m = re.exec(html)) !== null) {
+      if (topics.indexOf(m[1]) === -1) topics.push(m[1]);
+    }
+    if (topics.length === 0) {
+      console.log("❌ 未获取到帖子列表");
+      notify("V2EX", "❌ 阅读失败", "未获取到帖子列表");
+      $done({});
+      return;
+    }
+    topics.sort(function () { return Math.random() - 0.5; });
+    var count = Math.min(topics.length, READ_COUNT);
+    console.log("📖 开始阅读 " + count + " 个帖子");
+    var done = 0;
+    var chain = Promise.resolve();
+    for (var i = 0; i < count; i++) {
+      (function (tid) {
+        chain = chain.then(function () {
+          return fetchUrl("https://www.v2ex.com/t/" + tid, headers).then(function () {
+            done++;
+            console.log("✅ 已读 " + done + "/" + count);
+          });
+        }).then(function () {
+          return sleep(1000 + Math.floor(Math.random() * 2000));
+        });
+      })(topics[i]);
+    }
+    return chain.then(function () {
+      console.log("📖 阅读完成 " + done + " 篇");
+      notify("V2EX", "📖 阅读完成", "已浏览 " + done + " 个帖子");
+      $done({});
+    });
+  }).catch(function (e) {
+    console.log("❌ 阅读失败: " + e);
+    notify("V2EX", "❌ 阅读失败", "请检查网络连接");
+    $done({});
+  });
+}
+
 if (typeof $request !== "undefined" && $request && $request.headers) {
   console.log("=== V2EX 抓包 ===");
   var allHeaders = $request.headers || {};
@@ -200,11 +296,15 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
     verifyAndSaveCookie(cookie).then(function () { $done({}); });
   }
 } else {
+  var scriptName = (typeof $script !== "undefined" && $script.name) || "";
   var storedCookie = getStoredCookie();
   if (!storedCookie) {
     console.log("⚠️ 无 Cookie，请先打开「获取Cookie」开关并访问 V2EX");
     notify("V2EX", "⚠️ 无 Cookie", "请打开获取Cookie开关后访问 V2EX");
     $done({});
+  } else if (/阅读|read/i.test(scriptName)) {
+    console.log("=== V2EX 阅读 ===");
+    doRead(buildHeaders(storedCookie));
   } else {
     doCheckin(0, 3, buildHeaders(storedCookie));
   }
