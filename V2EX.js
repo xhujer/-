@@ -1,5 +1,6 @@
 var COOKIE_KEY = "V2EX_Cookie";
 var READ_COUNT = 20;
+var READ_SOURCES = ["/", "/?tab=hot", "/?tab=all", "/?tab=tech", "/recent?p=1", "/recent?p=2"];
 
 var COMMON_HEADERS = {
   "Accept": "*/*",
@@ -13,6 +14,15 @@ function notify(title, subtitle, body) {
 }
 
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+function dwellTime() {
+  if (Math.random() < 0.15) return 30000 + Math.floor(Math.random() * 15000);
+  return 8000 + Math.floor(Math.random() * 14000);
+}
+
+function gapTime() {
+  return 3000 + Math.floor(Math.random() * 6000);
+}
 
 function getStoredCookie() {
   try { return String($persistentStore.read(COOKIE_KEY) || "").trim(); }
@@ -241,40 +251,74 @@ function verifyAndSaveCookie(cookie) {
   });
 }
 
-function doRead(headers) {
-  return fetchUrl("https://www.v2ex.com/", headers).then(function (html) {
-    var topics = [];
-    var re = /href="\/t\/(\d+)/g, m;
-    while ((m = re.exec(html)) !== null) {
-      if (topics.indexOf(m[1]) === -1) topics.push(m[1]);
-    }
-    if (topics.length === 0) {
-      console.log("❌ 未获取到帖子列表");
-      notify("V2EX", "❌ 阅读失败", "未获取到帖子列表");
-      $done({});
-      return;
-    }
-    topics.sort(function () { return Math.random() - 0.5; });
-    var count = Math.min(topics.length, READ_COUNT);
-    console.log("📖 开始阅读 " + count + " 个帖子");
-    var done = 0;
-    var chain = Promise.resolve();
-    for (var i = 0; i < count; i++) {
-      (function (tid) {
-        chain = chain.then(function () {
-          return fetchUrl("https://www.v2ex.com/t/" + tid, headers).then(function () {
-            done++;
-            console.log("✅ 已读 " + done + "/" + count);
-          });
-        }).then(function () {
-          return sleep(1000 + Math.floor(Math.random() * 2000));
+function extractCopper(balanceStr) {
+  var m = String(balanceStr || "").match(/(\d+)\s*铜币/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function fetchTopics(headers) {
+  var all = [];
+  var chain = Promise.resolve();
+  for (var s = 0; s < READ_SOURCES.length; s++) {
+    (function (path) {
+      chain = chain.then(function () {
+        return fetchUrl("https://www.v2ex.com" + path, headers).then(function (html) {
+          var re = /href="\/t\/(\d+)/g, m;
+          while ((m = re.exec(html)) !== null) {
+            if (all.indexOf(m[1]) === -1) all.push(m[1]);
+          }
         });
-      })(topics[i]);
-    }
-    return chain.then(function () {
-      console.log("📖 阅读完成 " + done + " 篇");
-      notify("V2EX", "📖 阅读完成", "已浏览 " + done + " 个帖子");
-      $done({});
+      });
+    })(READ_SOURCES[s]);
+  }
+  return chain.then(function () { return all; });
+}
+
+function doRead(headers) {
+  return queryBalance(headers).then(function (base) {
+    var baseCopper = extractCopper(base.balance);
+    console.log("📖 阅读前铜币基线: " + (baseCopper === null ? "未知" : baseCopper));
+    return fetchTopics(headers).then(function (topics) {
+      if (topics.length === 0) {
+        console.log("❌ 未获取到帖子列表");
+        notify("V2EX", "❌ 阅读失败", "未获取到帖子列表");
+        $done({});
+        return;
+      }
+      topics.sort(function () { return Math.random() - 0.5; });
+      var count = Math.min(topics.length, READ_COUNT);
+      console.log("📖 开始阅读 " + count + " 个帖子（拟人化节奏）");
+      var done = 0;
+      var chain = Promise.resolve();
+      for (var i = 0; i < count; i++) {
+        (function (tid) {
+          chain = chain.then(function () {
+            return fetchUrl("https://www.v2ex.com/t/" + tid, headers).then(function () {
+              done++;
+              console.log("✅ 已读 " + done + "/" + count);
+            });
+          }).then(function () {
+            return sleep(dwellTime());
+          }).then(function () {
+            return sleep(gapTime());
+          });
+        })(topics[i]);
+      }
+      return chain.then(function () {
+        return queryBalance(headers).then(function (final) {
+          var finalCopper = extractCopper(final.balance);
+          var delta = (baseCopper !== null && finalCopper !== null) ? finalCopper - baseCopper : null;
+          var msg = "已读 " + done + " 篇";
+          if (delta !== null) {
+            msg += "，铜币 " + (delta > 0 ? "+" : "") + delta;
+            console.log("📖 阅读完成，" + msg);
+          } else {
+            console.log("📖 阅读完成 " + done + " 篇（无法对比余额）");
+          }
+          notify("V2EX", "📖 阅读完成", msg);
+          $done({});
+        });
+      });
     });
   }).catch(function (e) {
     console.log("❌ 阅读失败: " + e);
