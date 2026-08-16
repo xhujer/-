@@ -15,13 +15,16 @@ function notify(title, subtitle, body) {
 
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
-function dwellTime() {
+function readGap() {
   if (Math.random() < 0.15) return 30000 + Math.floor(Math.random() * 15000);
-  return 8000 + Math.floor(Math.random() * 14000);
+  return 10000 + Math.floor(Math.random() * 20000);
 }
 
-function gapTime() {
-  return 3000 + Math.floor(Math.random() * 6000);
+function isValidPost(html) {
+  if (!html) return false;
+  if (/cf-challenge|just a moment|attention required/i.test(html)) return false;
+  if (html.length < 3000) return false;
+  return true;
 }
 
 function getStoredCookie() {
@@ -157,7 +160,7 @@ function getOnce(headers) {
     var dm = html.match(/已连续登录\s*(\d+)\s*天/);
     var days = dm ? dm[1] : "?";
     if (html.indexOf("每日登录奖励已领取") !== -1) return { once: "", logged_in: true, already: true, days: days };
-    var om = html.match(/once=(\d+)/);
+    var om = html.match(/once\s*=\s*["']?(\d+)/);
     return { once: om ? om[1] : "", logged_in: true, already: false, days: days };
   });
 }
@@ -188,23 +191,21 @@ function doCheckin(attempt, maxRetry, headers) {
     if (!info.logged_in) {
       console.log("❌ Cookie 已失效，请重新抓取");
       notify("V2EX", "❌ Cookie 已失效", "请重新登录并抓取 Cookie");
-      $done({});
-      return;
+      return false;
     }
     if (info.already) {
       return queryBalance(headers).then(function (q) {
         var body = formatCard(info, q);
         console.log("📌 V2EX 每日签到\n今天已完成签到\n\n" + body);
         notify("📌 V2EX 每日签到", "今天已完成签到", body);
-        $done({});
+        return true;
       });
     }
     if (!info.once) {
       if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
       console.log("❌ 签到失败：未找到 once 码");
       notify("V2EX", "❌ 签到失败", "未找到 once 码");
-      $done({});
-      return;
+      return false;
     }
     return fetchUrl("https://www.v2ex.com/mission/daily/redeem?once=" + info.once, headers).then(function () {
       return getOnce(headers);
@@ -213,21 +214,20 @@ function doCheckin(attempt, maxRetry, headers) {
         if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
         console.log("❌ 签到失败：签到未生效");
         notify("V2EX", "❌ 签到失败", "签到未生效，请稍后重试");
-        $done({});
-        return;
+        return false;
       }
       return queryBalance(headers).then(function (q) {
         var body = formatCard(checkInfo, q);
         console.log("📌 V2EX 每日签到\n今天签到成功\n\n" + body);
         notify("📌 V2EX 每日签到", "今天签到成功", body);
-        $done({});
+        return true;
       });
     });
   }).catch(function (e) {
     if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
     console.log("❌ 网络错误，请检查网络连接");
     notify("V2EX", "❌ 网络错误", "请检查网络连接");
-    $done({});
+    return false;
   });
 }
 
@@ -258,18 +258,25 @@ function extractCopper(balanceStr) {
 
 function fetchTopics(headers) {
   var all = [];
+  var seen = {};
+  var sources = READ_SOURCES.slice();
+  sources.sort(function () { return Math.random() - 0.5; });
   var chain = Promise.resolve();
-  for (var s = 0; s < READ_SOURCES.length; s++) {
+  for (var s = 0; s < sources.length; s++) {
     (function (path) {
       chain = chain.then(function () {
         return fetchUrl("https://www.v2ex.com" + path, headers).then(function (html) {
-          var re = /href="\/t\/(\d+)/g, m;
+          var re = /href="\/t\/(\d+)[^"]*"[^>]*>([\s\S]*?)<\/a>/g, m;
           while ((m = re.exec(html)) !== null) {
-            if (all.indexOf(m[1]) === -1) all.push(m[1]);
+            var id = m[1];
+            if (!seen[id]) {
+              seen[id] = true;
+              all.push({ id: id, title: stripHtml(m[2]) });
+            }
           }
         });
       });
-    })(READ_SOURCES[s]);
+    })(sources[s]);
   }
   return chain.then(function () { return all; });
 }
@@ -277,12 +284,10 @@ function fetchTopics(headers) {
 function doRead(headers) {
   return queryBalance(headers).then(function (base) {
     var baseCopper = extractCopper(base.balance);
-    console.log("📖 阅读前铜币基线: " + (baseCopper === null ? "未知" : baseCopper));
     return fetchTopics(headers).then(function (topics) {
       if (topics.length === 0) {
         console.log("❌ 未获取到帖子列表");
         notify("V2EX", "❌ 阅读失败", "未获取到帖子列表");
-        $done({});
         return;
       }
       topics.sort(function () { return Math.random() - 0.5; });
@@ -291,18 +296,24 @@ function doRead(headers) {
       var done = 0;
       var chain = Promise.resolve();
       for (var i = 0; i < count; i++) {
-        (function (tid) {
+        (function (topic, idx) {
           chain = chain.then(function () {
-            return fetchUrl("https://www.v2ex.com/t/" + tid, headers).then(function () {
-              done++;
-              console.log("✅ 已读 " + done + "/" + count);
+            return fetchUrl("https://www.v2ex.com/t/" + topic.id, headers).then(function (html) {
+              if (isValidPost(html)) {
+                done++;
+                console.log("✅ " + done + "/" + count + " " + topic.title);
+              } else {
+                console.log("⏭️ 跳过无效页面 " + topic.id);
+              }
             });
           }).then(function () {
-            return sleep(dwellTime());
+            return sleep(readGap());
           }).then(function () {
-            return sleep(gapTime());
+            if ((idx + 1) % 5 === 0) {
+              return sleep(30000 + Math.floor(Math.random() * 30000));
+            }
           });
-        })(topics[i]);
+        })(topics[i], i);
       }
       return chain.then(function () {
         return queryBalance(headers).then(function (final) {
@@ -316,14 +327,12 @@ function doRead(headers) {
             console.log("📖 阅读完成 " + done + " 篇（无法对比余额）");
           }
           notify("V2EX", "📖 阅读完成", msg);
-          $done({});
         });
       });
     });
   }).catch(function (e) {
     console.log("❌ 阅读失败: " + e);
     notify("V2EX", "❌ 阅读失败", "请检查网络连接");
-    $done({});
   });
 }
 
@@ -348,8 +357,11 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
     $done({});
   } else if (/阅读|read/i.test(scriptName)) {
     console.log("=== V2EX 阅读 ===");
-    doRead(buildHeaders(storedCookie));
+    doRead(buildHeaders(storedCookie)).then(function () { $done({}); });
   } else {
-    doCheckin(0, 3, buildHeaders(storedCookie));
+    var h = buildHeaders(storedCookie);
+    doCheckin(0, 3, h).then(function (ok) {
+      if (ok) return doRead(h);
+    }).then(function () { $done({}); });
   }
 }
