@@ -291,7 +291,7 @@ function doRead(headers) {
       }
       topics.sort(function () { return Math.random() - 0.5; });
       var count = Math.min(topics.length, READ_COUNT);
-      console.log("📖 开始阅读 " + count + " 个帖子（拟人化节奏）");
+      console.log("📖 开始阅读 " + count + " 个帖子");
       var done = 0;
       var chain = Promise.resolve();
       for (var i = 0; i < count; i++) {
