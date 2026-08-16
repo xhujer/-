@@ -8,11 +8,11 @@
 #!type = normal
 
 [Argument]
-获取Cookie = switch,false,desc=打开后访问 V2EX 任意页面即可抓取 Cookie
+capture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 任意页面即可抓取 Cookie
 
 [Script]
-http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=false, timeout=10, tag=V2EX抓包, argument=[{获取Cookie}], enable=true
-cron "10 9 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=60, tag=V2EX签到, enable=true
+http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=false, timeout=10, tag=V2EX抓包, argument=[{capture}], enable=true
+cron "0 0 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=60, tag=V2EX签到, enable=true
 
 [MitM]
 hostname = %APPEND% www.v2ex.com
