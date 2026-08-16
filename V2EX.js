@@ -134,40 +134,39 @@ function formatCard(info, q, statusText) {
 }
 
 function doCheckin(attempt, maxRetry, headers) {
-  console.log("签到尝试 " + (attempt + 1) + "/" + maxRetry);
   return getOnce(headers).then(function (info) {
     if (!info.logged_in) {
-      console.log("登录状态: Cookie 已失效");
+      console.log("❌ Cookie 已失效，请重新抓取");
       $notification.post("V2EX", "❌ Cookie 已失效", "请重新登录并抓取 Cookie");
       $done({});
       return;
     }
     if (info.already) {
-      console.log("登录状态: 正常 | 连续登录 " + info.days + " 天 | 今日已签到");
       return queryBalance(headers).then(function (q) {
-        console.log("余额: " + (q.balance || "未知"));
-        $notification.post("📌 V2EX 每日签到", "今天已完成签到", formatCard(info, q, "今天已完成签到"));
+        var card = formatCard(info, q, "今天已完成签到");
+        console.log(card);
+        $notification.post("📌 V2EX 每日签到", "今天已完成签到", card);
         $done({});
       });
     }
     if (!info.once) {
       if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
-      console.log("签到失败: 未找到 once 码");
+      console.log("❌ 签到失败：未找到 once 码");
       $notification.post("V2EX", "❌ 签到失败", "未找到 once 码");
       $done({});
       return;
     }
-    console.log("登录状态: 正常 | 连续登录 " + info.days + " 天 | 开始签到");
     return fetchUrl("https://www.v2ex.com/mission/daily/redeem?once=" + info.once, headers).then(function () {
       return queryBalance(headers);
     }).then(function (q) {
-      console.log("签到成功 | 余额: " + (q.balance || "未知"));
-      $notification.post("📌 V2EX 每日签到", "今天签到成功", formatCard(info, q, "今天签到成功"));
+      var card = formatCard(info, q, "今天签到成功");
+      console.log(card);
+      $notification.post("📌 V2EX 每日签到", "今天签到成功", card);
       $done({});
     });
   }).catch(function (e) {
     if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
-    console.log("网络错误: " + e);
+    console.log("❌ 网络错误，请检查网络连接");
     $notification.post("V2EX", "❌ 网络错误", "请检查网络连接");
     $done({});
   });
@@ -206,14 +205,12 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
     verifyAndSaveCookie(cookie).then(function () { $done({}); });
   }
 } else {
-  console.log("=== V2EX 每日签到 ===");
   var storedCookie = getStoredCookie();
   if (!storedCookie) {
-    console.log("未找到 Cookie，请先打开「获取Cookie」开关并访问 V2EX");
+    console.log("⚠️ 无 Cookie，请先打开「获取Cookie」开关并访问 V2EX");
     $notification.post("V2EX", "⚠️ 无 Cookie", "请打开获取Cookie开关后访问 V2EX");
     $done({});
   } else {
-    console.log("已读取 Cookie，长度 " + storedCookie.length);
     doCheckin(0, 3, buildHeaders(storedCookie));
   }
 }
