@@ -165,17 +165,6 @@ function doCheckin(attempt, maxRetry, headers) {
   });
 }
 
-function shouldCapture() {
-  var arg = typeof $argument !== "undefined" ? $argument : null;
-  if (!arg) return false;
-  if (typeof arg === "object") {
-    var v = arg["capture"] !== undefined ? arg["capture"] : arg["获取Cookie"];
-    return v === true || v === "true" || v === "1";
-  }
-  if (typeof arg === "string") return arg.indexOf("capture") !== -1 || arg.indexOf("获取Cookie") !== -1;
-  return false;
-}
-
 function verifyAndSaveCookie(cookie) {
   return fetchUrl("https://www.v2ex.com/mission/daily", buildHeaders(cookie)).then(function (html) {
     var loggedIn = html.indexOf("已连续登录") !== -1 || html.indexOf("每日登录奖励") !== -1;
@@ -193,18 +182,14 @@ function verifyAndSaveCookie(cookie) {
   });
 }
 
-if (typeof $request !== "undefined") {
-  if (!shouldCapture()) {
+if (typeof $request !== "undefined" && $request && $request.headers) {
+  var allHeaders = $request.headers || {};
+  var cookie = allHeaders.Cookie || allHeaders.cookie || "";
+  if (!cookie) {
+    $notification.post("V2EX", "抓包失败", "未获取到 Cookie，请检查 MITM 配置");
     $done({});
   } else {
-    var allHeaders = $request.headers || {};
-    var cookie = allHeaders.Cookie || allHeaders.cookie || "";
-    if (!cookie) {
-      $notification.post("V2EX", "抓包失败", "未获取到 Cookie，请检查 MITM 配置");
-      $done({});
-    } else {
-      verifyAndSaveCookie(cookie).then(function () { $done({}); });
-    }
+    verifyAndSaveCookie(cookie).then(function () { $done({}); });
   }
 } else {
   var storedCookie = getStoredCookie();
