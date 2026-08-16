@@ -116,8 +116,8 @@ function formatDate(d) {
   return d.substring(0, 4) + "-" + d.substring(4, 6) + "-" + d.substring(6, 8);
 }
 
-function formatCard(info, q, statusText) {
-  var lines = ["📌 V2EX 每日签到", statusText, "", "用户昵称：" + (q.nickname || "未知"), "连续登录：" + (info.days || "?") + " 天", "当前余额：" + (q.balance || "未知"), ""];
+function formatCard(info, q) {
+  var lines = ["用户昵称：" + (q.nickname || "未知"), "连续登录：" + (info.days || "?") + " 天", "当前余额：" + (q.balance || "未知"), ""];
   var txns = q.transactions || [];
   if (txns.length > 0) {
     lines.push("📝 最近流水：");
@@ -138,9 +138,9 @@ function doCheckin(attempt, maxRetry, headers) {
     }
     if (info.already) {
       return queryBalance(headers).then(function (q) {
-        var card = formatCard(info, q, "今天已完成签到");
-        console.log(card);
-        notify("📌 V2EX 每日签到", "今天已完成签到", card);
+        var body = formatCard(info, q);
+        console.log("📌 V2EX 每日签到\n今天已完成签到\n\n" + body);
+        notify("📌 V2EX 每日签到", "今天已完成签到", body);
         $done({});
       });
     }
@@ -154,9 +154,9 @@ function doCheckin(attempt, maxRetry, headers) {
     return fetchUrl("https://www.v2ex.com/mission/daily/redeem?once=" + info.once, headers).then(function () {
       return queryBalance(headers);
     }).then(function (q) {
-      var card = formatCard(info, q, "今天签到成功");
-      console.log(card);
-      notify("📌 V2EX 每日签到", "今天签到成功", card);
+      var body = formatCard(info, q);
+      console.log("📌 V2EX 每日签到\n今天签到成功\n\n" + body);
+      notify("📌 V2EX 每日签到", "今天签到成功", body);
       $done({});
     });
   }).catch(function (e) {
