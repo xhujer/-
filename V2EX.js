@@ -91,7 +91,6 @@ function fetchUrl(url, headers) {
           var newCookie = mergeSetCookies(headers["Cookie"], sc);
           if (newCookie !== headers["Cookie"]) {
             $persistentStore.write(newCookie, COOKIE_KEY);
-            console.log("🔄 Cookie 已续期");
           }
         }
       } catch (e) {}
