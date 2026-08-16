@@ -1,5 +1,5 @@
 #!name = V2EX 每日签到
-#!desc = V2EX 每日签到领取铜币，卡片式通知（昵称/余额/最近3条流水）
+#!desc = V2EX 每日签到领取铜币
 #!author = Ming
 #!icon = https://raw.githubusercontent.com/lige47/QuanX-icon-rule/main/icon/04ProxySoft/V2ex.png
 #!system = iOS
@@ -12,7 +12,7 @@ capture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 任意页面�
 
 [Script]
 http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=false, timeout=10, tag=V2EX抓包, argument=[{capture}], enable=true
-cron "0 0 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=60, tag=V2EX签到, enable=true
+cron "10 9 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=60, tag=V2EX签到, enable=true
 
 [MitM]
-hostname =www.v2ex.com
+hostname = %APPEND% www.v2ex.com
