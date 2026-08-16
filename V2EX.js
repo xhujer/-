@@ -168,8 +168,11 @@ function doCheckin(attempt, maxRetry, headers) {
 function shouldCapture() {
   var arg = typeof $argument !== "undefined" ? $argument : null;
   if (!arg) return false;
-  if (typeof arg === "object") return arg["获取Cookie"] === true || arg["获取Cookie"] === "true" || arg["获取Cookie"] === "1";
-  if (typeof arg === "string") return arg.indexOf("获取Cookie") !== -1;
+  if (typeof arg === "object") {
+    var v = arg["capture"] !== undefined ? arg["capture"] : arg["获取Cookie"];
+    return v === true || v === "true" || v === "1";
+  }
+  if (typeof arg === "string") return arg.indexOf("capture") !== -1 || arg.indexOf("获取Cookie") !== -1;
   return false;
 }
 
