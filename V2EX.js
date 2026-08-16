@@ -216,7 +216,16 @@ function doCheckin(attempt, maxRetry, headers) {
         return false;
       }
       return queryBalance(headers).then(function (q) {
+        var todayReward = "";
+        if (q.transactions && q.transactions.length > 0) {
+          var t = q.transactions[0];
+          if (t.type.indexOf("每日登录奖励") !== -1) {
+            var n = parseFloat(t.amount);
+            if (!isNaN(n)) todayReward = "今日签到：" + (n > 0 ? "+" : "") + n + " 铜币";
+          }
+        }
         var body = formatCard(checkInfo, q);
+        if (todayReward) body = todayReward + "\n" + body;
         console.log("📌 V2EX 每日签到\n今天签到成功\n\n" + body);
         notify("📌 V2EX 每日签到", "今天签到成功", body);
         return true;
@@ -242,7 +251,7 @@ function verifyAndSaveCookie(cookie) {
     var username = um ? um[1] : "";
     console.log("回验成功: " + (username || "未知用户"));
     if (saveCookie(cookie)) {
-      notify("V2EX", "✅ 抓取成功", "已保存 Cookie" + (username ? "（用户：" + username + "）" : ""));
+      notify("V2EX", "抓取成功", "已保存 Cookie" + (username ? "（用户：" + username + "）" : ""));
     }
   }).catch(function (e) {
     console.log("回验网络错误: " + e);
@@ -300,7 +309,7 @@ function doRead(headers) {
             return fetchUrl("https://www.v2ex.com/t/" + topic.id, headers).then(function (html) {
               if (isValidPost(html)) {
                 done++;
-                console.log("✅ " + done + "/" + count + " " + topic.title);
+                console.log(done + "/" + count + " " + topic.title);
               } else {
                 console.log("⏭️ 跳过无效页面 " + topic.id);
               }
