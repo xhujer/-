@@ -1,7 +1,6 @@
 #!name = V2EX 每日签到
-#!desc = V2EX 每日签到领取铜币（卡片通知+流水），签到后自动阅读刷活跃度
-#!author = Curtinp118
-#!homepage = https://github.com/curtinp118/Loon
+#!desc = V2EX 每日签到领取铜币、自动阅读
+#!author = Ming
 #!icon = https://raw.githubusercontent.com/lige47/QuanX-icon-rule/main/icon/04ProxySoft/V2ex.png
 #!system = iOS
 #!loon_version = 3.5.0
@@ -10,7 +9,7 @@
 
 [Argument]
 
-cronInput = input,"10 9 * * *",tag=签到时间,desc=填写 5 段 cron 表达式，如"10 9 * * *"表示每天 09:10
+cronInput = input,"0 0 * * *",tag=签到时间
 
 cookieCapture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 任意页面即可抓取 Cookie
 
@@ -18,9 +17,9 @@ cookieCapture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 任意�
 
 http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=10,tag=V2EX抓包,enable={cookieCapture}
 
-cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=1200,tag=V2EX签到,enable=true
+cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=1800,tag=V2EX签到,enable=true
 
-generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=900,tag=手动签到,enable=true
+generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=1800,tag=手动签到,enable=true
 
 [MitM]
 
