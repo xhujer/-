@@ -1,5 +1,5 @@
 #!name = V2EX 每日签到
-#!desc = V2EX 每日签到领取铜币，卡片式通知（昵称/余额/最近3条流水）
+#!desc = V2EX 每日签到领取铜币，卡片式通知（昵称/余额/最近3条流水），支持阅读刷活跃度
 #!author = Curtinp118
 #!homepage = https://github.com/curtinp118/Loon
 #!icon = https://raw.githubusercontent.com/lige47/QuanX-icon-rule/main/icon/04ProxySoft/V2ex.png
@@ -14,11 +14,15 @@ cronInput = input,"10 9 * * *",tag=签到时间,desc=填写 5 段 cron 表达式
 
 cookieCapture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 任意页面即可抓取 Cookie
 
+readEnable = switch,false,tag=阅读刷活跃度,desc=实验功能，访问帖子尝试触发活跃度铜币，效果不保证
+
 [Script]
 
 http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=10,tag=V2EX抓包,enable={cookieCapture}
 
 cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=60,tag=V2EX签到,enable=true
+
+cron "30 9 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=300,tag=V2EX阅读,enable={readEnable}
 
 [MitM]
 
