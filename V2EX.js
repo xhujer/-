@@ -7,18 +7,9 @@ var COMMON_HEADERS = {
   "Referer": "https://www.v2ex.com/"
 };
 
-var $http = {
-  fetch: function (opts) {
-    return new Promise(function (resolve, reject) {
-      var handler = function (err, resp, data) {
-        if (err) reject(err);
-        else resolve(data || "");
-      };
-      if ((opts.method || "GET").toUpperCase() === "POST") $httpClient.post(opts, handler);
-      else $httpClient.get(opts, handler);
-    });
-  }
-};
+function notify(title, subtitle, body) {
+  $notification.post(title, subtitle, body);
+}
 
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
@@ -44,7 +35,12 @@ function buildHeaders(cookie) {
 }
 
 function fetchUrl(url, headers) {
-  return $http.fetch({ url: url, headers: headers, method: "GET" });
+  return new Promise(function (resolve, reject) {
+    $httpClient.get({ url: url, headers: headers }, function (err, _, data) {
+      if (err) reject(err);
+      else resolve(data || "");
+    });
+  });
 }
 
 function stripHtml(str) {
@@ -64,7 +60,7 @@ function parseProfile(html) {
   var result = { nickname: "", balance: "", transactions: [] };
   try {
     if (!html) return result;
-    var nickMatch = html.match(/alt="([A-Za-z0-9_-]+)"/);
+    var nickMatch = html.match(/\/member\/([A-Za-z0-9_-]+)/);
     if (nickMatch) result.nickname = nickMatch[1];
 
     var parts = [];
@@ -87,7 +83,6 @@ function parseProfile(html) {
       var timeStr = timeMatch ? stripHtml(timeMatch[1]).trim() : "";
       var typeCell = stripHtml(typeRaw.replace(/<small[\s\S]*?<\/small>/, "")).trim();
       var amountCell = stripHtml(rm[2]).trim();
-      var balanceCell = stripHtml(rm[3]).trim();
       var descCell = stripHtml(rm[4]).trim();
 
       var date = "";
@@ -95,7 +90,7 @@ function parseProfile(html) {
       if (dm) date = dm[1];
       else { var d2 = descCell.match(/(\d{8})/); if (d2) date = d2[1]; }
 
-      result.transactions.push({ type: typeCell, time: timeStr, amount: amountCell, balance: balanceCell, desc: descCell, date: date });
+      result.transactions.push({ type: typeCell, amount: amountCell, date: date });
     }
     return result;
   } catch (e) { return result; }
@@ -137,7 +132,7 @@ function doCheckin(attempt, maxRetry, headers) {
   return getOnce(headers).then(function (info) {
     if (!info.logged_in) {
       console.log("❌ Cookie 已失效，请重新抓取");
-      $notification.post("V2EX", "❌ Cookie 已失效", "请重新登录并抓取 Cookie");
+      notify("V2EX", "❌ Cookie 已失效", "请重新登录并抓取 Cookie");
       $done({});
       return;
     }
@@ -145,14 +140,14 @@ function doCheckin(attempt, maxRetry, headers) {
       return queryBalance(headers).then(function (q) {
         var card = formatCard(info, q, "今天已完成签到");
         console.log(card);
-        $notification.post("📌 V2EX 每日签到", "今天已完成签到", card);
+        notify("📌 V2EX 每日签到", "今天已完成签到", card);
         $done({});
       });
     }
     if (!info.once) {
       if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
       console.log("❌ 签到失败：未找到 once 码");
-      $notification.post("V2EX", "❌ 签到失败", "未找到 once 码");
+      notify("V2EX", "❌ 签到失败", "未找到 once 码");
       $done({});
       return;
     }
@@ -161,13 +156,13 @@ function doCheckin(attempt, maxRetry, headers) {
     }).then(function (q) {
       var card = formatCard(info, q, "今天签到成功");
       console.log(card);
-      $notification.post("📌 V2EX 每日签到", "今天签到成功", card);
+      notify("📌 V2EX 每日签到", "今天签到成功", card);
       $done({});
     });
   }).catch(function (e) {
     if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
     console.log("❌ 网络错误，请检查网络连接");
-    $notification.post("V2EX", "❌ 网络错误", "请检查网络连接");
+    notify("V2EX", "❌ 网络错误", "请检查网络连接");
     $done({});
   });
 }
@@ -177,18 +172,18 @@ function verifyAndSaveCookie(cookie) {
     var loggedIn = html.indexOf("已连续登录") !== -1 || html.indexOf("每日登录奖励") !== -1;
     if (!loggedIn) {
       console.log("回验失败: Cookie 无效或未登录");
-      $notification.post("V2EX", "抓取失败", "Cookie 无效或未登录，请先登录 V2EX");
+      notify("V2EX", "抓取失败", "Cookie 无效或未登录，请先登录 V2EX");
       return;
     }
     var um = html.match(/\/member\/([A-Za-z0-9_-]+)/);
     var username = um ? um[1] : "";
     console.log("回验成功: " + (username || "未知用户"));
     if (saveCookie(cookie)) {
-      $notification.post("V2EX", "✅ 抓取成功", "已保存 Cookie" + (username ? "（用户：" + username + "）" : ""));
+      notify("V2EX", "✅ 抓取成功", "已保存 Cookie" + (username ? "（用户：" + username + "）" : ""));
     }
   }).catch(function (e) {
     console.log("回验网络错误: " + e);
-    $notification.post("V2EX", "抓取失败", "回验失败，请检查网络");
+    notify("V2EX", "抓取失败", "回验失败，请检查网络");
   });
 }
 
@@ -198,7 +193,7 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
   var cookie = allHeaders.Cookie || allHeaders.cookie || "";
   if (!cookie) {
     console.log("未获取到 Cookie，请检查 MITM 配置");
-    $notification.post("V2EX", "抓包失败", "未获取到 Cookie，请检查 MITM 配置");
+    notify("V2EX", "抓包失败", "未获取到 Cookie，请检查 MITM 配置");
     $done({});
   } else {
     console.log("已捕获 Cookie，长度 " + cookie.length + "，开始回验...");
@@ -208,7 +203,7 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
   var storedCookie = getStoredCookie();
   if (!storedCookie) {
     console.log("⚠️ 无 Cookie，请先打开「获取Cookie」开关并访问 V2EX");
-    $notification.post("V2EX", "⚠️ 无 Cookie", "请打开获取Cookie开关后访问 V2EX");
+    notify("V2EX", "⚠️ 无 Cookie", "请打开获取Cookie开关后访问 V2EX");
     $done({});
   } else {
     doCheckin(0, 3, buildHeaders(storedCookie));
