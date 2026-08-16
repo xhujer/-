@@ -1,6 +1,7 @@
 #!name = V2EX 每日签到
-#!desc = V2EX 每日签到领取铜币
-#!author = Ming
+#!desc = V2EX 每日签到领取铜币，卡片式通知（昵称/余额/最近3条流水）
+#!author = Curtinp118
+#!homepage = https://github.com/curtinp118/Loon
 #!icon = https://raw.githubusercontent.com/lige47/QuanX-icon-rule/main/icon/04ProxySoft/V2ex.png
 #!system = iOS
 #!loon_version = 3.5.0
@@ -8,11 +9,17 @@
 #!type = normal
 
 [Argument]
-capture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 任意页面即可抓取 Cookie
+
+cronInput = input,"10 9 * * *",tag=签到时间,desc=填写 5 段 cron 表达式，如"10 9 * * *"表示每天 09:10
+
+cookieCapture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 任意页面即可抓取 Cookie
 
 [Script]
-http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=false, timeout=10, tag=V2EX抓包, argument=[{capture}], enable=true
-cron "10 9 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=60, tag=V2EX签到, enable=true
+
+http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=10,tag=V2EX抓包,enable={cookieCapture}
+
+cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=60,tag=V2EX签到,enable=true
 
 [MitM]
+
 hostname = %APPEND% www.v2ex.com
