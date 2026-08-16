@@ -1,5 +1,5 @@
 #!name = V2EX 每日签到
-#!desc = 每日签到自动阅读
+#!desc = 每日签到并执行阅读
 #!author = Ming
 #!icon = https://raw.githubusercontent.com/lige47/QuanX-icon-rule/main/icon/04ProxySoft/V2ex.png
 #!system = iOS
