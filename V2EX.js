@@ -1,6 +1,6 @@
 var COOKIE_KEY = "V2EX_Cookie";
-var READ_COUNT = 35;
-var READ_SOURCES = ["/recent", "/recent?p=2", "/recent?p=3", "/recent?p=4", "/?tab=all", "/?tab=hot"];
+var READ_COUNT = 20;
+var READ_SOURCES = ["/", "/?tab=hot", "/?tab=all", "/?tab=tech", "/recent?p=1", "/recent?p=2"];
 
 var COMMON_HEADERS = {
   "Accept": "*/*",
@@ -94,19 +94,19 @@ function fetchUrl(url, headers, retries) {
     if (isV2exLoginCookie(latestCookie)) headers["Cookie"] = latestCookie;
   }
   return new Promise(function (resolve, reject) {
-    $httpClient.get({ url: url, headers: headers, timeout: 15 }, function (err, resp, data) {
+    $httpClient.get({ url: url, headers: headers }, function (err, resp, data) {
       var status = Number(resp && (resp.statusCode || resp.status) || 0);
       var retryable = Boolean(err) || status === 408 || status === 425 || status === 429 || status >= 500;
       var successful = status >= 200 && status < 300;
       if (retryable && retries > 0) {
+        var reason = err ? "socket" : "HTTP " + status;
+        console.log("⚠️ " + reason + "，重试剩余 " + retries + " 次: " + url);
         sleep(3000 + Math.floor(Math.random() * 4000)).then(function () {
           fetchUrl(url, headers, retries - 1).then(resolve, reject);
         });
         return;
       }
       if (err || !successful) {
-        var finalReason = err ? "socket" : "HTTP " + (status || "unknown");
-        console.log("❌ 请求最终失败 [" + finalReason + "]: " + url);
         reject(err || new Error("HTTP " + (status || "unknown")));
         return;
       }
@@ -140,9 +140,11 @@ function stripHtml(str) {
 }
 
 function parseProfile(html) {
-  var result = { balance: "", transactions: [] };
+  var result = { nickname: "", balance: "", transactions: [] };
   try {
     if (!html) return result;
+    var nickMatch = html.match(/\/member\/([A-Za-z0-9_-]+)/);
+    if (nickMatch) result.nickname = nickMatch[1];
 
     var parts = [];
     var balanceBlock = html.match(/class="balance_area bigger"[\s\S]*?<\/div>/);
@@ -199,7 +201,7 @@ function formatDate(d) {
 }
 
 function formatCard(info, q) {
-  var lines = ["连续登录：" + (info.days || "?") + " 天", "当前余额：" + (q.balance || "未知"), ""];
+  var lines = ["用户昵称：" + (q.nickname || "未知"), "连续登录：" + (info.days || "?") + " 天", "当前余额：" + (q.balance || "未知"), ""];
   var txns = q.transactions || [];
   if (txns.length > 0) {
     lines.push("📝 最近流水：");
@@ -210,7 +212,7 @@ function formatCard(info, q) {
   return lines.join("\n");
 }
 
-function doCheckin(headers) {
+function doCheckin(attempt, maxRetry, headers) {
   return getOnce(headers).then(function (info) {
     if (!info.logged_in) {
       console.log("❌ Cookie 已失效，请重新抓取");
@@ -226,6 +228,7 @@ function doCheckin(headers) {
       });
     }
     if (!info.once) {
+      if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
       console.log("❌ 签到失败：未找到 once 码");
       notify("V2EX", "❌ 签到失败", "未找到 once 码");
       return false;
@@ -234,6 +237,7 @@ function doCheckin(headers) {
       return getOnce(headers);
     }).then(function (checkInfo) {
       if (!checkInfo.already) {
+        if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
         console.log("❌ 签到失败：签到未生效");
         notify("V2EX", "❌ 签到失败", "签到未生效，请稍后重试");
         return false;
@@ -255,8 +259,8 @@ function doCheckin(headers) {
       });
     });
   }).catch(function (e) {
-    console.log("❌ 网络错误: " + (e && e.message ? e.message : e));
-    console.log("❌ 请检查网络连接后重试签到");
+    if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
+    console.log("❌ 网络错误，请检查网络连接");
     notify("V2EX", "❌ 网络错误", "请检查网络连接");
     return false;
   });
@@ -419,7 +423,7 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
     doRead(buildHeaders(storedCookie)).then(function () { $done({}); });
   } else {
     var h = buildHeaders(storedCookie);
-    doCheckin(h).then(function (ok) {
+    doCheckin(0, 3, h).then(function (ok) {
       if (ok) return doRead(h);
     }).then(function () { $done({}); });
   }
