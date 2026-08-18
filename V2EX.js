@@ -20,10 +20,8 @@ function readGap() {
 }
 
 function isValidPost(html) {
-  if (!html) return false;
-  if (/cf-challenge|just a moment|attention required/i.test(html)) return false;
-  if (html.length < 3000) return false;
-  return true;
+  if (!html || html.length < 1000) return false;
+  return !/cf-challenge|just a moment|attention required/i.test(html);
 }
 
 function getStoredCookie() {
@@ -32,14 +30,20 @@ function getStoredCookie() {
 }
 
 function isV2exLoginCookie(cookie) {
-  return /(?:^|;\s*)A2O?=/i.test(String(cookie || ""));
+  return /(?:^|;\s*)(?:A2O?|PB3_SESSION)=/i.test(String(cookie || ""));
 }
 
 function saveCookie(cookie) {
   try {
     if (!isV2exLoginCookie(cookie)) return false;
-    if (getStoredCookie() === cookie) return false;
-    $persistentStore.write(cookie, COOKIE_KEY);
+    var current = getStoredCookie();
+    var currentId = getCookieAccountId(current);
+    var incomingId = getCookieAccountId(cookie);
+    var next = currentId && incomingId && currentId !== incomingId
+      ? cookie
+      : mergeSetCookies(current, String(cookie).split(";"));
+    if (current === next) return false;
+    $persistentStore.write(next, COOKIE_KEY);
     return true;
   } catch (e) { return false; }
 }
@@ -84,22 +88,26 @@ function mergeSetCookies(currentCookie, setCookieArr) {
 }
 
 function fetchUrl(url, headers, retries) {
-  if (retries === undefined) retries = 3;
+  if (retries === undefined) retries = 1;
   if (headers && headers["Cookie"]) {
     var latestCookie = getStoredCookie();
     if (isV2exLoginCookie(latestCookie)) headers["Cookie"] = latestCookie;
   }
   return new Promise(function (resolve, reject) {
     $httpClient.get({ url: url, headers: headers }, function (err, resp, data) {
-      if (err) {
-        if (retries > 0) {
-          console.log("⚠️ 请求失败，重试剩余 " + retries + " 次: " + url);
-          sleep(2000).then(function () {
-            fetchUrl(url, headers, retries - 1).then(resolve, reject);
-          });
-          return;
-        }
-        reject(err);
+      var status = Number(resp && (resp.statusCode || resp.status) || 0);
+      var retryable = Boolean(err) || status === 408 || status === 425 || status === 429 || status >= 500;
+      var successful = status >= 200 && status < 300;
+      if (retryable && retries > 0) {
+        var reason = err ? "socket" : "HTTP " + status;
+        console.log("⚠️ " + reason + "，重试剩余 " + retries + " 次: " + url);
+        sleep(3000 + Math.floor(Math.random() * 4000)).then(function () {
+          fetchUrl(url, headers, retries - 1).then(resolve, reject);
+        });
+        return;
+      }
+      if (err || !successful) {
+        reject(err || new Error("HTTP " + (status || "unknown")));
         return;
       }
       try {
@@ -350,9 +358,14 @@ function doRead(headers) {
 }
 
 function extractUsernameFromHtml(html) {
-  if (!html) return "";
-  var m = String(html).match(/href=["']\/member\/([A-Za-z0-9_-]+)["'][^>]*>/i);
-  return m ? m[1] : "";
+  var source = String(html || "");
+  var m = source.match(/<a\b(?=[^>]*\bclass=["'][^"']*\btop\b[^"']*["'])(?=[^>]*\bhref=["']\/member\/([^"'/?#]+)["'])[^>]*>/i);
+  if (m) return m[1];
+  var all = {};
+  var re = /href=["']\/member\/([^"'/?#]+)["']/gi;
+  while ((m = re.exec(source)) !== null) all[m[1].toLowerCase()] = m[1];
+  var keys = Object.keys(all);
+  return keys.length === 1 ? all[keys[0]] : "";
 }
 
 function getCookieAccountId(cookie) {
