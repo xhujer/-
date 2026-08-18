@@ -1,6 +1,6 @@
-#!name = V2EX 每日签到
-#!desc = 每日签到并执行阅读
-#!author = Ming
+#!name = V2EX 每日签到（修复版）
+#!desc = 每日签到并执行阅读，增强 Cookie 抓取验证
+#!author = Ming (修复版 by Minis)
 #!icon = https://raw.githubusercontent.com/lige47/QuanX-icon-rule/main/icon/04ProxySoft/V2ex.png
 #!system = iOS
 #!loon_version = 3.5.0
@@ -11,11 +11,11 @@
 
 cronInput = input,"0 8 * * *",tag=签到时间
 
-cookieCapture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 任意页面即可抓取 Cookie
+cookieCapture = switch,false,tag=获取Cookie,desc=打开后登录 V2EX 并访问主页或签到页（https://www.v2ex.com 或 https://www.v2ex.com/mission/daily）
 
 [Script]
 
-http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=10,tag=获取Cookie,enable={cookieCapture}
+http-request ^https?://www\.v2ex\.com/(mission/daily)?(\?.*)?$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=10,tag=获取Cookie,enable={cookieCapture}
 
 cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=1800,tag=V2EX签到,enable=true
 
