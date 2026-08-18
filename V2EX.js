@@ -406,3 +406,4 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
       if (ok) return doRead(h);
     }).then(function () { $done({}); });
   }
+}
