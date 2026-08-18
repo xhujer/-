@@ -80,40 +80,33 @@ function mergeSetCookies(currentCookie, setCookieArr) {
   return merged.join("; ");
 }
 
-function httpGet(url, headers) {
+function fetchUrl(url, headers, retries) {
+  if (retries === undefined) retries = 3;
   return new Promise(function (resolve, reject) {
     $httpClient.get({ url: url, headers: headers }, function (err, resp, data) {
-      if (err) { reject(err); return; }
-      resolve({ resp: resp, data: data });
-    });
-  });
-}
-
-// 带重试的请求，遇到 socket 错误自动退避重试
-function fetchUrl(url, headers, retry) {
-  retry = retry || 0;
-  return httpGet(url, headers).then(function (r) {
-    var resp = r.resp, data = r.data;
-    try {
-      var sc = (resp && resp.headers && (resp.headers["Set-Cookie"] || resp.headers["set-cookie"])) || [];
-      if (!Array.isArray(sc)) sc = [sc];
-      if (sc.length > 0 && headers && headers["Cookie"]) {
-        var newCookie = mergeSetCookies(headers["Cookie"], sc);
-        if (newCookie !== headers["Cookie"]) {
-          $persistentStore.write(newCookie, COOKIE_KEY);
+      if (err) {
+        if (retries > 0) {
+          console.log("⚠️ 请求失败，重试剩余 " + retries + " 次: " + url);
+          sleep(2000).then(function () {
+            fetchUrl(url, headers, retries - 1).then(resolve, reject);
+          });
+          return;
         }
+        reject(err);
+        return;
       }
-    } catch (e) {}
-    return data || "";
-  }).catch(function (e) {
-    var msg = String(e && e.message ? e.message : e);
-    if (retry < 3 && /socket|closed|remote peer|timeout|network|connection/i.test(msg)) {
-      console.log("⚠️ 连接失败，重试 " + (retry + 1) + "/3: " + msg);
-      return sleep(5000 * (retry + 1)).then(function () {
-        return fetchUrl(url, headers, retry + 1);
-      });
-    }
-    throw e;
+      try {
+        var sc = (resp && resp.headers && (resp.headers["Set-Cookie"] || resp.headers["set-cookie"])) || [];
+        if (!Array.isArray(sc)) sc = [sc];
+        if (sc.length > 0 && headers && headers["Cookie"]) {
+          var newCookie = mergeSetCookies(headers["Cookie"], sc);
+          if (newCookie !== headers["Cookie"]) {
+            $persistentStore.write(newCookie, COOKIE_KEY);
+          }
+        }
+      } catch (e) {}
+      resolve(data || "");
+    });
   });
 }
 
@@ -268,15 +261,22 @@ function verifyAndSaveCookie(cookie) {
     var um = html.match(/\/member\/([A-Za-z0-9_-]+)/);
     var username = um ? um[1] : "";
     console.log("回验成功: " + (username || "未知用户"));
-    if (getStoredCookie() === cookie) {
-      console.log("Cookie 未变化，跳过通知");
-      return;
+    if (saveCookie(cookie)) {
+      notify("V2EX", "抓取成功", "已保存 Cookie" + (username ? "（用户：" + username + "）" : ""));
     }
-    $persistentStore.write(cookie, COOKIE_KEY);
-    notify("🎉用户名", "cookie存储成功", "");
   }).catch(function (e) {
     console.log("回验网络错误: " + e);
     notify("V2EX", "抓取失败", "回验失败，请检查网络");
+  });
+}
+
+function fetchUsername(cookie) {
+  return fetchUrl("https://www.v2ex.com/mission/daily", buildHeaders(cookie)).then(function (html) {
+    if (!html) return "";
+    var um = html.match(/\/member\/([A-Za-z0-9_-]+)[^>]*>[^<]*<\/a>\s*<a[^>]*href="\/signout"/);
+    if (um) return um[1];
+    var um2 = html.match(/\/member\/([A-Za-z0-9_-]+)/);
+    return um2 ? um2[1] : "";
   });
 }
 
@@ -323,7 +323,7 @@ function doRead(headers) {
       var count = Math.min(topics.length, READ_COUNT);
       console.log("📖 开始阅读 " + count + " 个帖子");
       var done = 0;
-      var failed = 0;
+      var skipped = 0;
       var chain = Promise.resolve();
       for (var i = 0; i < count; i++) {
         (function (topic, idx) {
@@ -333,12 +333,12 @@ function doRead(headers) {
                 done++;
                 console.log(done + "/" + count + " " + topic.title);
               } else {
-                failed++;
+                skipped++;
                 console.log("⏭️ 跳过无效页面 " + topic.id);
               }
             }).catch(function (e) {
-              failed++;
-              console.log("⏭️ 读取失败 " + topic.id + ": " + e);
+              skipped++;
+              console.log("⏭️ 读取失败，跳过 " + topic.id + ": " + e);
             });
           }).then(function () {
             return sleep(readGap());
@@ -353,15 +353,12 @@ function doRead(headers) {
         return queryBalance(headers).then(function (final) {
           var finalCopper = extractCopper(final.balance);
           var delta = (baseCopper !== null && finalCopper !== null) ? finalCopper - baseCopper : null;
-          var msg = "已读 " + done + " 篇" + (failed > 0 ? "（跳过 " + failed + "）" : "");
-          if (delta !== null) {
-            msg += "，铜币 " + (delta > 0 ? "+" : "") + delta;
-          }
+          var msg = "已读 " + done + " 篇";
+          if (skipped > 0) msg += "，跳过 " + skipped + " 篇";
+          if (delta !== null) msg += "，铜币 " + (delta > 0 ? "+" : "") + delta;
           console.log("📖 阅读完成，" + msg);
           notify("V2EX", "📖 阅读完成", msg);
         });
-      }).catch(function (e) {
-        console.log("❌ 阅读结束: " + e);
       });
     });
   }).catch(function (e) {
@@ -379,8 +376,19 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
     notify("V2EX", "抓包失败", "未获取到 Cookie，请检查 MITM 配置");
     $done({});
   } else {
-    console.log("已捕获 Cookie，长度 " + cookie.length + "，开始回验...");
-    verifyAndSaveCookie(cookie).then(function () { $done({}); });
+    var changed = saveCookie(cookie);
+    console.log("已捕获 Cookie，长度 " + cookie.length + (changed ? "，已保存" : "，内容未变化"));
+    if (!changed) {
+      $done({});
+    } else {
+      fetchUsername(cookie).then(function (username) {
+        notify("V2EX", "🎉" + (username || "V2EX") + " cookie存储成功", "");
+        $done({});
+      }).catch(function () {
+        notify("V2EX", "🎉 Cookie 存储成功", "");
+        $done({});
+      });
+    }
   }
 } else {
   var scriptName = (typeof $script !== "undefined" && $script.name) || "";
@@ -398,4 +406,3 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
       if (ok) return doRead(h);
     }).then(function () { $done({}); });
   }
-}
