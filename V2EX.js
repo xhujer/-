@@ -355,13 +355,20 @@ function extractUsernameFromHtml(html) {
   return m ? m[1] : "";
 }
 
-function notifyCookieSaved(username) {
-  var now = Date.now();
-  var last = 0;
-  try { last = Number($persistentStore.read("V2EX_LastNotifyAt") || 0); } catch (e) {}
-  if (last > 0 && now >= last && now - last < 10000) return false;
-  try { $persistentStore.write(String(now), "V2EX_LastNotifyAt"); } catch (e) {}
-  notify("V2EX", "🎉" + (username || "V2EX") + " cookie存储成功", "");
+function getCookieAccountId(cookie) {
+  var m = String(cookie || "").match(/A2O?="?[^;]*\|48:([^|]+)\|/i);
+  return m ? m[1] : "";
+}
+
+function notifyCookieSaved(username, cookie) {
+  username = String(username || "").trim();
+  if (!username) return false;
+  var accountId = getCookieAccountId(cookie) || username;
+  var last = "";
+  try { last = String($persistentStore.read("V2EX_LastNotifiedAccount") || ""); } catch (e) {}
+  if (last === accountId) return false;
+  try { $persistentStore.write(accountId, "V2EX_LastNotifiedAccount"); } catch (e) {}
+  notify("V2EX", "🎉" + username + " cookie存储成功", "");
   return true;
 }
 
@@ -375,7 +382,7 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
     var responseCookie = getStoredCookie();
     if (responseUsername && isV2exLoginCookie(responseCookie)) {
       try { $persistentStore.write(responseUsername, "V2EX_Username"); } catch (e) {}
-      notifyCookieSaved(responseUsername);
+      notifyCookieSaved(responseUsername, responseCookie);
     }
     $done({});
   }
@@ -389,9 +396,6 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
   } else {
     var changed = saveCookie(cookie);
     console.log("已捕获登录 Cookie，长度 " + cookie.length + (changed ? "，已更新" : "，内容未变化"));
-    var savedUsername = "";
-    try { savedUsername = String($persistentStore.read("V2EX_Username") || ""); } catch (e) {}
-    notifyCookieSaved(savedUsername);
     $done({});
   }
 } else {
