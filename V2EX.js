@@ -105,6 +105,8 @@ function fetchUrl(url, headers, retries) {
         return;
       }
       if (err || !successful) {
+        var finalReason = err ? "socket" : "HTTP " + (status || "unknown");
+        console.log("❌ 请求最终失败 [" + finalReason + "]: " + url);
         reject(err || new Error("HTTP " + (status || "unknown")));
         return;
       }
@@ -253,7 +255,8 @@ function doCheckin(headers) {
       });
     });
   }).catch(function (e) {
-    console.log("❌ 网络错误，请检查网络连接");
+    console.log("❌ 网络错误: " + (e && e.message ? e.message : e));
+    console.log("❌ 请检查网络连接后重试签到");
     notify("V2EX", "❌ 网络错误", "请检查网络连接");
     return false;
   });
