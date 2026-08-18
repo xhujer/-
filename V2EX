@@ -16,7 +16,7 @@ cookieCapture = switch,true,tag=获取Cookie,desc=默认开启，抓完 Cookie �
 
 [Script]
 
-http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=10, tag=V2EX抓包, enable={cookieCapture}
+http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=false, timeout=10, tag=V2EX抓包, enable={cookieCapture}
 
 http-response ^https?://www\.v2ex\.com/(?!api/|pro/emitter|static/|b/i/|favicon\.ico).*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=true, timeout=10, tag=V2EX响应提取用户名, enable={cookieCapture}
 
