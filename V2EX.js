@@ -88,18 +88,19 @@ function mergeSetCookies(currentCookie, setCookieArr) {
 }
 
 function fetchUrl(url, headers, retries) {
-  if (retries === undefined) retries = 1;
+  if (retries === undefined) retries = 3;
   if (headers && headers["Cookie"]) {
     var latestCookie = getStoredCookie();
     if (isV2exLoginCookie(latestCookie)) headers["Cookie"] = latestCookie;
   }
   return new Promise(function (resolve, reject) {
-    $httpClient.get({ url: url, headers: headers, timeout: 15 }, function (err, resp, data) {
+    $httpClient.get({ url: url, headers: headers, timeout: 30 }, function (err, resp, data) {
       var status = Number(resp && (resp.statusCode || resp.status) || 0);
       var retryable = Boolean(err) || status === 408 || status === 425 || status === 429 || status >= 500;
       var successful = status >= 200 && status < 300;
       if (retryable && retries > 0) {
-        sleep(3000 + Math.floor(Math.random() * 4000)).then(function () {
+        var backoff = 3000 * (4 - retries) + Math.floor(Math.random() * 2000);
+        sleep(backoff).then(function () {
           fetchUrl(url, headers, retries - 1).then(resolve, reject);
         });
         return;
