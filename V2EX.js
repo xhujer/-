@@ -268,9 +268,12 @@ function verifyAndSaveCookie(cookie) {
     var um = html.match(/\/member\/([A-Za-z0-9_-]+)/);
     var username = um ? um[1] : "";
     console.log("回验成功: " + (username || "未知用户"));
-    if (saveCookie(cookie)) {
-      notify("V2EX", "抓取成功", "已保存 Cookie" + (username ? "（用户：" + username + "）" : ""));
+    if (getStoredCookie() === cookie) {
+      console.log("Cookie 未变化，跳过通知");
+      return;
     }
+    $persistentStore.write(cookie, COOKIE_KEY);
+    notify("🎉用户名", "cookie存储成功", "");
   }).catch(function (e) {
     console.log("回验网络错误: " + e);
     notify("V2EX", "抓取失败", "回验失败，请检查网络");
