@@ -20,7 +20,7 @@ clearCookie = switch,false,tag=清除Cookie,desc=开启后访问一次 V2EX 即�
 
 http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=false, timeout=10, tag=V2EX抓包, enable={cookieCapture}, argument=[{clearCookie}]
 
-http-response ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=true, timeout=10, tag=V2EX响应提取用户名, enable=true, argument=[{clearCookie}]
+http-response ^https?://www\.v2ex\.com/(?!api/|pro/|static/|favicon\.ico).*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=true, timeout=10, tag=V2EX响应提取用户名, enable=true
 
 cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=1800, tag=V2EX签到, enable=true
 
