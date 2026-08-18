@@ -11,15 +11,13 @@
 
 cronInput = input,"0 8 * * *",tag=签到时间
 
-cookieCapture = switch,true,tag=获取Cookie,desc=默认已开启。访问 https://www.v2ex.com/mission/daily 或 /member/你的用户名 页面即可抓取，抓完请关闭
-
 [Rewrite]
 
 ^https://www\.v2ex\.com/(mission|member).* url script-request-header https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js
 
 [Script]
 
-http-request ^https://www\.v2ex\.com/(mission|member).*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,requires-body=false,timeout=10,tag=获取Cookie,enable={cookieCapture}
+http-request ^https://www\.v2ex\.com/(mission|member).*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,requires-body=false,timeout=10,tag=获取Cookie,enable=true
 
 cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=1800,tag=V2EX签到,enable=true
 
