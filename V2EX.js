@@ -80,22 +80,40 @@ function mergeSetCookies(currentCookie, setCookieArr) {
   return merged.join("; ");
 }
 
-function fetchUrl(url, headers) {
+function httpGet(url, headers) {
   return new Promise(function (resolve, reject) {
     $httpClient.get({ url: url, headers: headers }, function (err, resp, data) {
       if (err) { reject(err); return; }
-      try {
-        var sc = (resp && resp.headers && (resp.headers["Set-Cookie"] || resp.headers["set-cookie"])) || [];
-        if (!Array.isArray(sc)) sc = [sc];
-        if (sc.length > 0 && headers && headers["Cookie"]) {
-          var newCookie = mergeSetCookies(headers["Cookie"], sc);
-          if (newCookie !== headers["Cookie"]) {
-            $persistentStore.write(newCookie, COOKIE_KEY);
-          }
-        }
-      } catch (e) {}
-      resolve(data || "");
+      resolve({ resp: resp, data: data });
     });
+  });
+}
+
+// 带重试的请求，遇到 socket 错误自动退避重试
+function fetchUrl(url, headers, retry) {
+  retry = retry || 0;
+  return httpGet(url, headers).then(function (r) {
+    var resp = r.resp, data = r.data;
+    try {
+      var sc = (resp && resp.headers && (resp.headers["Set-Cookie"] || resp.headers["set-cookie"])) || [];
+      if (!Array.isArray(sc)) sc = [sc];
+      if (sc.length > 0 && headers && headers["Cookie"]) {
+        var newCookie = mergeSetCookies(headers["Cookie"], sc);
+        if (newCookie !== headers["Cookie"]) {
+          $persistentStore.write(newCookie, COOKIE_KEY);
+        }
+      }
+    } catch (e) {}
+    return data || "";
+  }).catch(function (e) {
+    var msg = String(e && e.message ? e.message : e);
+    if (retry < 3 && /socket|closed|remote peer|timeout|network|connection/i.test(msg)) {
+      console.log("⚠️ 连接失败，重试 " + (retry + 1) + "/3: " + msg);
+      return sleep(5000 * (retry + 1)).then(function () {
+        return fetchUrl(url, headers, retry + 1);
+      });
+    }
+    throw e;
   });
 }
 
@@ -302,6 +320,7 @@ function doRead(headers) {
       var count = Math.min(topics.length, READ_COUNT);
       console.log("📖 开始阅读 " + count + " 个帖子");
       var done = 0;
+      var failed = 0;
       var chain = Promise.resolve();
       for (var i = 0; i < count; i++) {
         (function (topic, idx) {
@@ -311,8 +330,12 @@ function doRead(headers) {
                 done++;
                 console.log(done + "/" + count + " " + topic.title);
               } else {
+                failed++;
                 console.log("⏭️ 跳过无效页面 " + topic.id);
               }
+            }).catch(function (e) {
+              failed++;
+              console.log("⏭️ 读取失败 " + topic.id + ": " + e);
             });
           }).then(function () {
             return sleep(readGap());
@@ -327,15 +350,15 @@ function doRead(headers) {
         return queryBalance(headers).then(function (final) {
           var finalCopper = extractCopper(final.balance);
           var delta = (baseCopper !== null && finalCopper !== null) ? finalCopper - baseCopper : null;
-          var msg = "已读 " + done + " 篇";
+          var msg = "已读 " + done + " 篇" + (failed > 0 ? "（跳过 " + failed + "）" : "");
           if (delta !== null) {
             msg += "，铜币 " + (delta > 0 ? "+" : "") + delta;
-            console.log("📖 阅读完成，" + msg);
-          } else {
-            console.log("📖 阅读完成 " + done + " 篇（无法对比余额）");
           }
+          console.log("📖 阅读完成，" + msg);
           notify("V2EX", "📖 阅读完成", msg);
         });
+      }).catch(function (e) {
+        console.log("❌ 阅读结束: " + e);
       });
     });
   }).catch(function (e) {
