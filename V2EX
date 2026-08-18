@@ -9,7 +9,8 @@
 
 [Script]
 http-request ^https://www\.v2ex\.com/(mission|member).*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=false, timeout=10, tag=V2EX抓包, enable=true
-cron "10 9 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=1800, tag=V2EX签到, enable=true
+cron "0 8 * * *" script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=1800, tag=V2EX签到, enable=true
+generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=1800, tag=手动签到, enable=true
 
 [MITM]
 hostname = www.v2ex.com
