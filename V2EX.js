@@ -359,7 +359,7 @@ function notifyCookieSaved(username) {
   var now = Date.now();
   var last = 0;
   try { last = Number($persistentStore.read("V2EX_LastNotifyAt") || 0); } catch (e) {}
-  if (now - last < 60000) return false;
+  if (last > 0 && now >= last && now - last < 10000) return false;
   try { $persistentStore.write(String(now), "V2EX_LastNotifyAt"); } catch (e) {}
   notify("V2EX", "🎉" + (username || "V2EX") + " cookie存储成功", "");
   return true;
@@ -389,11 +389,9 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
   } else {
     var changed = saveCookie(cookie);
     console.log("已捕获登录 Cookie，长度 " + cookie.length + (changed ? "，已更新" : "，内容未变化"));
-    if (changed) {
-      var savedUsername = "";
-      try { savedUsername = String($persistentStore.read("V2EX_Username") || ""); } catch (e) {}
-      notifyCookieSaved(savedUsername);
-    }
+    var savedUsername = "";
+    try { savedUsername = String($persistentStore.read("V2EX_Username") || ""); } catch (e) {}
+    notifyCookieSaved(savedUsername);
     $done({});
   }
 } else {
