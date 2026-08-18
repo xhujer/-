@@ -353,12 +353,8 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
     notify("V2EX", "抓包失败", "未获取到 Cookie，请检查 MITM 配置");
     $done({});
   } else {
-    var saved = saveCookie(cookie);
-    console.log("已捕获 Cookie，长度 " + cookie.length + (saved ? "，已保存" : "，内容未变化"));
-    if (saved) {
-      notify("V2EX", "抓取成功", "Cookie 已保存");
-    }
-    $done({});
+    console.log("已捕获 Cookie，长度 " + cookie.length + "，开始回验...");
+    verifyAndSaveCookie(cookie).then(function () { $done({}); });
   }
 } else {
   var scriptName = (typeof $script !== "undefined" && $script.name) || "";
