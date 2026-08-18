@@ -11,7 +11,7 @@
 
 cronInput = input,"0 8 * * *",tag=签到时间
 
-cookieCapture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 任意页面即可抓取 Cookie
+cookieCapture = switch,true,tag=获取Cookie,desc=默认已开启。访问 https://www.v2ex.com/mission/daily 或 /member/你的用户名 页面即可抓取，抓完请关闭
 
 [Rewrite]
 
