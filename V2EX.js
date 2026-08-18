@@ -1,6 +1,6 @@
 var COOKIE_KEY = "V2EX_Cookie";
-var READ_COUNT = 20;
-var READ_SOURCES = ["/", "/?tab=hot", "/?tab=all", "/?tab=tech", "/recent?p=1", "/recent?p=2"];
+var READ_COUNT = 35;
+var READ_SOURCES = ["/recent", "/recent?p=2", "/recent?p=3", "/recent?p=4", "/?tab=all", "/?tab=hot"];
 
 var COMMON_HEADERS = {
   "Accept": "*/*",
@@ -16,7 +16,7 @@ function notify(title, subtitle, body) {
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
 function readGap() {
-  return 3000 + Math.floor(Math.random() * 3000);
+  return 6000 + Math.floor(Math.random() * 6000);
 }
 
 function isValidPost(html) {
