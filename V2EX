@@ -23,6 +23,6 @@ cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/hea
 
 generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=1800,tag=手动签到,enable=true
 
-[MitM]
+[MITM]
 
-hostname = %APPEND% www.v2ex.com
+hostname = www.v2ex.com
