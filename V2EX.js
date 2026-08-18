@@ -239,23 +239,42 @@ function doCheckin(attempt, maxRetry, headers) {
   });
 }
 
+// 验证 Cookie 完整性
+function validateCookie(cookie) {
+  if (!cookie || cookie.length < 10) return false;
+  // V2EX 关键 Cookie: A2 (登录标识), PB3 (会话标识)
+  var hasA2 = /\bA2=/.test(cookie);
+  var hasPB3 = /\bPB3=/.test(cookie);
+  return hasA2 && hasPB3;
+}
+
 function verifyAndSaveCookie(cookie) {
+  // 先检查 Cookie 格式
+  if (!validateCookie(cookie)) {
+    console.log("❌ Cookie 不完整，缺少 A2 或 PB3 字段");
+    notify("V2EX", "❌ 抓取失败", "Cookie 不完整，请确保已登录后再访问 V2EX 主页或签到页");
+    return Promise.resolve();
+  }
+
   return fetchUrl("https://www.v2ex.com/mission/daily", buildHeaders(cookie)).then(function (html) {
     var loggedIn = html.indexOf("已连续登录") !== -1 || html.indexOf("每日登录奖励") !== -1;
     if (!loggedIn) {
-      console.log("回验失败: Cookie 无效或未登录");
-      notify("V2EX", "抓取失败", "Cookie 无效或未登录，请先登录 V2EX");
+      console.log("❌ 回验失败: Cookie 无效或未登录");
+      notify("V2EX", "❌ 抓取失败", "Cookie 无效，请先登录 V2EX 后再访问主页或签到页");
       return;
     }
     var um = html.match(/\/member\/([A-Za-z0-9_-]+)/);
     var username = um ? um[1] : "";
-    console.log("回验成功: " + (username || "未知用户"));
+    var dm = html.match(/已连续登录\s*(\d+)\s*天/);
+    var days = dm ? dm[1] : "?";
+    
+    console.log("✅ 回验成功: " + (username || "未知用户") + "，已连续登录 " + days + " 天");
     if (saveCookie(cookie)) {
-      notify("V2EX", "抓取成功", "已保存 Cookie" + (username ? "（用户：" + username + "）" : ""));
+      notify("V2EX", "✅ 抓取成功", "用户：" + (username || "未知") + "\n连续登录：" + days + " 天\n\nCookie 已保存，可关闭开关");
     }
   }).catch(function (e) {
-    console.log("回验网络错误: " + e);
-    notify("V2EX", "抓取失败", "回验失败，请检查网络");
+    console.log("❌ 回验网络错误: " + e);
+    notify("V2EX", "❌ 抓取失败", "网络异常，请检查连接后重试");
   });
 }
 
@@ -344,24 +363,31 @@ function doRead(headers) {
   });
 }
 
+// ========== 入口 ==========
 if (typeof $request !== "undefined" && $request && $request.headers) {
-  console.log("=== V2EX 抓包 ===");
+  console.log("=== V2EX Cookie 抓取 ===");
   var allHeaders = $request.headers || {};
   var cookie = allHeaders.Cookie || allHeaders.cookie || "";
+  
   if (!cookie) {
-    console.log("未获取到 Cookie，请检查 MITM 配置");
-    notify("V2EX", "抓包失败", "未获取到 Cookie，请检查 MITM 配置");
+    console.log("❌ 未获取到 Cookie，请检查：");
+    console.log("1. MITM 是否已启用 www.v2ex.com");
+    console.log("2. 是否已安装并信任证书");
+    notify("V2EX", "❌ 抓包失败", "未获取到 Cookie\n请检查 MITM 配置和证书");
     $done({});
   } else {
-    console.log("已捕获 Cookie，长度 " + cookie.length + "，开始回验...");
+    console.log("📦 已捕获 Cookie（长度 " + cookie.length + "），开始验证...");
     verifyAndSaveCookie(cookie).then(function () { $done({}); });
   }
 } else {
   var scriptName = (typeof $script !== "undefined" && $script.name) || "";
   var storedCookie = getStoredCookie();
   if (!storedCookie) {
-    console.log("⚠️ 无 Cookie，请先打开「获取Cookie」开关并访问 V2EX");
-    notify("V2EX", "⚠️ 无 Cookie", "请打开获取Cookie开关后访问 V2EX");
+    console.log("⚠️ 无 Cookie，请先抓取");
+    console.log("1. 打开插件「获取Cookie」开关");
+    console.log("2. 在 Safari 登录 V2EX");
+    console.log("3. 访问 www.v2ex.com 主页或签到页");
+    notify("V2EX", "⚠️ 无 Cookie", "请先打开「获取Cookie」开关\n登录后访问 V2EX 主页或签到页");
     $done({});
   } else if (/阅读|read/i.test(scriptName)) {
     console.log("=== V2EX 阅读 ===");
