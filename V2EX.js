@@ -367,6 +367,23 @@ function doRead(headers) {
   });
 }
 
+function shouldClearCookie() {
+  try {
+    var arg = (typeof $argument !== "undefined" && $argument) || {};
+    if (typeof arg === "string") {
+      return /(^|[&,\s])clearCookie(?:=true)?($|[&,\s])/i.test(arg) || /清除Cookie(?:=true)?/i.test(arg);
+    }
+    return arg.clearCookie === true || arg.clearCookie === "true" || arg["清除Cookie"] === true || arg["清除Cookie"] === "true";
+  } catch (e) { return false; }
+}
+
+function clearStoredCookie() {
+  try { $persistentStore.write("", COOKIE_KEY); } catch (e) {}
+  try { $persistentStore.write("", "V2EX_Username"); } catch (e) {}
+  console.log("V2EX Cookie 和用户名已清除");
+  notify("V2EX", "🗑️ Cookie 已清除", "本地持久化 Cookie 和用户名已删除");
+}
+
 function extractUsernameFromHtml(html) {
   if (!html) return "";
   var m = String(html).match(/href=["']\/member\/([A-Za-z0-9_-]+)["'][^>]*>/i);
@@ -374,7 +391,10 @@ function extractUsernameFromHtml(html) {
 }
 
 // http-response：从首页/页面响应 HTML 提取当前用户名
-if (typeof $response !== "undefined" && $response && typeof $response.body !== "undefined") {
+if (shouldClearCookie()) {
+  clearStoredCookie();
+  $done({});
+} else if (typeof $response !== "undefined" && $response && typeof $response.body !== "undefined") {
   var responseUsername = extractUsernameFromHtml($response.body);
   var responseCookie = getStoredCookie();
   if (responseUsername && responseCookie) {
@@ -410,7 +430,7 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
         try { $persistentStore.write(username, "V2EX_Username"); } catch (e) {}
         notify("V2EX", "🎉" + username + " cookie存储成功", "");
       } else {
-        console.log("Cookie 已保存，等待页面响应提取用户名");
+        notify("V2EX", "🎉V2EX cookie存储成功", "首页响应稍后提取用户名");
       }
       $done({});
     }
