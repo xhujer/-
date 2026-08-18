@@ -10,13 +10,17 @@ cronInput = input,"0 8 * * *",tag=签到时间
 
 cookieCapture = switch,true,tag=获取Cookie,desc=默认开启，抓完 Cookie 后可关闭
 
+clearCookie = switch,false,tag=清除Cookie,desc=开启后访问一次 V2EX 即删除本地 Cookie，完成后请关闭
+
 [Rewrite]
 
 ^https?://www\.v2ex\.com/.* url script-request-header https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js
 
 [Script]
 
-http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=false, timeout=10, tag=V2EX抓包, enable={cookieCapture}
+http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=false, timeout=10, tag=V2EX抓包, enable={cookieCapture}, argument=[{clearCookie}]
+
+http-response ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=true, timeout=10, tag=V2EX响应提取用户名, enable=true, argument=[{clearCookie}]
 
 cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=1800, tag=V2EX签到, enable=true
 
