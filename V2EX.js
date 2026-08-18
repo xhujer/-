@@ -32,9 +32,13 @@ function getStoredCookie() {
   catch (e) { return ""; }
 }
 
+function isV2exLoginCookie(cookie) {
+  return /(?:^|;\s*)A2O?=/i.test(String(cookie || ""));
+}
+
 function saveCookie(cookie) {
   try {
-    if (!cookie) return false;
+    if (!isV2exLoginCookie(cookie)) return false;
     if (getStoredCookie() === cookie) return false;
     $persistentStore.write(cookie, COOKIE_KEY);
     return true;
@@ -380,7 +384,9 @@ function shouldClearCookie() {
 function clearStoredCookie() {
   try { $persistentStore.write("", COOKIE_KEY); } catch (e) {}
   try { $persistentStore.write("", "V2EX_Username"); } catch (e) {}
-  console.log("V2EX Cookie 和用户名已清除");
+  try { $persistentStore.write("", "V2EX_CookieNotifyPending"); } catch (e) {}
+  try { $persistentStore.write("", "V2EX_LastNotifiedUser"); } catch (e) {}
+  console.log("V2EX Cookie、用户名和通知标记已清除");
   notify("V2EX", "🗑️ Cookie 已清除", "本地持久化 Cookie 和用户名已删除");
 }
 
@@ -395,45 +401,36 @@ if (shouldClearCookie()) {
   clearStoredCookie();
   $done({});
 } else if (typeof $response !== "undefined" && $response && typeof $response.body !== "undefined") {
-  var responseUsername = extractUsernameFromHtml($response.body);
-  var responseCookie = getStoredCookie();
-  if (responseUsername && responseCookie) {
-    var oldUsername = "";
-    try { oldUsername = String($persistentStore.read("V2EX_Username") || ""); } catch (e) {}
-    try { $persistentStore.write(responseUsername, "V2EX_Username"); } catch (e) {}
-    if (oldUsername !== responseUsername) {
-      notify("V2EX", "🎉" + responseUsername + " cookie存储成功", "");
+  var responseHeaders = $response.headers || {};
+  var contentType = String(responseHeaders["Content-Type"] || responseHeaders["content-type"] || "");
+  if (contentType && contentType.toLowerCase().indexOf("text/html") === -1) {
+    $done({});
+  } else {
+    var responseUsername = extractUsernameFromHtml($response.body);
+    var responseCookie = getStoredCookie();
+    if (responseUsername && isV2exLoginCookie(responseCookie)) {
+      var lastNotifiedUser = "";
+      try { lastNotifiedUser = String($persistentStore.read("V2EX_LastNotifiedUser") || ""); } catch (e) {}
+      try { $persistentStore.write(responseUsername, "V2EX_Username"); } catch (e) {}
+      if (lastNotifiedUser !== responseUsername) {
+        try { $persistentStore.write(responseUsername, "V2EX_LastNotifiedUser"); } catch (e) {}
+        notify("V2EX", "🎉" + responseUsername + " cookie存储成功", "");
+      }
     }
+    $done({});
   }
-  $done({});
 } else if (typeof $request !== "undefined" && $request && $request.headers) {
   console.log("=== V2EX 抓包 ===");
   var allHeaders = $request.headers || {};
   var cookie = allHeaders.Cookie || allHeaders.cookie || "";
-  if (!cookie) {
-    console.log("未获取到 Cookie，请检查 MITM 配置");
-    notify("V2EX", "抓包失败", "未获取到 Cookie，请检查 MITM 配置");
+  if (!isV2exLoginCookie(cookie)) {
+    console.log("忽略不含 A2O/A2 的非登录 Cookie");
     $done({});
   } else {
     var changed = saveCookie(cookie);
-    console.log("已捕获 Cookie，长度 " + cookie.length + (changed ? "，已保存" : "，内容未变化"));
-    if (!changed) {
-      $done({});
-    } else {
-      var username = "";
-      try {
-        var requestUrl = String($request.url || "");
-        var userMatch = requestUrl.match(/\/member\/([A-Za-z0-9_-]+)/i);
-        if (userMatch) username = userMatch[1];
-      } catch (e) {}
-      if (username) {
-        try { $persistentStore.write(username, "V2EX_Username"); } catch (e) {}
-        notify("V2EX", "🎉" + username + " cookie存储成功", "");
-      } else {
-        notify("V2EX", "🎉V2EX cookie存储成功", "首页响应稍后提取用户名");
-      }
-      $done({});
-    }
+    console.log("已捕获登录 Cookie，长度 " + cookie.length + (changed ? "，已更新" : "，内容未变化"));
+    if (changed) console.log("等待 HTML 响应提取用户名并通知");
+    $done({});
   }
 } else {
   var scriptName = (typeof $script !== "undefined" && $script.name) || "";
