@@ -16,8 +16,7 @@ function notify(title, subtitle, body) {
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
 function readGap() {
-  if (Math.random() < 0.15) return 30000 + Math.floor(Math.random() * 15000);
-  return 10000 + Math.floor(Math.random() * 20000);
+  return 3000 + Math.floor(Math.random() * 3000);
 }
 
 function isValidPost(html) {
@@ -86,6 +85,10 @@ function mergeSetCookies(currentCookie, setCookieArr) {
 
 function fetchUrl(url, headers, retries) {
   if (retries === undefined) retries = 3;
+  if (headers && headers["Cookie"]) {
+    var latestCookie = getStoredCookie();
+    if (isV2exLoginCookie(latestCookie)) headers["Cookie"] = latestCookie;
+  }
   return new Promise(function (resolve, reject) {
     $httpClient.get({ url: url, headers: headers }, function (err, resp, data) {
       if (err) {
@@ -104,7 +107,8 @@ function fetchUrl(url, headers, retries) {
         if (!Array.isArray(sc)) sc = [sc];
         if (sc.length > 0 && headers && headers["Cookie"]) {
           var newCookie = mergeSetCookies(headers["Cookie"], sc);
-          if (newCookie !== headers["Cookie"]) {
+          if (newCookie !== headers["Cookie"] && isV2exLoginCookie(newCookie)) {
+            headers["Cookie"] = newCookie;
             $persistentStore.write(newCookie, COOKIE_KEY);
           }
         }
@@ -254,36 +258,6 @@ function doCheckin(attempt, maxRetry, headers) {
   });
 }
 
-function verifyAndSaveCookie(cookie) {
-  return fetchUrl("https://www.v2ex.com/mission/daily", buildHeaders(cookie)).then(function (html) {
-    var loggedIn = html.indexOf("已连续登录") !== -1 || html.indexOf("每日登录奖励") !== -1;
-    if (!loggedIn) {
-      console.log("回验失败: Cookie 无效或未登录");
-      notify("V2EX", "抓取失败", "Cookie 无效或未登录，请先登录 V2EX");
-      return;
-    }
-    var um = html.match(/\/member\/([A-Za-z0-9_-]+)/);
-    var username = um ? um[1] : "";
-    console.log("回验成功: " + (username || "未知用户"));
-    if (saveCookie(cookie)) {
-      notify("V2EX", "抓取成功", "已保存 Cookie" + (username ? "（用户：" + username + "）" : ""));
-    }
-  }).catch(function (e) {
-    console.log("回验网络错误: " + e);
-    notify("V2EX", "抓取失败", "回验失败，请检查网络");
-  });
-}
-
-function fetchUsername(cookie) {
-  return fetchUrl("https://www.v2ex.com/mission/daily", buildHeaders(cookie)).then(function (html) {
-    if (!html) return "";
-    var um = html.match(/\/member\/([A-Za-z0-9_-]+)[^>]*>[^<]*<\/a>\s*<a[^>]*href="\/signout"/);
-    if (um) return um[1];
-    var um2 = html.match(/\/member\/([A-Za-z0-9_-]+)/);
-    return um2 ? um2[1] : "";
-  });
-}
-
 function extractCopper(balanceStr) {
   var m = String(balanceStr || "").match(/(\d+)\s*铜币/);
   return m ? parseInt(m[1], 10) : null;
@@ -307,6 +281,8 @@ function fetchTopics(headers) {
               all.push({ id: id, title: stripHtml(m[2]) });
             }
           }
+        }).catch(function (e) {
+          console.log("⏭️ 帖子来源失败，跳过 " + path + ": " + e);
         });
       });
     })(sources[s]);
@@ -315,20 +291,20 @@ function fetchTopics(headers) {
 }
 
 function doRead(headers) {
-  return queryBalance(headers).then(function (base) {
+  return queryBalance(headers).catch(function () {
+    return { balance: "" };
+  }).then(function (base) {
     var baseCopper = extractCopper(base.balance);
     return fetchTopics(headers).then(function (topics) {
-      if (topics.length === 0) {
-        console.log("❌ 未获取到帖子列表");
+      if (!topics.length) {
         notify("V2EX", "❌ 阅读失败", "未获取到帖子列表");
         return;
       }
       topics.sort(function () { return Math.random() - 0.5; });
       var count = Math.min(topics.length, READ_COUNT);
-      console.log("📖 开始阅读 " + count + " 个帖子");
-      var done = 0;
-      var skipped = 0;
+      var done = 0, skipped = 0;
       var chain = Promise.resolve();
+      console.log("📖 开始阅读 " + count + " 个帖子");
       for (var i = 0; i < count; i++) {
         (function (topic, idx) {
           chain = chain.then(function () {
@@ -345,20 +321,22 @@ function doRead(headers) {
               console.log("⏭️ 读取失败，跳过 " + topic.id + ": " + e);
             });
           }).then(function () {
+            if (idx + 1 >= count) return;
             return sleep(readGap());
           }).then(function () {
-            if ((idx + 1) % 5 === 0) {
-              return sleep(30000 + Math.floor(Math.random() * 30000));
+            if (idx + 1 < count && (idx + 1) % 5 === 0) {
+              return sleep(8000 + Math.floor(Math.random() * 7000));
             }
           });
         })(topics[i], i);
       }
       return chain.then(function () {
-        return queryBalance(headers).then(function (final) {
+        return queryBalance(headers).catch(function () {
+          return { balance: "" };
+        }).then(function (final) {
           var finalCopper = extractCopper(final.balance);
           var delta = (baseCopper !== null && finalCopper !== null) ? finalCopper - baseCopper : null;
-          var msg = "已读 " + done + " 篇";
-          if (skipped > 0) msg += "，跳过 " + skipped + " 篇";
+          var msg = "已读 " + done + " 篇，跳过 " + skipped + " 篇";
           if (delta !== null) msg += "，铜币 " + (delta > 0 ? "+" : "") + delta;
           console.log("📖 阅读完成，" + msg);
           notify("V2EX", "📖 阅读完成", msg);
@@ -367,27 +345,8 @@ function doRead(headers) {
     });
   }).catch(function (e) {
     console.log("❌ 阅读失败: " + e);
-    notify("V2EX", "❌ 阅读失败", "请检查网络连接");
+    notify("V2EX", "❌ 阅读失败", "未获取到可读帖子");
   });
-}
-
-function shouldClearCookie() {
-  try {
-    var arg = (typeof $argument !== "undefined" && $argument) || {};
-    if (typeof arg === "string") {
-      return /(^|[&,\s])clearCookie(?:=true)?($|[&,\s])/i.test(arg) || /清除Cookie(?:=true)?/i.test(arg);
-    }
-    return arg.clearCookie === true || arg.clearCookie === "true" || arg["清除Cookie"] === true || arg["清除Cookie"] === "true";
-  } catch (e) { return false; }
-}
-
-function clearStoredCookie() {
-  try { $persistentStore.write("", COOKIE_KEY); } catch (e) {}
-  try { $persistentStore.write("", "V2EX_Username"); } catch (e) {}
-  try { $persistentStore.write("", "V2EX_CookieNotifyPending"); } catch (e) {}
-  try { $persistentStore.write("", "V2EX_LastNotifiedUser"); } catch (e) {}
-  console.log("V2EX Cookie、用户名和通知标记已清除");
-  notify("V2EX", "🗑️ Cookie 已清除", "本地持久化 Cookie 和用户名已删除");
 }
 
 function extractUsernameFromHtml(html) {
@@ -396,11 +355,7 @@ function extractUsernameFromHtml(html) {
   return m ? m[1] : "";
 }
 
-// http-response：从首页/页面响应 HTML 提取当前用户名
-if (shouldClearCookie()) {
-  clearStoredCookie();
-  $done({});
-} else if (typeof $response !== "undefined" && $response && typeof $response.body !== "undefined") {
+if (typeof $response !== "undefined" && $response && typeof $response.body !== "undefined") {
   var responseHeaders = $response.headers || {};
   var contentType = String(responseHeaders["Content-Type"] || responseHeaders["content-type"] || "");
   if (contentType && contentType.toLowerCase().indexOf("text/html") === -1) {
