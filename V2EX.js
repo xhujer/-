@@ -367,7 +367,26 @@ function doRead(headers) {
   });
 }
 
-if (typeof $request !== "undefined" && $request && $request.headers) {
+function extractUsernameFromHtml(html) {
+  if (!html) return "";
+  var m = String(html).match(/href=["']\/member\/([A-Za-z0-9_-]+)["'][^>]*>/i);
+  return m ? m[1] : "";
+}
+
+// http-response：从首页/页面响应 HTML 提取当前用户名
+if (typeof $response !== "undefined" && $response && typeof $response.body !== "undefined") {
+  var responseUsername = extractUsernameFromHtml($response.body);
+  var responseCookie = getStoredCookie();
+  if (responseUsername && responseCookie) {
+    var oldUsername = "";
+    try { oldUsername = String($persistentStore.read("V2EX_Username") || ""); } catch (e) {}
+    try { $persistentStore.write(responseUsername, "V2EX_Username"); } catch (e) {}
+    if (oldUsername !== responseUsername) {
+      notify("V2EX", "🎉" + responseUsername + " cookie存储成功", "");
+    }
+  }
+  $done({});
+} else if (typeof $request !== "undefined" && $request && $request.headers) {
   console.log("=== V2EX 抓包 ===");
   var allHeaders = $request.headers || {};
   var cookie = allHeaders.Cookie || allHeaders.cookie || "";
@@ -381,13 +400,19 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
     if (!changed) {
       $done({});
     } else {
-      fetchUsername(cookie).then(function (username) {
-        notify("V2EX", "🎉" + (username || "V2EX") + " cookie存储成功", "");
-        $done({});
-      }).catch(function () {
-        notify("V2EX", "🎉 Cookie 存储成功", "");
-        $done({});
-      });
+      var username = "";
+      try {
+        var requestUrl = String($request.url || "");
+        var userMatch = requestUrl.match(/\/member\/([A-Za-z0-9_-]+)/i);
+        if (userMatch) username = userMatch[1];
+      } catch (e) {}
+      if (username) {
+        try { $persistentStore.write(username, "V2EX_Username"); } catch (e) {}
+        notify("V2EX", "🎉" + username + " cookie存储成功", "");
+      } else {
+        console.log("Cookie 已保存，等待页面响应提取用户名");
+      }
+      $done({});
     }
   }
 } else {
@@ -406,4 +431,3 @@ if (typeof $request !== "undefined" && $request && $request.headers) {
       if (ok) return doRead(h);
     }).then(function () { $done({}); });
   }
-}
