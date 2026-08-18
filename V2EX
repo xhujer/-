@@ -1,5 +1,5 @@
-#!name = V2EX 每日签到
-#!desc = V2EX 每日签到领取铜币
+!name = V2EX 每日签到
+#!desc = 每日签到并执行阅读
 #!author = Ming
 #!icon = https://raw.githubusercontent.com/lige47/QuanX-icon-rule/main/icon/04ProxySoft/V2ex.png
 #!system = iOS
@@ -11,16 +11,16 @@
 
 cronInput = input,"0 8 * * *",tag=签到时间
 
-cookieCapture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 签到页或个人主页
+cookieCapture = switch,false,tag=获取Cookie,desc=打开后访问 V2EX 任意页面即可抓取 Cookie
 
 [Script]
 
-http-request ^https://www\.v2ex\.com/(mission|member).*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, requires-body=false, timeout=10, tag=V2EX获取Cookie, enable={cookieCapture}
+http-request ^https?://www\.v2ex\.com/.*$ script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=10,tag=获取Cookie,enable={cookieCapture}
 
-cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=1800, tag=V2EX签到, enable=true
+cron {cronInput} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=1800,tag=V2EX签到,enable=true
 
-generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js, timeout=1800, tag=手动签到, enable=true
+generic script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/V2EX.js,timeout=1800,tag=手动签到,enable=true
 
-[MITM]
+[MitM]
 
 hostname = %APPEND% www.v2ex.com
