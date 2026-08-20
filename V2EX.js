@@ -1,6 +1,6 @@
 var COOKIE_KEY = "V2EX_Cookie";
 var LOCK_KEY = "V2EX_Running";
-var READ_COUNT = 50;
+var READ_COUNT = 35;
 var READ_SOURCES = ["/recent", "/recent?p=2", "/recent?p=3", "/recent?p=4", "/?tab=all", "/?tab=hot"];
 
 var COMMON_HEADERS = {
@@ -163,11 +163,9 @@ function stripHtml(str) {
 }
 
 function parseProfile(html) {
-  var result = { nickname: "", balance: "", transactions: [] };
+  var result = { balance: "", transactions: [] };
   try {
     if (!html) return result;
-    var nickMatch = html.match(/\/member\/([A-Za-z0-9_-]+)/);
-    if (nickMatch) result.nickname = nickMatch[1];
 
     var parts = [];
     var balanceBlock = html.match(/class="balance_area bigger"[\s\S]*?<\/div>/);
@@ -205,6 +203,7 @@ function parseProfile(html) {
 function getOnce(headers) {
   return fetchUrl("https://www.v2ex.com/mission/daily", headers).then(function (html) {
     if (!html || looksLoggedOut(html)) return { once: "", logged_in: false, already: false, days: "?" };
+    updateUsernameFromHtml(html);
     var dm = html.match(/已连续登录\s*(\d+)\s*天/);
     var days = dm ? dm[1] : "?";
     if (html.indexOf("每日登录奖励已领取") !== -1) return { once: "", logged_in: true, already: true, days: days };
@@ -223,7 +222,7 @@ function formatDate(d) {
 }
 
 function formatCard(info, q) {
-  var lines = ["用户昵称：" + (q.nickname || "未知"), "连续登录：" + (info.days || "?") + " 天", "当前余额：" + (q.balance || "未知"), ""];
+  var lines = ["连续登录：" + (info.days || "?") + " 天", "当前余额：" + (q.balance || "未知"), ""];
   var txns = q.transactions || [];
   if (txns.length > 0) {
     lines.push("📝 最近流水：");
@@ -411,26 +410,19 @@ function notifyCookieSaved(username, cookie) {
   try { last = String($persistentStore.read("V2EX_LastNotifiedAccount") || ""); } catch (e) {}
   if (last === accountId) return false;
   try { $persistentStore.write(accountId, "V2EX_LastNotifiedAccount"); } catch (e) {}
-  notify("V2EX", "🎉" + username + " cookie存储成功", "");
+  notify("V2EX", "🎉" + username + " cookie获取成功", "");
   return true;
 }
 
-if (typeof $response !== "undefined" && $response && typeof $response.body !== "undefined") {
-  var responseHeaders = $response.headers || {};
-  var contentType = String(responseHeaders["Content-Type"] || responseHeaders["content-type"] || "");
-  if (contentType && contentType.toLowerCase().indexOf("text/html") === -1) {
-    $done({});
-  } else {
-    var responseUsername = extractUsernameFromHtml($response.body);
-    var responseCookie = getStoredCookie();
-    if (responseUsername && isV2exLoginCookie(responseCookie)) {
-      try { $persistentStore.write(responseUsername, "V2EX_Username"); } catch (e) {}
-      notifyCookieSaved(responseUsername, responseCookie);
-    }
-    $done({});
-  }
-} else if (typeof $request !== "undefined" && $request && $request.headers) {
-  console.log("=== V2EX 抓包 ===");
+function updateUsernameFromHtml(html) {
+  var username = extractUsernameFromHtml(html);
+  if (!username) return "";
+  try { $persistentStore.write(username, "V2EX_Username"); } catch (e) {}
+  return username;
+}
+
+if (typeof $request !== "undefined" && $request && $request.headers) {
+  console.log("=== V2EX 获取Cookie ===");
   var allHeaders = $request.headers || {};
   var cookie = allHeaders.Cookie || allHeaders.cookie || "";
   if (!isV2exLoginCookie(cookie)) {
@@ -439,6 +431,15 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
   } else {
     var changed = saveCookie(cookie);
     console.log("已捕获登录 Cookie，长度 " + cookie.length + (changed ? "，已更新" : "，内容未变化"));
+    if (changed) {
+      var savedUsername = "";
+      try { savedUsername = String($persistentStore.read("V2EX_Username") || ""); } catch (e) {}
+      if (savedUsername) {
+        notifyCookieSaved(savedUsername, cookie);
+      } else {
+        notify("V2EX", "🎉 Cookie 获取成功", "签到后自动识别用户名");
+      }
+    }
     $done({});
   }
 } else {
