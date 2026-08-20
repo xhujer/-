@@ -1,5 +1,5 @@
 var COOKIE_KEY = "V2EX_Cookie";
-var READ_COUNT = 35;
+var READ_COUNT = 50;
 var READ_SOURCES = ["/recent", "/recent?p=2", "/recent?p=3", "/recent?p=4", "/?tab=all", "/?tab=hot"];
 
 var COMMON_HEADERS = {
