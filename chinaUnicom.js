@@ -5480,20 +5480,22 @@
       return;
     }
     const list = readJSON(STORE_KEY, []);
-    // appId 是设备/安装标识，同一台设备切换号码时可能相同，不能用于账号去重。
+    // 去重：只用 tokenOnline 判断是否同一账号。appId 是设备/安装标识，
+    // 同设备切号、重复登录时 appId 可能变化，不能参与去重判断，
+    // 否则同一账号每次打开页面都会触发“已保存”通知。
     const index = list.findIndex((x) => x.tokenOnline === token);
-    const item = { tokenOnline: token, appId, updatedAt: dateTime(), mobile: index >= 0 ? list[index].mobile || "" : "" };
-    let changed = false;
-    if (index < 0) {
+    const isNew = index < 0;
+    const item = { tokenOnline: token, appId, updatedAt: dateTime(), mobile: isNew ? "" : (list[index].mobile || "") };
+    if (isNew) {
       list.push(item);
-      changed = true;
     } else {
-      changed = list[index].tokenOnline !== token || list[index].appId !== appId;
+      // 同一账号：仅静默刷新 appId / mobile 等字段，绝不弹通知
       list[index] = { ...list[index], ...item };
     }
     writeJSON(STORE_KEY, list);
-    console.log(`[\u4E2D\u56FD\u8054\u901A] \u5DF2\u4FDD\u5B58\u8D26\u53F7 ${list.length}\uFF0CToken=${mask(token)}\uFF0CAppId=${mask(appId)}`);
-    if (changed) $notification.post("\u4E2D\u56FD\u8054\u901A\u8D26\u53F7\u83B7\u53D6\u6210\u529F", `\u5DF2\u4FDD\u5B58\u7B2C ${index < 0 ? list.length : index + 1} \u4E2A\u8D26\u53F7`, `Token\uFF1A${mask(token)}
+    console.log(`[\u4E2D\u56FD\u8054\u901A] \u5DF2${isNew ? "\u65B0\u589E\u4FDD\u5B58" : "\u66F4\u65B0"}${list.length}\u4E2A\u8D26\u53F7 (${isNew ? "\u65B0\u8D26\u53F7" : "\u5DF2\u5B58\u8D26\u53F7\u4E0D\u91CD\u590D\u63D0\u793A"})\uFF0CToken=${mask(token)}\uFF0CAppId=${mask(appId)}`);
+    // 只有真正新增账号才弹通知；同一账号重复捕获静默更新，避免“打开页面一直提示已获取”
+    if (isNew) $notification.post("\u4E2D\u56FD\u8054\u901A\u8D26\u53F7\u83B7\u53D6\u6210\u529F", `\u5DF2\u4FDD\u5B58\u7B2C ${list.length} \u4E2A\u8D26\u53F7`, `Token\uFF1A${mask(token)}
 AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
 \u5B9A\u65F6\u4EFB\u52A1\u5C06\u81EA\u52A8\u4F7F\u7528\uFF0C\u65E0\u9700\u624B\u586B\u3002`);
     $done({});
