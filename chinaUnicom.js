@@ -5480,21 +5480,23 @@
       return;
     }
     const list = readJSON(STORE_KEY, []);
-    // 去重：只用 tokenOnline 判断是否同一账号。appId 是设备/安装标识，
-    // 同设备切号、重复登录时 appId 可能变化，不能参与去重判断，
-    // 否则同一账号每次打开页面都会触发“已保存”通知。
-    const index = list.findIndex((x) => x.tokenOnline === token);
+    // 去重：同一设备重复登录（token 每次登录都会变化）只算一个账号。
+    // ① 先按 tokenOnline 精确匹配 → 命中则静默更新
+    // ② 再按 appId（设备/安装标识）匹配 → 同设备重新登录新 token，合并更新、不新增、不通知
+    // ③ 都没有 → 才是真正新设备/新账号，才新增并通知
+    // 注意：同设备抓多个不同号码会因 appId 相同而合并，仅适用于单设备单号场景。
+    let index = list.findIndex((x) => x.tokenOnline === token);
+    if (index < 0 && appId) index = list.findIndex((x) => x.appId === appId && x.appId);
     const isNew = index < 0;
-    const item = { tokenOnline: token, appId, updatedAt: dateTime(), mobile: isNew ? "" : (list[index].mobile || "") };
     if (isNew) {
-      list.push(item);
+      list.push({ tokenOnline: token, appId, updatedAt: dateTime(), mobile: "" });
     } else {
-      // 同一账号：仅静默刷新 appId / mobile 等字段，绝不弹通知
-      list[index] = { ...list[index], ...item };
+      // 同一账号：仅静默刷新 token / appId / mobile 字段，绝不弹通知、不新增
+      list[index] = { ...list[index], tokenOnline: token, appId, updatedAt: dateTime() };
     }
     writeJSON(STORE_KEY, list);
-    console.log(`[\u4E2D\u56FD\u8054\u901A] \u5DF2${isNew ? "\u65B0\u589E\u4FDD\u5B58" : "\u66F4\u65B0"}${list.length}\u4E2A\u8D26\u53F7 (${isNew ? "\u65B0\u8D26\u53F7" : "\u5DF2\u5B58\u8D26\u53F7\u4E0D\u91CD\u590D\u63D0\u793A"})\uFF0CToken=${mask(token)}\uFF0CAppId=${mask(appId)}`);
-    // 只有真正新增账号才弹通知；同一账号重复捕获静默更新，避免“打开页面一直提示已获取”
+    console.log(`[\u4E2D\u56FD\u8054\u901A] \u5DF2${isNew ? "\u65B0\u589E\u4FDD\u5B58" : "\u5408\u5E76\u66F4\u65B0"}${list.length}\u4E2A\u8D26\u53F7 (${isNew ? "\u65B0\u8D26\u53F7" : "\u5DF2\u5B58\u8D26\u53F7\uFF0C\u91CD\u590D\u767B\u5F55\u4E0D\u91CD\u590D\u63D0\u793A"})\uFF0CToken=${mask(token)}\uFF0CAppId=${mask(appId)}`);
+    // 只有真正的全新账号才弹通知；同一设备重复登录静默合并，避免"打开页面一直提示已获取"
     if (isNew) $notification.post("\u4E2D\u56FD\u8054\u901A\u8D26\u53F7\u83B7\u53D6\u6210\u529F", `\u5DF2\u4FDD\u5B58\u7B2C ${list.length} \u4E2A\u8D26\u53F7`, `Token\uFF1A${mask(token)}
 AppId\uFF1A${appId ? mask(appId) : "\u672C\u6B21\u8BF7\u6C42\u672A\u643A\u5E26"}
 \u5B9A\u65F6\u4EFB\u52A1\u5C06\u81EA\u52A8\u4F7F\u7528\uFF0C\u65E0\u9700\u624B\u586B\u3002`);
