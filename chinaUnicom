@@ -11,6 +11,7 @@
 [Argument]
 cron = input,"0 7,20 * * *",tag=定时执行,desc=每天07:00和20:00执行
 capture = switch,true,tag=自动抓取账号,desc=退出并重新登录中国联通 App 后自动保存；多账号自动追加
+clearAllAccounts = switch,false,tag=清空全部账号,desc=开启后访问一次抓取页面即删除所有已保存账号；抓完后请关闭
 mode = select,"all","sign","ltzf","ttlxj","ttxc","market","security","cloud","woread","aiting","wostore","regional",tag=执行模块,desc=all 为执行全部已开启模块
 queryOnly = switch,false,tag=仅查询模式,desc=只查询资产和任务状态
 
@@ -48,7 +49,7 @@ wostoreMaxDraw = input,"1",tag=沃云积分抽奖上限,desc=默认 1 次
 
 [Script]
 # 登录请求抓取 token_online 和 appId；账号保存为数组，重复登录同账号会更新而不会重复添加
-http-request ^https:\/\/(?:m\.client\.10010\.com\/mobileService\/(?:onLine|login|v1\/login)\.htm|(?:loginxx|loginhl)\.10010\.com\/mobileService\/(?:onLine|login_vcode_member)\.htm) script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,requires-body=true,timeout=30,tag=🔵中国联通抓取账号,enable={capture}
+http-request ^https:\/\/(?:m\.client\.10010\.com\/mobileService\/(?:onLine|login|v1\/login)\.htm|(?:loginxx|loginhl)\.10010\.com\/mobileService\/(?:onLine|login_vcode_member)\.htm) script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,requires-body=true,timeout=30,tag=🔵中国联通抓取账号,enable={capture},argument=[{clearAllAccounts}]
 
 # 日常任务
 cron {cron} script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🔵中国联通自动任务,argument=[{mode},{queryOnly},{enableSign},{enableLtzf},{enableTtlxj},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{provinceOverride},{enableNotify},{marketTask},{marketMember},{marketDraw},{marketClaim},{grabCoupon},{grabAmount},{ahFriday},{ahAmount},{requestNode},{cloudImageFid},{cloudUploadName},{hometownEnable},{ttxcGarbageWait},{ttxcGrowMax},{wostoreMaxDraw}]
