@@ -1,38 +1,12 @@
 if (typeof $response === "undefined") {
   $done({});
 } else {
-
-  let body = $response.body || "";
-
-  try {
-
-    let obj = JSON.parse(body);
-
-    if (obj.respCode === "0211" || obj.respCode === 211) {
-
-      obj.respCode = "0000";
-
-      if (obj.respDesc) {
-        obj.respDesc = "成功";
-      }
-
-      if (obj.message) {
-        obj.message = "成功";
-      }
-
-      body = JSON.stringify(obj);
-    }
-
-  } catch (e) {
-
-    body = body
-      .replace(/"respCode"\s*:\s*"0211"/g, '"respCode":"0000"')
-      .replace(/"respCode"\s*:\s*0211/g, '"respCode":0000');
-
-  }
-
-  $done({
-    body
-  });
-
+  let body = String($response.body || "");
+  console.log("officialWhite url: " + ($request && $request.url ? $request.url : ""));
+  console.log("officialWhite body before: " + body);
+  body = body
+    .replace(/"respCode"\s*:\s*"0211"/g, '"respCode":"0000"')
+    .replace(/"respCode"\s*:\s*0211/g, '"respCode":"0000"');
+  console.log("officialWhite body after: " + body);
+  $done({ body });
 }
