@@ -1,0 +1,12 @@
+#!name=联通VoWiFi白名单修复
+#!desc=修改联通VoWiFi白名单检测返回状态
+#!author=LO
+#!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/China_Unicom.png
+
+[Script]
+
+http-response ^https:\/\/m\.client\.10010\.com\/edopinterface\/officialWhite\/checkOfficialWhitePhone script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/cccc, requires-body=true, timeout=10, tag=联通VoWiFi白名单
+
+[MITM]
+
+hostname = m.client.10010.com
