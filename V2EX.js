@@ -265,8 +265,17 @@ function doCheckin(attempt, maxRetry, headers) {
 }
 
 function extractCopper(balanceStr) {
-  var m = String(balanceStr || "").match(/(\d+)\s*铜币/);
-  return m ? parseInt(m[1], 10) : null;
+  var s = String(balanceStr || "");
+  var total = 0, found = false;
+  var re = /(\d+)\s*(金币|银币|铜币)/g, m;
+  while ((m = re.exec(s)) !== null) {
+    var n = parseInt(m[1], 10);
+    found = true;
+    if (m[2] === "金币") total += n * 10000;
+    else if (m[2] === "银币") total += n * 100;
+    else total += n;
+  }
+  return found ? total : null;
 }
 
 function fetchTopics(headers) {
@@ -343,7 +352,7 @@ function doRead(headers) {
           var finalCopper = extractCopper(final.balance);
           var delta = (baseCopper !== null && finalCopper !== null) ? finalCopper - baseCopper : null;
           var msg = "已读 " + done + " 篇，跳过 " + skipped + " 篇";
-          if (delta !== null) msg += "，铜币 " + (delta > 0 ? "+" : "") + delta;
+          if (delta !== null) msg += "，等价铜币 " + (delta > 0 ? "+" : "") + delta;
           console.log("📖 阅读完成，" + msg);
           notify("V2EX", "📖 阅读完成", msg);
         });
@@ -372,14 +381,13 @@ function getCookieAccountId(cookie) {
 }
 
 function notifyCookieSaved(username, cookie) {
-  username = String(username || "").trim();
-  if (!username) return false;
+  username = String(username || "").trim() || "V2EX";
   var accountId = getCookieAccountId(cookie) || username;
   var last = "";
   try { last = String($persistentStore.read("V2EX_LastNotifiedAccount") || ""); } catch (e) {}
   if (last === accountId) return false;
   try { $persistentStore.write(accountId, "V2EX_LastNotifiedAccount"); } catch (e) {}
-  notify("V2EX", "🎉" + username + " cookie存储成功", "");
+  notify("V2EX", "🎉" + username + " cookie获取成功", "");
   return true;
 }
 
@@ -398,7 +406,7 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
     $done({});
   }
 } else if (typeof $request !== "undefined" && $request && $request.headers) {
-  console.log("=== V2EX 抓包 ===");
+  console.log("=== 获取Cookie ===");
   var allHeaders = $request.headers || {};
   var cookie = allHeaders.Cookie || allHeaders.cookie || "";
   if (!isV2exLoginCookie(cookie)) {
@@ -407,6 +415,11 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
   } else {
     var changed = saveCookie(cookie);
     console.log("已捕获登录 Cookie，长度 " + cookie.length + (changed ? "，已更新" : "，内容未变化"));
+    if (changed) {
+      var savedUsername = "";
+      try { savedUsername = String($persistentStore.read("V2EX_Username") || ""); } catch (e) {}
+      notifyCookieSaved(savedUsername, cookie);
+    }
     $done({});
   }
 } else {
