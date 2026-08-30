@@ -385,11 +385,6 @@ function getCookieAccountId(cookie) {
 
 function notifyCookieSaved(username, cookie) {
   username = String(username || "").trim() || "V2EX";
-  var accountId = getCookieAccountId(cookie) || username;
-  var last = "";
-  try { last = String($persistentStore.read("V2EX_LastNotifiedAccount") || ""); } catch (e) {}
-  if (last === accountId) return false;
-  try { $persistentStore.write(accountId, "V2EX_LastNotifiedAccount"); } catch (e) {}
   notify("V2EX", "🎉" + username + " cookie获取成功", "");
   return true;
 }
