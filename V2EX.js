@@ -227,7 +227,11 @@ function formatDate(d) {
 }
 
 function formatCard(info, q) {
-  var lines = ["连续登录：" + (info.days || "?") + " 天", "当前余额：" + (q.balance || "未知"), ""];
+  var uname = "";
+  try { uname = String($persistentStore.read("V2EX_Username") || "").trim(); } catch (e) {}
+  var lines = [];
+  if (uname) lines.push("用户：" + uname);
+  lines.push("连续登录：" + (info.days || "?") + " 天", "当前余额：" + (q.balance || "未知"), "");
   var txns = q.transactions || [];
   if (txns.length > 0) {
     lines.push("📝 最近流水：");
