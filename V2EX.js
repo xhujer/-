@@ -157,11 +157,9 @@ function stripHtml(str) {
 }
 
 function parseProfile(html) {
-  var result = { nickname: "", balance: "", transactions: [] };
+  var result = { balance: "", transactions: [] };
   try {
     if (!html) return result;
-    var nickMatch = html.match(/\/member\/([A-Za-z0-9_-]+)/);
-    if (nickMatch) result.nickname = nickMatch[1];
 
     var parts = [];
     var balanceBlock = html.match(/class="balance_area bigger"[\s\S]*?<\/div>/);
@@ -218,7 +216,7 @@ function formatDate(d) {
 }
 
 function formatCard(info, q) {
-  var lines = ["用户昵称：" + (q.nickname || "未知"), "连续登录：" + (info.days || "?") + " 天", "当前余额：" + (q.balance || "未知"), ""];
+  var lines = ["连续登录：" + (info.days || "?") + " 天", "当前余额：" + (q.balance || "未知"), ""];
   var txns = q.transactions || [];
   if (txns.length > 0) {
     lines.push("📝 最近流水：");
@@ -402,13 +400,21 @@ function getCookieAccountId(cookie) {
 
 function notifyCookieSaved(username, cookie) {
   username = String(username || "").trim() || "V2EX";
-  var now = Date.now();
-  var last = 0;
-  try { last = Number($persistentStore.read("V2EX_LastNotifyAt") || 0); } catch (e) {}
-  if (now - last < 10000) return false;
-  try { $persistentStore.write(String(now), "V2EX_LastNotifyAt"); } catch (e) {}
+  var accountId = getCookieAccountId(cookie) || username;
+  var last = "";
+  try { last = String($persistentStore.read("V2EX_LastNotifiedAccount") || ""); } catch (e) {}
+  if (last === accountId) return false;
+  try { $persistentStore.write(accountId, "V2EX_LastNotifiedAccount"); } catch (e) {}
   notify("V2EX", "🎉" + username + " cookie获取成功", "");
   return true;
+}
+
+function isCaptureDone() {
+  try { return String($persistentStore.read("V2EX_CaptureDone") || "") === "1"; } catch (e) { return false; }
+}
+
+function markCaptureDone() {
+  try { $persistentStore.write("1", "V2EX_CaptureDone"); } catch (e) {}
 }
 
 if (typeof $response !== "undefined" && $response && typeof $response.body !== "undefined") {
@@ -427,21 +433,28 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
   }
 } else if (typeof $request !== "undefined" && $request && $request.headers) {
   console.log("=== V2EX 抓包 ===");
-  var allHeaders = $request.headers || {};
-  var cookie = allHeaders.Cookie || allHeaders.cookie || "";
-  if (!isV2exLoginCookie(cookie)) {
-    console.log("忽略未登录 Cookie（缺少 A2/A2O，仅有 PB3_SESSION 等匿名字段）");
+  if (isCaptureDone()) {
+    console.log("已抓取过 Cookie，本次跳过");
     $done({});
   } else {
-    var changed = saveCookie(cookie);
-    var purified = purifyCookie(cookie);
-    console.log("已捕获登录 Cookie，提纯后长度 " + purified.length + (changed ? "，已更新" : "，内容未变化"));
-    if (changed) {
-      var savedUsername = "";
-      try { savedUsername = String($persistentStore.read("V2EX_Username") || ""); } catch (e) {}
-      notifyCookieSaved(savedUsername, cookie);
+    var allHeaders = $request.headers || {};
+    var cookie = allHeaders.Cookie || allHeaders.cookie || "";
+    if (!isV2exLoginCookie(cookie)) {
+      console.log("忽略未登录 Cookie（缺少 A2/A2O，仅有 PB3_SESSION 等匿名字段）");
+      $done({});
+    } else {
+      var purified = purifyCookie(cookie);
+      var changed = saveCookie(cookie);
+      console.log("已捕获登录 Cookie，提纯后长度 " + purified.length + (changed ? "，已更新" : "，内容未变化"));
+      if (changed) {
+        var savedUsername = "";
+        try { savedUsername = String($persistentStore.read("V2EX_Username") || ""); } catch (e) {}
+        if (notifyCookieSaved(savedUsername, cookie)) {
+          markCaptureDone();
+        }
+      }
+      $done({});
     }
-    $done({});
   }
 } else {
   var scriptName = (typeof $script !== "undefined" && $script.name) || "";
