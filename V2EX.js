@@ -35,15 +35,37 @@ function isV2exLoginCookie(cookie) {
   return /(?:^|;\s*)A2O?=/i.test(String(cookie || ""));
 }
 
+// 提纯：只保留服务端登录相关字段，剔除 GA/语言/标签等噪声，避免无关字段变化导致重复判定
+function purifyCookie(cookie) {
+  var keep = ["A2", "A2O", "PB3_SESSION"];
+  var map = {};
+  var parts = String(cookie || "").split(";");
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i].trim();
+    if (!p) continue;
+    var idx = p.indexOf("=");
+    if (idx < 0) continue;
+    var name = p.slice(0, idx).trim();
+    var value = p.slice(idx + 1).trim();
+    if (keep.indexOf(name) !== -1 && value) map[name] = value;
+  }
+  var out = [];
+  for (var j = 0; j < keep.length; j++) {
+    if (map[keep[j]]) out.push(keep[j] + "=" + map[keep[j]]);
+  }
+  return out.join("; ");
+}
+
 function saveCookie(cookie) {
   try {
     if (!isV2exLoginCookie(cookie)) return false;
+    var purified = purifyCookie(cookie);
     var current = getStoredCookie();
     var currentId = getCookieAccountId(current);
-    var incomingId = getCookieAccountId(cookie);
+    var incomingId = getCookieAccountId(purified);
     var next = currentId && incomingId && currentId !== incomingId
-      ? cookie
-      : mergeSetCookies(current, String(cookie).split(";"));
+      ? purified
+      : mergeSetCookies(current, purified.split(";"));
     if (current === next) return false;
     $persistentStore.write(next, COOKIE_KEY);
     return true;
@@ -385,6 +407,11 @@ function getCookieAccountId(cookie) {
 
 function notifyCookieSaved(username, cookie) {
   username = String(username || "").trim() || "V2EX";
+  var now = Date.now();
+  var last = 0;
+  try { last = Number($persistentStore.read("V2EX_LastNotifyAt") || 0); } catch (e) {}
+  if (now - last < 10000) return false;
+  try { $persistentStore.write(String(now), "V2EX_LastNotifyAt"); } catch (e) {}
   notify("V2EX", "🎉" + username + " cookie获取成功", "");
   return true;
 }
