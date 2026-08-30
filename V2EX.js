@@ -194,10 +194,21 @@ function parseProfile(html) {
   } catch (e) { return result; }
 }
 
+function looksLoggedOut(html) {
+  var body = String(html || "");
+  var hasSignin = /(?:href|action)=["']\/signin(?:[?#][^"']*)?["']/i.test(body);
+  var hasSignout = /<a\b[^>]*\bhref=["']\/signout(?:[?#][^"']*)?["'][^>]*>/i.test(body);
+  return body.indexOf("需要先登录") !== -1 || body.indexOf("你要查看的页面需要先登录") !== -1 ||
+    (hasSignin && !hasSignout);
+}
+
 function getOnce(headers) {
   return fetchUrl("https://www.v2ex.com/mission/daily", headers).then(function (html) {
-    if (!html || html.indexOf("需要先登录") !== -1) return { once: "", logged_in: false, already: false, days: "?" };
-    if (/href="\/signin"/i.test(html) && !/href="\/signout"/i.test(html)) return { once: "", logged_in: false, already: false, days: "?" };
+    if (!html || looksLoggedOut(html)) return { once: "", logged_in: false, already: false, days: "?" };
+    var uname = extractUsernameFromHtml(html);
+    if (uname) {
+      try { $persistentStore.write(uname, "V2EX_Username"); } catch (e) {}
+    }
     var dm = html.match(/已连续登录\s*(\d+)\s*天/);
     var days = dm ? dm[1] : "?";
     if (html.indexOf("每日登录奖励已领取") !== -1) return { once: "", logged_in: true, already: true, days: days };
@@ -417,21 +428,7 @@ function markCaptureDone() {
   try { $persistentStore.write("1", "V2EX_CaptureDone"); } catch (e) {}
 }
 
-if (typeof $response !== "undefined" && $response && typeof $response.body !== "undefined") {
-  var responseHeaders = $response.headers || {};
-  var contentType = String(responseHeaders["Content-Type"] || responseHeaders["content-type"] || "");
-  if (contentType && contentType.toLowerCase().indexOf("text/html") === -1) {
-    $done({});
-  } else {
-    var responseUsername = extractUsernameFromHtml($response.body);
-    var responseCookie = getStoredCookie();
-    if (responseUsername && isV2exLoginCookie(responseCookie)) {
-      try { $persistentStore.write(responseUsername, "V2EX_Username"); } catch (e) {}
-      notifyCookieSaved(responseUsername, responseCookie);
-    }
-    $done({});
-  }
-} else if (typeof $request !== "undefined" && $request && $request.headers) {
+if (typeof $request !== "undefined" && $request && $request.headers) {
   console.log("=== V2EX 抓包 ===");
   if (isCaptureDone()) {
     console.log("已抓取过 Cookie，本次跳过");
