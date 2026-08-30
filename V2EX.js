@@ -30,7 +30,9 @@ function getStoredCookie() {
 }
 
 function isV2exLoginCookie(cookie) {
-  return /(?:^|;\s*)(?:A2O?|PB3_SESSION)=/i.test(String(cookie || ""));
+  // V2EX 真正登录凭证是 A2（核心）/ A2O（辅助），内部含 |48:<账号UUID>| 段。
+  // PB3_SESSION 是匿名会话（|11:PB3_SESSION|36:<IP>...|），不代表已登录，不能作为登录依据。
+  return /(?:^|;\s*)A2O?=/i.test(String(cookie || ""));
 }
 
 function saveCookie(cookie) {
@@ -376,7 +378,8 @@ function extractUsernameFromHtml(html) {
 }
 
 function getCookieAccountId(cookie) {
-  var m = String(cookie || "").match(/A2O?="?[^;]*\|48:([^|]+)\|/i);
+  // 从 A2/A2O 值中提取 |48:<base64账号UUID>| 段作为稳定账号标识
+  var m = String(cookie || "").match(/A2O?="?[^;]*?\|48:([^|]+)\|/i);
   return m ? m[1] : "";
 }
 
@@ -406,11 +409,11 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
     $done({});
   }
 } else if (typeof $request !== "undefined" && $request && $request.headers) {
-  console.log("=== 获取Cookie ===");
+  console.log("=== V2EX 抓包 ===");
   var allHeaders = $request.headers || {};
   var cookie = allHeaders.Cookie || allHeaders.cookie || "";
   if (!isV2exLoginCookie(cookie)) {
-    console.log("忽略不含 A2O/A2 的非登录 Cookie");
+    console.log("忽略未登录 Cookie（缺少 A2/A2O，仅有 PB3_SESSION 等匿名字段）");
     $done({});
   } else {
     var changed = saveCookie(cookie);
