@@ -61,13 +61,8 @@ function saveCookie(cookie) {
     if (!isV2exLoginCookie(cookie)) return false;
     var purified = purifyCookie(cookie);
     var current = getStoredCookie();
-    var currentId = getCookieAccountId(current);
-    var incomingId = getCookieAccountId(purified);
-    var next = currentId && incomingId && currentId !== incomingId
-      ? purified
-      : mergeSetCookies(current, purified.split(";"));
-    if (current === next) return false;
-    $persistentStore.write(next, COOKIE_KEY);
+    if (current === purified) return false;
+    $persistentStore.write(purified, COOKIE_KEY);
     return true;
   } catch (e) { return false; }
 }
@@ -439,7 +434,8 @@ if (typeof $response !== "undefined" && $response && typeof $response.body !== "
     $done({});
   } else {
     var changed = saveCookie(cookie);
-    console.log("已捕获登录 Cookie，长度 " + cookie.length + (changed ? "，已更新" : "，内容未变化"));
+    var purified = purifyCookie(cookie);
+    console.log("已捕获登录 Cookie，提纯后长度 " + purified.length + (changed ? "，已更新" : "，内容未变化"));
     if (changed) {
       var savedUsername = "";
       try { savedUsername = String($persistentStore.read("V2EX_Username") || ""); } catch (e) {}
