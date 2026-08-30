@@ -380,7 +380,7 @@ function doRead(headers) {
           var finalCopper = extractCopper(final.balance);
           var delta = (baseCopper !== null && finalCopper !== null) ? finalCopper - baseCopper : null;
           var msg = "已读 " + done + " 篇，跳过 " + skipped + " 篇";
-          if (delta !== null) msg += "，等价铜币 " + (delta > 0 ? "+" : "") + delta;
+          if (delta !== null) msg += "，铜币 " + (delta > 0 ? "+" : "") + delta;
           console.log("📖 阅读完成，" + msg);
           notify("V2EX", "📖 阅读完成", msg);
         });
