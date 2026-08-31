@@ -87,14 +87,20 @@ function mergeSetCookies(currentCookie, setCookieArr) {
   return merged.join("; ");
 }
 
-function fetchUrl(url, headers, retries) {
+function fetchUrl(url, headers, retries, referer) {
   if (retries === undefined) retries = 1;
   if (headers && headers["Cookie"]) {
     var latestCookie = getStoredCookie();
     if (isV2exLoginCookie(latestCookie)) headers["Cookie"] = latestCookie;
   }
+  var reqHeaders = headers;
+  if (referer) {
+    reqHeaders = {};
+    for (var hk in headers) reqHeaders[hk] = headers[hk];
+    reqHeaders["Referer"] = referer;
+  }
   return new Promise(function (resolve, reject) {
-    $httpClient.get({ url: url, headers: headers }, function (err, resp, data) {
+    $httpClient.get({ url: url, headers: reqHeaders }, function (err, resp, data) {
       var status = Number(resp && (resp.statusCode || resp.status) || 0);
       var retryable = Boolean(err) || status === 408 || status === 425 || status === 429 || status >= 500;
       var successful = status >= 200 && status < 300;
@@ -138,23 +144,28 @@ function stripHtml(str) {
 }
 
 function parseProfile(html) {
-  var result = { nickname: "", balance: "", transactions: [] };
+  var result = { nickname: "", gold: 0, silver: 0, bronze: 0, balance: "", transactions: [] };
   try {
     if (!html) return result;
     var nickMatch = html.match(/\/member\/([A-Za-z0-9_-]+)/);
     if (nickMatch) result.nickname = nickMatch[1];
 
-    var parts = [];
     var balanceBlock = html.match(/class="balance_area bigger"[\s\S]*?<\/div>/);
     if (balanceBlock) {
       var re = /(\d+)\s+<img[^>]+alt="([A-Z])"/g, m;
       while ((m = re.exec(balanceBlock[0])) !== null) {
-        if (m[2] === "G") parts.push(m[1] + " 金币");
-        if (m[2] === "S") parts.push(m[1] + " 银币");
-        if (m[2] === "B") parts.push(m[1] + " 铜币");
+        var n = parseInt(m[1], 10);
+        if (m[2] === "G") result.gold = n;
+        if (m[2] === "S") result.silver = n;
+        if (m[2] === "B") result.bronze = n;
       }
     }
-    result.balance = parts.join(", ") || "";
+    // 格式化显示：只列出非零币种，顺序 金币/银币/铜币
+    var parts = [];
+    if (result.gold > 0) parts.push(result.gold + " 金币");
+    if (result.silver > 0) parts.push(result.silver + " 银币");
+    if (result.bronze > 0) parts.push(result.bronze + " 铜币");
+    result.balance = parts.join(", ") || ("0 铜币");
 
     var rowRe = /<tr>[\s\S]*?<td class="d">([\s\S]*?)<\/td>[\s\S]*?<td class="d"[^>]*>([\s\S]*?)<\/td>[\s\S]*?<td class="d"[^>]*>([\s\S]*?)<\/td>[\s\S]*?<td class="d"[^>]*>([\s\S]*?)<\/td>[\s\S]*?<\/tr>/g;
     var rm;
@@ -179,13 +190,22 @@ function parseProfile(html) {
 
 function getOnce(headers) {
   return fetchUrl("https://www.v2ex.com/mission/daily", headers).then(function (html) {
-    if (!html || html.indexOf("需要先登录") !== -1) return { once: "", logged_in: false, already: false, days: "?" };
-    if (/href="\/signin"/i.test(html) && !/href="\/signout"/i.test(html)) return { once: "", logged_in: false, already: false, days: "?" };
-    var dm = html.match(/已连续登录\s*(\d+)\s*天/);
-    var days = dm ? dm[1] : "?";
-    if (html.indexOf("每日登录奖励已领取") !== -1) return { once: "", logged_in: true, already: true, days: days };
-    var om = html.match(/once\s*=\s*["']?(\d+)/);
-    return { once: om ? om[1] : "", logged_in: true, already: false, days: days };
+    var days = "";
+    var dm = html ? html.match(/已连续登录\s*(\d+)\s*天/) : null;
+    if (dm) days = dm[1];
+
+    if (!html || html.indexOf("需要先登录") !== -1 || html.indexOf("请先登录") !== -1 ||
+        (/href="\/signin"/i.test(html) && !/href="\/signout"/i.test(html))) {
+      return { state: "auth_required", days: days };
+    }
+    if (/验证码|captcha|你是机器人吗|cf-challenge|attention required/i.test(html)) {
+      return { state: "blocked", days: days };
+    }
+    var om = html.match(/mission\/daily\/redeem\?once=(\d+)/) || html.match(/redeem\?once=(\d+)/);
+    if (html.indexOf("每日登录奖励已领取") !== -1 || !om) {
+      return { state: "already_done", days: days };
+    }
+    return { state: "claimable", once: om[1], days: days };
   });
 }
 
@@ -212,12 +232,17 @@ function formatCard(info, q) {
 
 function doCheckin(attempt, maxRetry, headers) {
   return getOnce(headers).then(function (info) {
-    if (!info.logged_in) {
+    if (info.state === "auth_required") {
       console.log("❌ Cookie 已失效，请重新抓取");
       notify("V2EX", "❌ Cookie 已失效", "请重新登录并抓取 Cookie");
       return false;
     }
-    if (info.already) {
+    if (info.state === "blocked") {
+      console.log("⚠️ 触发验证码/风控，需人工处理");
+      notify("V2EX", "⚠️ 需要人工验证", "V2EX 出现验证码，请手动处理");
+      return false;
+    }
+    if (info.state === "already_done") {
       return queryBalance(headers).then(function (q) {
         var body = formatCard(info, q);
         console.log("📌 V2EX 每日签到\n今天已完成签到\n\n" + body);
@@ -225,28 +250,34 @@ function doCheckin(attempt, maxRetry, headers) {
         return true;
       });
     }
-    if (!info.once) {
-      if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
-      console.log("❌ 签到失败：未找到 once 码");
-      notify("V2EX", "❌ 签到失败", "未找到 once 码");
+    if (info.state !== "claimable") {
+      console.log("❌ 签到失败：无法解析签到页状态");
+      notify("V2EX", "❌ 签到失败", "无法解析签到页，页面结构可能已变");
       return false;
     }
-    return fetchUrl("https://www.v2ex.com/mission/daily/redeem?once=" + info.once, headers).then(function () {
+    return fetchUrl("https://www.v2ex.com/mission/daily/redeem?once=" + info.once, headers, undefined, "https://www.v2ex.com/mission/daily").then(function () {
       return getOnce(headers);
     }).then(function (checkInfo) {
-      if (!checkInfo.already) {
+      if (checkInfo.state !== "already_done") {
         if (attempt + 1 < maxRetry) return sleep(3000).then(function () { return doCheckin(attempt + 1, maxRetry, headers); });
-        console.log("❌ 签到失败：签到未生效");
+        console.log("❌ 签到失败：签到未生效（状态 " + checkInfo.state + "）");
         notify("V2EX", "❌ 签到失败", "签到未生效，请稍后重试");
         return false;
       }
       return queryBalance(headers).then(function (q) {
         var todayReward = "";
         if (q.transactions && q.transactions.length > 0) {
-          var t = q.transactions[0];
-          if (t.type.indexOf("每日登录奖励") !== -1) {
-            var n = parseFloat(t.amount);
-            if (!isNaN(n)) todayReward = "今日签到：" + (n > 0 ? "+" : "") + n + " 铜币";
+          for (var ti = 0; ti < q.transactions.length; ti++) {
+            var t = q.transactions[ti];
+            if (t.type.indexOf("每日登录奖励") === -1) continue;
+            var rm = String(t.amount).match(/(\d+)\s*(金币|银币|铜币)/);
+            if (rm) {
+              todayReward = "今日签到：" + rm[1] + " " + rm[2];
+            } else {
+              var n = parseFloat(t.amount);
+              if (!isNaN(n)) todayReward = "今日签到：" + (n > 0 ? "+" : "") + n + " 铜币";
+            }
+            break;
           }
         }
         var body = formatCard(checkInfo, q);
@@ -264,9 +295,26 @@ function doCheckin(attempt, maxRetry, headers) {
   });
 }
 
-function extractCopper(balanceStr) {
-  var m = String(balanceStr || "").match(/(\d+)\s*铜币/);
-  return m ? parseInt(m[1], 10) : null;
+function extractCopper(profile) {
+  // 输入可能是字符串（旧逻辑）或结构化对象（parseProfile 返回）
+  if (typeof profile === "object" && profile !== null) {
+    if (typeof profile.gold === "number") {
+      return profile.gold * 10000 + profile.silver * 100 + profile.bronze;
+    }
+    var s = profile.balance || "";
+  } else {
+    var s = profile || "";
+  }
+  var total = 0, found = false;
+  var re = /(\d+)\s*(金币|银币|铜币)/g, m;
+  while ((m = re.exec(String(s))) !== null) {
+    var n = parseInt(m[1], 10);
+    found = true;
+    if (m[2] === "金币") total += n * 10000;
+    else if (m[2] === "银币") total += n * 100;
+    else total += n;
+  }
+  return found ? total : null;
 }
 
 function fetchTopics(headers) {
@@ -298,9 +346,9 @@ function fetchTopics(headers) {
 
 function doRead(headers) {
   return queryBalance(headers).catch(function () {
-    return { balance: "" };
+    return { gold: 0, silver: 0, bronze: 0, balance: "" };
   }).then(function (base) {
-    var baseCopper = extractCopper(base.balance);
+    var baseCopper = extractCopper(base);
     return fetchTopics(headers).then(function (topics) {
       if (!topics.length) {
         notify("V2EX", "❌ 阅读失败", "未获取到帖子列表");
@@ -338,12 +386,12 @@ function doRead(headers) {
       }
       return chain.then(function () {
         return queryBalance(headers).catch(function () {
-          return { balance: "" };
+          return { gold: 0, silver: 0, bronze: 0, balance: "" };
         }).then(function (final) {
-          var finalCopper = extractCopper(final.balance);
+          var finalCopper = extractCopper(final);
           var delta = (baseCopper !== null && finalCopper !== null) ? finalCopper - baseCopper : null;
           var msg = "已读 " + done + " 篇，跳过 " + skipped + " 篇";
-          if (delta !== null) msg += "，铜币 " + (delta > 0 ? "+" : "") + delta;
+          if (delta !== null) msg += "，铜币 " + delta;
           console.log("📖 阅读完成，" + msg);
           notify("V2EX", "📖 阅读完成", msg);
         });
