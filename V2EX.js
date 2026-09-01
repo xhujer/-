@@ -297,8 +297,11 @@ function doCheckin(attempt, maxRetry, headers) {
 
 function extractCopper(profile) {
   // 输入可能是字符串（旧逻辑）或结构化对象（parseProfile 返回）
-  if (typeof profile === "object" && profile !== null) {
-    if (typeof profile.gold === "number") {
+  if (profile === null || profile === undefined) return null;
+  if (typeof profile === "object") {
+    if (typeof profile.gold === "number" && typeof profile.silver === "number" && typeof profile.bronze === "number") {
+      // 余额全 0 且 balance 为空，说明是"查询失败兜底"对象，视为未知（返回 null）
+      if (profile.gold === 0 && profile.silver === 0 && profile.bronze === 0 && !profile.balance) return null;
       return profile.gold * 10000 + profile.silver * 100 + profile.bronze;
     }
     var s = profile.balance || "";
