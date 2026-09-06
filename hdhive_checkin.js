@@ -1,5 +1,5 @@
 const NAME = "HDHive 自动签到";
-const BASE = "https://hdhive.com";
+const BASE = "https://re0.me";
 const HOME = `${BASE}/`;
 const ACTION_API = "https://hdhive.ckid.workers.dev/";
 const DEFAULT_UA =
@@ -386,7 +386,7 @@ async function getAction() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        domain: "hdhive.com",
+        domain: "re0.me",
         path: "/",
         actionName: "checkIn",
       }),
@@ -965,7 +965,7 @@ async function main() {
 
   if (!cookie) {
     throw new Error(
-      "尚未获取登录 Cookie；请启用插件并登录一次 hdhive.com"
+      "尚未获取登录 Cookie；请启用插件并登录一次 re0.me"
     );
   }
 
