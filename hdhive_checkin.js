@@ -1,7 +1,6 @@
 const NAME = "HDHive 自动签到";
 const BASE = "https://re0.me";
 const HOME = `${BASE}/`;
-const ACTION_API = "https://hdhive.ckid.workers.dev/";
 const DEFAULT_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) " +
   "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 " +
@@ -11,6 +10,11 @@ const CHECKIN_TREE =
   "%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue" +
   "%5D%7D%2Cnull%2Cnull%2Ctrue%5D";
 const POINTS_TREE = routeTree(["manager", "points-logs"]);
+
+// 站点最近一次已知的 checkIn Server Action ID（站点重新构建后会自动扫描刷新）
+const PINNED_ACTION = "40e54b034c6540e575cd6362e60ae236da33560534";
+const ACTION_SCAN_LIMIT = 60;
+const ACTION_SCAN_CONCURRENCY = 8;
 
 const KEY = {
   cookie: "hdhive_cookie_v15",
@@ -372,58 +376,99 @@ function validAction(value) {
   return /^[a-f0-9]{20,128}$/i.test(String(value || ""));
 }
 
-async function getAction() {
-  let errorMessage = "";
+function collectChunks(html) {
+  const found = [];
+  const patterns = [
+    /"(\/_next\/static\/[^"]+?\.js)"/g,
+    /(?:src|href)="([^"]*?\/_next\/static\/[^"]+?\.js)"/g,
+  ];
+  patterns.forEach((pattern) => {
+    let match;
+    while ((match = pattern.exec(html))) {
+      const path = match[1].replace(/&amp;/g, "&");
+      if (found.indexOf(path) === -1) found.push(path);
+    }
+  });
+  return found;
+}
 
-  try {
-    const response = await request("post", {
-      url: ACTION_API,
-      timeout: 18000,
+function actionFromChunk(text) {
+  const match = String(text || "").match(
+    /createServerReference\)?\(\s*"([0-9a-f]{32,64})"[\s\S]{0,240}?"checkIn"/
+  );
+  return match && validAction(match[1]) ? match[1] : "";
+}
+
+async function scanSiteAction(jar, ua, html) {
+  let source = String(html || "");
+  if (!source) {
+    const page = await request("get", {
+      url: `${HOME}?_loon_scan=${Date.now()}`,
+      timeout: 25000,
+      alpn: "h2",
       "auto-cookie": false,
       "auto-redirect": false,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        domain: "re0.me",
-        path: "/",
-        actionName: "checkIn",
-      }),
+      headers: documentHeaders(ua, jar),
     });
-
-    if (response.status !== 200) {
-      throw new Error(`Action 解析服务 HTTP ${response.status}`);
-    }
-
-    let value = null;
-    try {
-      value = JSON.parse(response.body);
-    } catch (_) {}
-
-    const candidates = [
-      typeof value === "string" ? value : "",
-      value && value.actionId,
-      value && value.data && value.data.actionId,
-      value && value.result && value.result.actionId,
-      (response.body.match(
-        /"actionId"\s*:\s*"([a-f0-9]{20,128})"/i
-      ) || [])[1],
-    ];
-    const action = candidates.find(validAction);
-
-    if (!action) throw new Error("Action 解析服务未返回有效 ID");
-    $persistentStore.write(String(action), KEY.action);
-    return { id: String(action), source: "dynamic" };
-  } catch (error) {
-    errorMessage = error && error.message ? error.message : String(error);
-    console.log(`[${NAME}] 动态 Action 获取失败: ${errorMessage}`);
+    jar.absorb(page.headers);
+    saveSession(jar);
+    source = page.body;
   }
 
+  const paths = collectChunks(source).slice(0, ACTION_SCAN_LIMIT);
+  console.log(`[${NAME}] 站点内解析 Action：候选 JS ${paths.length} 个`);
+
+  for (let start = 0; start < paths.length; start += ACTION_SCAN_CONCURRENCY) {
+    const batch = paths.slice(start, start + ACTION_SCAN_CONCURRENCY);
+    const bodies = await Promise.all(
+      batch.map((path) =>
+        request("get", {
+          url: /^https?:/i.test(path) ? path : BASE + path,
+          timeout: 15000,
+          alpn: "h2",
+          "auto-cookie": false,
+          "auto-redirect": false,
+          headers: documentHeaders(ua, jar, HOME),
+        })
+          .then((response) => (response.status === 200 ? response.body : ""))
+          .catch(() => "")
+      )
+    );
+    for (let index = 0; index < bodies.length; index += 1) {
+      const action = actionFromChunk(bodies[index]);
+      if (action) {
+        console.log(`[${NAME}] 命中 ${batch[index]}`);
+        return action;
+      }
+    }
+  }
+  return "";
+}
+
+async function getAction(jar, ua, html, forceScan) {
   const cached = $persistentStore.read(KEY.action) || "";
-  if (validAction(cached)) {
+
+  if (!forceScan && validAction(cached)) {
     console.log(`[${NAME}] 使用缓存的 Action ID`);
     return { id: cached, source: "cache" };
+  }
+
+  let errorMessage = "";
+  try {
+    const action = await scanSiteAction(jar, ua, html);
+    if (action) {
+      $persistentStore.write(action, KEY.action);
+      return { id: action, source: "site" };
+    }
+    errorMessage = "站点 JS 中未找到 checkIn Action ID";
+  } catch (error) {
+    errorMessage = error && error.message ? error.message : String(error);
+  }
+
+  if (validAction(PINNED_ACTION)) {
+    console.log(`[${NAME}] 站点解析失败(${errorMessage})，使用内置 Action ID`);
+    $persistentStore.write(PINNED_ACTION, KEY.action);
+    return { id: PINNED_ACTION, source: "pinned" };
   }
   throw new Error(errorMessage || "无法获取 checkIn Action ID");
 }
@@ -971,6 +1016,7 @@ async function main() {
 
   const jar = new CookieJar(cookie);
   const firstSession = await renewToken(jar, ua);
+  let pageHtml = firstSession.body;
   let before = mergeUsers(
     userFrom(firstSession.body),
     readJSON(KEY.user, null)
@@ -985,15 +1031,18 @@ async function main() {
   let source = "";
   let attempts = 0;
 
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
     attempts = attempt;
-    const action = await getAction();
+    const action = await getAction(jar, ua, pageHtml, attempt > 1);
     source = action.source;
     response = await submitCheckin(jar, ua, action.id, gamble);
     result = analyze(response);
 
-    if (result.retry && attempt === 1) {
+    if (result.retry && attempt < 3) {
+      // Action / Token 失效：丢弃缓存并重新从站点 JS 解析
+      $persistentStore.write("", KEY.action);
       const session = await renewToken(jar, ua);
+      pageHtml = session.body;
       before = mergeUsers(userFrom(session.body), before);
       continue;
     }
