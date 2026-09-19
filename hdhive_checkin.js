@@ -114,9 +114,9 @@ function setCookieLines(headers) {
   return result;
 }
 
-// Loon 文档形式 argument=[{gamble},{jitter}]：按声明顺序给位置参数
+// Loon 文档形式 argument=[{gamble}]：按声明顺序给位置参数
 function positional(values) {
-  const keys = ["gamble", "jitter"];
+  const keys = ["gamble"];
   const args = {};
   for (let index = 0; index < values.length && index < keys.length; index += 1) {
     args[keys[index]] = values[index];
@@ -547,7 +547,6 @@ async function getAction(jar, ua, html, forceScan) {
   const cached = $persistentStore.read(KEY.action) || "";
 
   if (!forceScan && validAction(cached)) {
-    console.log(`[${NAME}] 使用缓存的 Action ID`);
     return { id: cached, source: "cache" };
   }
 
@@ -1125,13 +1124,6 @@ async function main() {
   const args = getArgs();
   const gamble = bool(args.gamble);
   const mode = gamble ? "赌狗签到" : "普通签到";
-  // 逆向：站点的 cron 指纹之一就是"每天同一秒发起"，这里随机抖动一下
-  const jitter = Number(args.jitter === undefined ? 30 : args.jitter);
-  if (Number.isFinite(jitter) && jitter > 0) {
-    const waitMs = Math.floor(Math.random() * jitter * 1000);
-    console.log(`[${NAME}] 随机延迟 ${Math.round(waitMs / 1000)} 秒后开始`);
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
-  }
   const cookie = $persistentStore.read(KEY.cookie) || "";
   const ua = $persistentStore.read(KEY.ua) || DEFAULT_UA;
 
