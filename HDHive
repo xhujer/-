@@ -3,6 +3,8 @@
 #!author = Ming
 #!date = 2026-09-19
 #!icon = https://re0.me/favicon.ico
+#!system = iOS,iPadOS
+#!loon_version = 3.2.1(733)
 #!tag = HDHive
 
 [Argument]
@@ -16,9 +18,9 @@ gamble = switch,false,tag=赌狗签到
 
 [Script]
 
-http-request ^https:\/\/re0\.me\/ script-path=https://paste.rs/dyFRe,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
+http-request ^https:\/\/re0\.me\/ script-path=https://paste.rs/xMa5c,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
 
-cron {cron} script-path=https://paste.rs/dyFRe,timeout=180,tag=HDHive每日签到,argument=gamble={gamble}
+cron {cron} script-path=https://paste.rs/xMa5c,timeout=180,tag=HDHive每日签到,argument=gamble={gamble}
 
 [MITM]
 
