@@ -313,10 +313,16 @@ function request(method, options) {
   });
 }
 
-function isChallenge(status, body) {
+function isChallenge(status, body, headers) {
   const text = String(body || "").toLowerCase();
+  const head = headers || {};
+  const cfRay = String(getHeader(head, "cf-ray") || "");
+  const cfMitigated = String(getHeader(head, "cf-mitigated") || "");
   return (
     status === 503 ||
+    Boolean(cfMitigated) ||
+    (Boolean(cfRay) && status >= 400) ||
+    (status === 403 && text.includes("cloudflare")) ||
     text.includes("正在进行安全验证") ||
     text.includes("正在验证") ||
     text.includes("enable javascript and cookies") ||
@@ -366,18 +372,27 @@ async function renewToken(jar, ua) {
   jar.absorb(response.headers);
   saveSession(jar);
 
-  if (isChallenge(response.status, response.body)) {
-    throw new Error("首页触发浏览器安全检测，Token 自动续签失败");
+  if (isChallenge(response.status, response.body, response.headers)) {
+    const ray = String(getHeader(response.headers, "cf-ray") || "");
+    throw new Error(
+      `首页被 Cloudflare 安全拦截（HTTP ${response.status}${ray ? `，ray ${ray}` : ""}），` +
+        "这不是登录过期；请稍后或换个网络重试"
+    );
   }
 
   const location = String(getHeader(response.headers, "location") || "");
+  const body = String(response.body || "");
+  const shortBody = body.length > 0 && body.length < 4096 && !/<!doctype|<html/i.test(body);
   if (
     response.status === 401 ||
     response.status === 403 ||
     /\/login(?:[/?#]|$)/i.test(location) ||
-    /请先登录|登录已失效|未登录/.test(response.body)
+    (shortBody && /请先登录|登录已失效|未登录/.test(body))
   ) {
-    throw new Error("长期登录 Cookie 已失效，请重新登录一次 HDHive");
+    throw new Error(
+      `长期登录 Cookie 已失效（HTTP ${response.status}` +
+        `${location ? `，跳转 ${location}` : ""}，正文 ${body.length} 字节），请重新登录一次 HDHive`
+    );
   }
 
   if (!jar.has("hdh_sa_token")) {
