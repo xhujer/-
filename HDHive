@@ -19,9 +19,9 @@ cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录或访问 re0.me 
 
 [Script]
 
-http-request ^https:\/\/re0\.me\/ script-path=https://paste.rs/d2UWj,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
+http-request ^https:\/\/re0\.me\/ script-path=https://paste.rs/tlguS,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
 
-cron "{cron}" script-path=https://paste.rs/d2UWj,timeout=180,tag=HDHive每日签到,argument=[{gamble}]
+cron "{cron}" script-path=https://paste.rs/tlguS,timeout=180,tag=HDHive每日签到,argument=[{gamble}]
 
 [Mitm]
 
