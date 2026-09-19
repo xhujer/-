@@ -321,7 +321,6 @@ function isChallenge(status, body, headers) {
   return (
     status === 503 ||
     Boolean(cfMitigated) ||
-    (Boolean(cfRay) && status >= 400) ||
     (status === 403 && text.includes("cloudflare")) ||
     text.includes("正在进行安全验证") ||
     text.includes("正在验证") ||
@@ -375,8 +374,7 @@ async function renewToken(jar, ua) {
   if (isChallenge(response.status, response.body, response.headers)) {
     const ray = String(getHeader(response.headers, "cf-ray") || "");
     throw new Error(
-      `首页被 Cloudflare 安全拦截（HTTP ${response.status}${ray ? `，ray ${ray}` : ""}），` +
-        "这不是登录过期；请稍后或换个网络重试"
+      `首页被 Cloudflare 安全拦截（HTTP ${response.status}${ray ? `，ray ${ray}` : ""}）`
     );
   }
 
