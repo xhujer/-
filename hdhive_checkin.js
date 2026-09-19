@@ -11,7 +11,6 @@ const CHECKIN_TREE =
   "%5D%7D%2Cnull%2Cnull%2Ctrue%5D";
 const POINTS_TREE = routeTree(["manager", "points-logs"]);
 
-// 站点最近一次已知的 checkIn Server Action ID（站点重新构建后会自动扫描刷新）
 const PINNED_ACTION = "40e54b034c6540e575cd6362e60ae236da33560534";
 const ACTION_SCAN_LIMIT = 60;
 const ACTION_SCAN_CONCURRENCY = 8;
@@ -114,7 +113,6 @@ function setCookieLines(headers) {
   return result;
 }
 
-// Loon 文档形式 argument=[{gamble}]：按声明顺序给位置参数
 function positional(values) {
   const keys = ["gamble"];
   const args = {};
@@ -392,7 +390,6 @@ function validAction(value) {
   return /^[a-f0-9]{20,128}$/i.test(String(value || ""));
 }
 
-// 记住上次命中的 chunk 文件名前缀（如 9689），下次优先拉它，通常一次就能命中
 function chunkBase(path) {
   return String(path || "").split("/").pop();
 }
@@ -490,7 +487,6 @@ async function scanSiteAction(jar, ua, html) {
 
   let paths = collectChunks(sources[0] || "");
   if (paths.length === 0) {
-    // 首次没拿到候选（首页被重定向 / 返回的是空壳），再抓一次首页与账户页
     const targets = [
       `${HOME}?_loon_scan=${Date.now()}`,
       `${BASE}/manager/account?_loon_scan=${Date.now()}`,
@@ -665,7 +661,6 @@ function analyze(response) {
       .filter((value, index, array) => value && array.indexOf(value) === index)
       .join("：");
 
-  // 框架给出的明确信号：动作 ID 失效（比正文正则可靠）
   if (
     response.status === 404 ||
     getHeader(headers, "x-nextjs-action-not-found") ||
@@ -679,7 +674,6 @@ function analyze(response) {
     return { ok: false, retry: false, kind: "challenge", status: response.status, detail: "签到请求触发浏览器安全检测" };
   }
 
-  // 短期动作令牌过期 → 换新 token 重试
   if (response.status === 409 || /action_token_invalid/.test(lower) || /action token invalid/.test(lower)) {
     return { ok: false, retry: true, kind: "token", status: response.status, detail: "短期 Action Token 已失效" };
   }
@@ -707,9 +701,6 @@ function analyze(response) {
     return { ok: true, retry: false, kind: "success", status: response.status, detail, verified: true };
   }
 
-  // 兜底只在「正文很短且不是 HTML」时启用：
-  // 站点的动作响应可能是 148KB 的整页数据，页面文案里本来就含"签到成功""success":true，
-  // 直接做文本匹配会把"没签到"误判成成功（2026-09-19 实测踩到）。
   const shortPlain = text.length > 0 && text.length < 4096 && !/<!doctype|<html/i.test(text);
   if (shortPlain && /你已经签到过了|明天再来吧|今日已签到|已经签到/.test(text)) {
     return { ok: true, retry: false, kind: "already", status: response.status, detail: jsonField(text, "description") || "今天已经签到过了" };
@@ -833,7 +824,6 @@ async function queryAccount(jar, ua) {
 function normalizeRecord(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
 
-  // 站点实测字段：change_type / points / remark / created_at
   const description =
     clean(
       value.remark ||
@@ -996,8 +986,8 @@ function rewardFrom(result, body, before, after) {
   return null;
 }
 
-function saveHistory(server, current, already) {
-  const stored = readJSON(KEY.history, []);
+function saveHistory(server, current, already, trustServer) {
+  const stored = trustServer ? [] : readJSON(KEY.history, []);
   let values = [];
   if (Array.isArray(server)) values = values.concat(server);
   if (current && (!already || values.length === 0)) values.push(current);
@@ -1030,8 +1020,6 @@ async function loadPoints(result, response, before, jar, ua) {
 
   const reward = rewardFrom(result, response.body, before, user);
   const server = await queryPointLogs(jar, ua);
-  // 只有真正解析到服务端动作返回值、且拿到正奖励时才记一条；
-  // 否则宁可不记，也不要伪造出「获得 0 积分」这种假流水（2026-09-19 踩过）。
   const current =
     result.kind === "success" && result.verified
       ? reward !== null && reward > 0
@@ -1041,7 +1029,8 @@ async function loadPoints(result, response, before, jar, ua) {
   const history = saveHistory(
     server,
     current,
-    result.kind === "already"
+    result.kind === "already",
+    server.length > 0
   );
 
   writeJSON(KEY.user, user);
@@ -1181,7 +1170,6 @@ async function main() {
   let source = "";
   let attempts = 0;
 
-  // 站点重新构建过 → 缓存的动作 ID 必然失效，直接重扫，不必先撞一次 404
   let forceScan = cachedChunkStale(pageHtml);
   if (forceScan) console.log(`[${NAME}] 检测到站点已重新构建，直接重新解析 Action ID`);
 
@@ -1191,15 +1179,15 @@ async function main() {
     source = action.source;
     response = await submitCheckin(jar, ua, action.id, gamble);
     result = analyze(response);
-    console.log(
-      `[${NAME}] POST ${response.status} len=${String(response.body || "").length} ` +
-        `kind=${result.kind}${result.verified ? " (verified)" : ""}`
-    );
+    if (result.kind !== "success" && result.kind !== "already") {
+      console.log(
+        `[${NAME}] POST ${response.status} len=${String(response.body || "").length} ` +
+          `kind=${result.kind}${result.verified ? " (verified)" : ""}`
+      );
+    }
 
     if (result.retry && attempt < 3) {
-      // 动作 ID 失效才丢缓存重扫；令牌失效只需换新 token 重发
       forceScan = result.kind === "action";
-      // 官方文档：删除键要写 undefined，空字符串/0/false 行为不一致
       if (forceScan) $persistentStore.write(undefined, KEY.action);
       const session = await renewToken(jar, ua);
       pageHtml = session.body;
@@ -1271,7 +1259,6 @@ if (typeof $request !== "undefined") {
   main()
     .then((result) => {
       console.log(result.log);
-      // attach 支持 openUrl：文档 $notification.post(title, subtitle, content, attach, delay)
       if (result.attach) $notification.post(NAME, result.title, result.message, result.attach);
       else $notification.post(NAME, result.title, result.message);
     })
