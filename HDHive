@@ -1,10 +1,8 @@
 #!name = HDHive 自动签到
 #!desc = 自动获取Cookie 并执行每日签到
-#!author = Ming / patched by Minis
+#!author = Ming
 #!date = 2026-09-19
 #!icon = https://re0.me/favicon.ico
-#!system = iOS,iPadOS
-#!loon_version = 3.2.1(733)
 #!tag = HDHive
 
 [Argument]
