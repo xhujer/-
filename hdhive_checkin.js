@@ -319,6 +319,11 @@ function isChallenge(status, body) {
   const text = String(body || "").toLowerCase();
   return (
     status === 503 ||
+    text.includes("正在进行安全验证") ||
+    text.includes("正在验证") ||
+    text.includes("enable javascript and cookies") ||
+    text.includes("cdn-cgi/challenge-platform") ||
+    text.includes("cf_chl_opt") ||
     text.includes("正在检测浏览器安全能力") ||
     text.includes("just a moment") ||
     text.includes("checking your browser") ||
@@ -601,24 +606,50 @@ async function submitCheckin(jar, ua, action, gamble) {
   return response;
 }
 
-function actionPayload(body) {
-  // RSC 数据行形如 `1:{"error":{...}}` / `1:{"response":{...}}`
-  const text = decodeText(body);
-  const lines = text.split("\n");
-  let best = null;
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const colon = line.indexOf(":");
-    if (colon <= 0 || colon > 8) continue;
-    if (!/^[0-9a-f]+$/i.test(line.slice(0, colon))) continue;
-    const rest = line.slice(colon + 1).trim();
-    if (rest[0] !== "{") continue;
-    try {
-      const value = JSON.parse(rest);
-      if (value && (value.response || value.error)) best = value;
-    } catch (_) {}
+function jsonAt(text, start) {
+  const open = text[start];
+  if (open !== "{" && open !== "[") return null;
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === open) depth += 1;
+    else if (character === close) {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, index + 1));
+        } catch (_) {
+          return null;
+        }
+      }
+    }
   }
-  return best;
+  return null;
+}
+
+/** 只认服务端动作返回值本身：{response:{...}} / {error:{...}}，与所在行格式无关 */
+function actionPayload(body) {
+  const text = decodeText(body);
+  for (let markerIndex = 0; markerIndex < 2; markerIndex += 1) {
+    const marker = markerIndex === 0 ? '{"error"' : '{"response"';
+    let at = text.indexOf(marker);
+    while (at >= 0) {
+      const value = jsonAt(text, at);
+      if (value && (value.error || value.response)) return value;
+      at = text.indexOf(marker, at + 1);
+    }
+  }
+  return null;
 }
 
 function analyze(response) {
@@ -671,19 +702,22 @@ function analyze(response) {
   if (response2) {
     const detail = detailOf(response2) || "签到成功";
     if (/已经签到|明天再来/.test(detail)) {
-      return { ok: true, retry: false, kind: "already", status: response.status, detail };
+      return { ok: true, retry: false, kind: "already", status: response.status, detail, verified: true };
     }
-    return { ok: true, retry: false, kind: "success", status: response.status, detail };
+    return { ok: true, retry: false, kind: "success", status: response.status, detail, verified: true };
   }
 
-  // 兜底：正文启发式（RSC 结构若变动仍有判断力）
-  if (/你已经签到过了|明天再来吧|今日已签到|已经签到/.test(text)) {
+  // 兜底只在「正文很短且不是 HTML」时启用：
+  // 站点的动作响应可能是 148KB 的整页数据，页面文案里本来就含"签到成功""success":true，
+  // 直接做文本匹配会把"没签到"误判成成功（2026-09-19 实测踩到）。
+  const shortPlain = text.length > 0 && text.length < 4096 && !/<!doctype|<html/i.test(text);
+  if (shortPlain && /你已经签到过了|明天再来吧|今日已签到|已经签到/.test(text)) {
     return { ok: true, retry: false, kind: "already", status: response.status, detail: jsonField(text, "description") || "今天已经签到过了" };
   }
-  if (/"success"\s*:\s*true/i.test(text) || /签到成功|签到奖励|获得.{0,20}积分/.test(text)) {
+  if (shortPlain && (/"success"\s*:\s*true/i.test(text) || /签到成功|签到奖励|获得.{0,20}积分/.test(text))) {
     return { ok: true, retry: false, kind: "success", status: response.status, detail: jsonField(text, "message") || "签到成功" };
   }
-  if (response.status === 401 || /请先登录|未登录|登录已失效|unauthorized/i.test(text)) {
+  if (response.status === 401 || (shortPlain && /请先登录|未登录|登录已失效|unauthorized/i.test(text))) {
     return { ok: false, retry: false, kind: "login", status: response.status, detail: "登录状态已失效，请重新登录一次 HDHive" };
   }
   return {
@@ -996,16 +1030,13 @@ async function loadPoints(result, response, before, jar, ua) {
 
   const reward = rewardFrom(result, response.body, before, user);
   const server = await queryPointLogs(jar, ua);
+  // 只有真正解析到服务端动作返回值、且拿到正奖励时才记一条；
+  // 否则宁可不记，也不要伪造出「获得 0 积分」这种假流水（2026-09-19 踩过）。
   const current =
-    result.kind === "success"
-      ? {
-          time: formatTime(new Date()),
-          change: reward,
-          description:
-            reward === null
-              ? result.detail || "签到成功"
-              : `签到成功，获得 ${reward} 积分`,
-        }
+    result.kind === "success" && result.verified
+      ? reward !== null && reward > 0
+        ? { time: formatTime(new Date()), change: reward, description: `签到成功，获得 ${reward} 积分` }
+        : { time: formatTime(new Date()), change: null, description: result.detail || "签到成功" }
       : null;
   const history = saveHistory(
     server,
@@ -1160,6 +1191,10 @@ async function main() {
     source = action.source;
     response = await submitCheckin(jar, ua, action.id, gamble);
     result = analyze(response);
+    console.log(
+      `[${NAME}] POST ${response.status} len=${String(response.body || "").length} ` +
+        `kind=${result.kind}${result.verified ? " (verified)" : ""}`
+    );
 
     if (result.retry && attempt < 3) {
       // 动作 ID 失效才丢缓存重扫；令牌失效只需换新 token 重发
