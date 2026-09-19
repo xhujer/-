@@ -9,7 +9,7 @@
 
 [Argument]
 
-cron = input,"0 7 * * *",tag=签到时间,desc=必须 5 段：分 时 日 月 周；例如 0 7 * * * 表示每天 7:00
+cron = input,"0 7 * * * 
 
 cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录或访问 re0.me 时自动保存长期登录 Cookie
 
@@ -18,9 +18,9 @@ gamble = switch,false,tag=赌狗签到,desc=关闭时为普通签到；开启后
 
 [Script]
 
-http-request ^https:\/\/re0\.me\/ script-path=https://paste.rs/tlguS,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
+http-request ^https:\/\/re0\.me\/ script-path=https://paste.rs/7NAEw,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
 
-cron {cron} script-path=https://paste.rs/tlguS,timeout=180,tag=HDHive每日签到,argument=gamble={gamble}
+cron {cron} script-path=https://paste.rs/7NAEw,timeout=180,tag=HDHive每日签到,argument=gamble={gamble}
 
 [MITM]
 
