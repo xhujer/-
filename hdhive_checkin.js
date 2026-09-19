@@ -25,6 +25,7 @@ const KEY = {
   history: "hdhive_sign_history_v2",
   flow: "hdhive_points_flow_v4",
   report: "hdhive_checkin_report_v1",
+  chunk: "hdhive_chunk_v1",
 };
 
 class CookieJar {
@@ -113,11 +114,21 @@ function setCookieLines(headers) {
   return result;
 }
 
+// Loon 文档形式 argument=[{gamble},{jitter}]：按声明顺序给位置参数
+function positional(values) {
+  const keys = ["gamble", "jitter"];
+  const args = {};
+  for (let index = 0; index < values.length && index < keys.length; index += 1) {
+    args[keys[index]] = values[index];
+  }
+  return args;
+}
+
 function getArgs() {
   if (typeof $argument === "undefined" || $argument === null) return {};
   if (typeof $argument === "object") {
     return Array.isArray($argument)
-      ? { gamble: $argument[0] }
+      ? positional($argument)
       : $argument;
   }
 
@@ -127,7 +138,7 @@ function getArgs() {
   if (text[0] === "{" || text[0] === "[") {
     try {
       const value = JSON.parse(text);
-      return Array.isArray(value) ? { gamble: value[0] } : value;
+      return Array.isArray(value) ? positional(value) : value;
     } catch (_) {}
   }
 
@@ -376,19 +387,54 @@ function validAction(value) {
   return /^[a-f0-9]{20,128}$/i.test(String(value || ""));
 }
 
+// 记住上次命中的 chunk 文件名前缀（如 9689），下次优先拉它，通常一次就能命中
+function chunkBase(path) {
+  return String(path || "").split("/").pop();
+}
+
+/** 逆向结论：首页列出的 chunk 文件名带构建哈希；缓存那份不在列表里 = 站点重新构建过 */
+function cachedChunkStale(html) {
+  const cached = $persistentStore.read(KEY.chunk) || "";
+  if (!cached || !html) return false;
+  const listed = collectChunks(html);
+  if (!listed.length) return false;
+  const want = chunkBase(cached);
+  return !listed.some((path) => chunkBase(path) === want);
+}
+
+function chunkPrefix(path) {
+  const name = String(path || "").split("/").pop();
+  return name.indexOf("-") > 0 ? name.split("-")[0] : "";
+}
+
+function preferKnownChunk(paths) {
+  const known = chunkPrefix($persistentStore.read(KEY.chunk) || "");
+  if (!known) return paths;
+  return paths
+    .slice()
+    .sort((first, second) =>
+      (chunkPrefix(first) === known ? 0 : 1) - (chunkPrefix(second) === known ? 0 : 1)
+    );
+}
+function normalizeBody(text) {
+  return String(text || "")
+    .replace(/\\u002[fF]/g, "/")
+    .replace(/\\\//g, "/")
+    .replace(/&#x2[fF];/g, "/")
+    .replace(/&#47;/g, "/")
+    .replace(/&amp;/g, "&");
+}
+
 function collectChunks(html) {
+  const source = normalizeBody(html);
   const found = [];
-  const patterns = [
-    /"(\/_next\/static\/[^"]+?\.js)"/g,
-    /(?:src|href)="([^"]*?\/_next\/static\/[^"]+?\.js)"/g,
-  ];
-  patterns.forEach((pattern) => {
-    let match;
-    while ((match = pattern.exec(html))) {
-      const path = match[1].replace(/&amp;/g, "&");
-      if (found.indexOf(path) === -1) found.push(path);
-    }
-  });
+  const pattern = /\/_next\/static\/[^\s"'<>;\\]+?\.js/g;
+  let match;
+  while ((match = pattern.exec(source))) {
+    const path = match[0].replace(/[?&].*$/, "");
+    if (path.indexOf("/_next/static/") !== 0) continue;
+    if (found.indexOf(path) === -1) found.push(path);
+  }
   return found;
 }
 
@@ -399,45 +445,97 @@ function actionFromChunk(text) {
   return match && validAction(match[1]) ? match[1] : "";
 }
 
-async function scanSiteAction(jar, ua, html) {
-  let source = String(html || "");
-  if (!source) {
-    const page = await request("get", {
-      url: `${HOME}?_loon_scan=${Date.now()}`,
-      timeout: 25000,
+async function fetchDocument(jar, ua, url) {
+  const response = await request("get", {
+    url,
+    timeout: 25000,
+    alpn: "h2",
+    "auto-cookie": false,
+    "auto-redirect": true,
+    headers: documentHeaders(ua, jar, HOME),
+  });
+  jar.absorb(response.headers);
+  saveSession(jar);
+  console.log(
+    `[${NAME}] 抓取 ${url.replace(BASE, "")} -> HTTP ${response.status}，` +
+      `长度 ${String(response.body || "").length}`
+  );
+  return response;
+}
+
+async function fetchChunk(jar, ua, path) {
+  try {
+    const response = await request("get", {
+      url: /^https?:/i.test(path) ? path : BASE + path,
+      timeout: 15000,
       alpn: "h2",
       "auto-cookie": false,
       "auto-redirect": false,
-      headers: documentHeaders(ua, jar),
+      headers: documentHeaders(ua, jar, HOME),
     });
-    jar.absorb(page.headers);
-    saveSession(jar);
-    source = page.body;
+    return response.status === 200 ? response.body : "";
+  } catch (error) {
+    return "";
+  }
+}
+
+async function scanSiteAction(jar, ua, html) {
+  const sources = [];
+  if (html) sources.push(String(html));
+
+  let paths = collectChunks(sources[0] || "");
+  if (paths.length === 0) {
+    // 首次没拿到候选（首页被重定向 / 返回的是空壳），再抓一次首页与账户页
+    const targets = [
+      `${HOME}?_loon_scan=${Date.now()}`,
+      `${BASE}/manager/account?_loon_scan=${Date.now()}`,
+    ];
+    for (let index = 0; index < targets.length && paths.length === 0; index += 1) {
+      try {
+        const page = await fetchDocument(jar, ua, targets[index]);
+        sources.push(String(page.body || ""));
+        paths = collectChunks(page.body);
+      } catch (error) {
+        console.log(
+          `[${NAME}] 抓取失败: ${error && error.message ? error.message : error}`
+        );
+      }
+    }
   }
 
-  const paths = collectChunks(source).slice(0, ACTION_SCAN_LIMIT);
   console.log(`[${NAME}] 站点内解析 Action：候选 JS ${paths.length} 个`);
+  if (paths.length === 0) {
+    const sample = String(sources[sources.length - 1] || "")
+      .replace(/\s+/g, " ")
+      .slice(0, 160);
+    console.log(`[${NAME}] 首页样本: ${sample}`);
+    return "";
+  }
 
-  for (let start = 0; start < paths.length; start += ACTION_SCAN_CONCURRENCY) {
-    const batch = paths.slice(start, start + ACTION_SCAN_CONCURRENCY);
-    const bodies = await Promise.all(
-      batch.map((path) =>
-        request("get", {
-          url: /^https?:/i.test(path) ? path : BASE + path,
-          timeout: 15000,
-          alpn: "h2",
-          "auto-cookie": false,
-          "auto-redirect": false,
-          headers: documentHeaders(ua, jar, HOME),
-        })
-          .then((response) => (response.status === 200 ? response.body : ""))
-          .catch(() => "")
-      )
-    );
+  let list = preferKnownChunk(paths).slice(0, ACTION_SCAN_LIMIT);
+
+  const known = chunkPrefix($persistentStore.read(KEY.chunk) || "");
+  const retry = known
+    ? list.filter((path) => chunkPrefix(path) === known)[0]
+    : "";
+  if (retry) {
+    console.log(`[${NAME}] 先试探上次命中的 chunk`);
+    const action = actionFromChunk(await fetchChunk(jar, ua, retry));
+    if (action) {
+      console.log(`[${NAME}] 命中 ${retry}`);
+      return action;
+    }
+    list = list.filter((path) => path !== retry);
+  }
+
+  for (let start = 0; start < list.length; start += ACTION_SCAN_CONCURRENCY) {
+    const batch = list.slice(start, start + ACTION_SCAN_CONCURRENCY);
+    const bodies = await Promise.all(batch.map((path) => fetchChunk(jar, ua, path)));
     for (let index = 0; index < bodies.length; index += 1) {
       const action = actionFromChunk(bodies[index]);
       if (action) {
         console.log(`[${NAME}] 命中 ${batch[index]}`);
+        $persistentStore.write(batch[index], KEY.chunk);
         return action;
       }
     }
@@ -504,98 +602,98 @@ async function submitCheckin(jar, ua, action, gamble) {
   return response;
 }
 
+function actionPayload(body) {
+  // RSC 数据行形如 `1:{"error":{...}}` / `1:{"response":{...}}`
+  const text = decodeText(body);
+  const lines = text.split("\n");
+  let best = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const colon = line.indexOf(":");
+    if (colon <= 0 || colon > 8) continue;
+    if (!/^[0-9a-f]+$/i.test(line.slice(0, colon))) continue;
+    const rest = line.slice(colon + 1).trim();
+    if (rest[0] !== "{") continue;
+    try {
+      const value = JSON.parse(rest);
+      if (value && (value.response || value.error)) best = value;
+    } catch (_) {}
+  }
+  return best;
+}
+
 function analyze(response) {
+  const headers = response.headers || {};
   const text = decodeText(response.body);
   const lower = text.toLowerCase();
-  const message = jsonField(text, "message");
-  const description = jsonField(text, "description");
-  const detail = [message, description]
-    .map(clean)
-    .filter((value, index, array) => value && array.indexOf(value) === index)
-    .join("：");
+  const payload = actionPayload(response.body);
+  const error = payload && payload.error ? payload.error : null;
+  const response2 = payload && payload.response ? payload.response : null;
+  const code = error && error.code !== undefined ? String(error.code) : "";
+  const detailOf = (obj) =>
+    [clean(obj && obj.message), clean(obj && obj.description)]
+      .filter((value, index, array) => value && array.indexOf(value) === index)
+      .join("：");
 
-  if (
-    response.status === 409 ||
-    lower.includes("action_token_invalid") ||
-    lower.includes("action token invalid")
-  ) {
-    return {
-      ok: false,
-      retry: true,
-      kind: "token",
-      status: response.status,
-      detail: "短期 Action Token 已失效",
-    };
-  }
-
+  // 框架给出的明确信号：动作 ID 失效（比正文正则可靠）
   if (
     response.status === 404 ||
+    getHeader(headers, "x-nextjs-action-not-found") ||
     lower.includes("server action not found") ||
     lower.includes("failed to find server action")
   ) {
-    return {
-      ok: false,
-      retry: true,
-      kind: "action",
-      status: response.status,
-      detail: "当前 Server Action 已更新",
-    };
+    return { ok: false, retry: true, kind: "action", status: response.status, detail: "当前 Server Action 已更新" };
   }
 
   if (isChallenge(response.status, text)) {
-    return {
-      ok: false,
-      retry: false,
-      kind: "challenge",
-      status: response.status,
-      detail: "签到请求触发浏览器安全检测",
-    };
+    return { ok: false, retry: false, kind: "challenge", status: response.status, detail: "签到请求触发浏览器安全检测" };
   }
 
+  // 短期动作令牌过期 → 换新 token 重试
+  if (response.status === 409 || /action_token_invalid/.test(lower) || /action token invalid/.test(lower)) {
+    return { ok: false, retry: true, kind: "token", status: response.status, detail: "短期 Action Token 已失效" };
+  }
+
+  if (error) {
+    const detail = detailOf(error) || "服务返回了错误";
+    const blob = `${code} ${detail}`.toLowerCase();
+    if (/你已经签到过了|明天再来吧|今日已签到|已经签到/.test(detail)) {
+      return { ok: true, retry: false, kind: "already", status: response.status, detail };
+    }
+    if (/account_dormant/.test(blob)) {
+      return { ok: false, retry: false, kind: "dormant", status: response.status, detail: detail || "账号处于休眠状态" };
+    }
+    if (code === "401" || /session_user_mismatch|请先登录|未登录|登录已失效|unauthorized/.test(blob)) {
+      return { ok: false, retry: false, kind: "login", status: response.status, detail: detail || "登录状态已失效，请重新登录一次 HDHive" };
+    }
+    return { ok: false, retry: false, kind: "unknown", status: response.status, detail };
+  }
+
+  if (response2) {
+    const detail = detailOf(response2) || "签到成功";
+    if (/已经签到|明天再来/.test(detail)) {
+      return { ok: true, retry: false, kind: "already", status: response.status, detail };
+    }
+    return { ok: true, retry: false, kind: "success", status: response.status, detail };
+  }
+
+  // 兜底：正文启发式（RSC 结构若变动仍有判断力）
   if (/你已经签到过了|明天再来吧|今日已签到|已经签到/.test(text)) {
-    return {
-      ok: true,
-      retry: false,
-      kind: "already",
-      status: response.status,
-      detail: detail || "今天已经签到过了",
-    };
+    return { ok: true, retry: false, kind: "already", status: response.status, detail: jsonField(text, "description") || "今天已经签到过了" };
   }
-
-  if (
-    /"success"\s*:\s*true/i.test(text) ||
-    /签到成功|签到奖励|获得.{0,20}积分/.test(text)
-  ) {
-    return {
-      ok: true,
-      retry: false,
-      kind: "success",
-      status: response.status,
-      detail: detail || "签到成功",
-    };
+  if (/"success"\s*:\s*true/i.test(text) || /签到成功|签到奖励|获得.{0,20}积分/.test(text)) {
+    return { ok: true, retry: false, kind: "success", status: response.status, detail: jsonField(text, "message") || "签到成功" };
   }
-
-  if (
-    response.status === 401 ||
-    /请先登录|未登录|登录已失效|unauthorized/i.test(text)
-  ) {
-    return {
-      ok: false,
-      retry: false,
-      kind: "login",
-      status: response.status,
-      detail: "登录状态已失效，请重新登录一次 HDHive",
-    };
+  if (response.status === 401 || /请先登录|未登录|登录已失效|unauthorized/i.test(text)) {
+    return { ok: false, retry: false, kind: "login", status: response.status, detail: "登录状态已失效，请重新登录一次 HDHive" };
   }
-
   return {
     ok: false,
     retry: false,
     kind: "unknown",
     status: response.status,
-    detail:
-      detail ||
-      `服务返回了无法识别的结果（HTTP ${response.status || "未知"}）`,
+    detail: `服务返回了无法识别的结果（HTTP ${response.status || "未知"}）`,
+    sample: clean(text).slice(0, 200),
   };
 }
 
@@ -702,15 +800,17 @@ async function queryAccount(jar, ua) {
 function normalizeRecord(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
 
-  const description = clean(
-    value.description ||
-      value.reason ||
+  // 站点实测字段：change_type / points / remark / created_at
+  const description =
+    clean(
       value.remark ||
-      value.content ||
-      value.message ||
-      value.title ||
-      value.type
-  );
+        value.description ||
+        value.reason ||
+        value.content ||
+        value.message ||
+        value.title
+    ) ||
+    (value.change_type ? `积分变动（${clean(value.change_type)}）` : "");
   const time =
     value.created_at ||
     value.createdAt ||
@@ -720,6 +820,7 @@ function normalizeRecord(value) {
     value.date ||
     value.occurred_at;
   const change = [
+    value.remark !== undefined || value.change_type !== undefined ? value.points : undefined,
     value.change,
     value.points_change,
     value.pointsChange,
@@ -931,6 +1032,22 @@ async function loadPoints(result, response, before, jar, ua) {
 }
 
 function render(result, mode, points) {
+  if (result.kind === "dormant") {
+    return {
+      title: "⚠️ 账号休眠",
+      message: `${result.detail}\n\n点按此通知可直接打开恢复页面。`,
+      log: `[${NAME}] 账号休眠：${result.detail}`,
+      attach: { openUrl: "https://re0.me/restore" },
+    };
+  }
+  if (result.kind === "login") {
+    return {
+      title: "🔑 登录已失效",
+      message: `${result.detail}\n\n点按此通知重新登录 HDHive。`,
+      log: `[${NAME}] 登录失效：${result.detail}`,
+      attach: { openUrl: "https://re0.me/login" },
+    };
+  }
   const status =
     result.kind === "success"
       ? "✅ 签到成功"
@@ -946,6 +1063,7 @@ function render(result, mode, points) {
 
   if (!points) {
     if (result.detail) lines.push(result.detail);
+    if (result.sample) lines.push(`响应片段：${result.sample.slice(0, 120)}`);
   } else {
     const user = points.user;
     const latest = points.latest;
@@ -986,6 +1104,7 @@ function saveReport(result, gamble, attempts, source, points) {
     success: Boolean(result.ok),
     result: result.kind,
     detail: result.detail,
+    sample: result.sample || "",
     httpStatus: result.status || 0,
     mode: gamble ? "gamble" : "normal",
     attempts,
@@ -1003,8 +1122,16 @@ function saveReport(result, gamble, attempts, source, points) {
 }
 
 async function main() {
-  const gamble = bool(getArgs().gamble);
+  const args = getArgs();
+  const gamble = bool(args.gamble);
   const mode = gamble ? "赌狗签到" : "普通签到";
+  // 逆向：站点的 cron 指纹之一就是"每天同一秒发起"，这里随机抖动一下
+  const jitter = Number(args.jitter === undefined ? 30 : args.jitter);
+  if (Number.isFinite(jitter) && jitter > 0) {
+    const waitMs = Math.floor(Math.random() * jitter * 1000);
+    console.log(`[${NAME}] 随机延迟 ${Math.round(waitMs / 1000)} 秒后开始`);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
   const cookie = $persistentStore.read(KEY.cookie) || "";
   const ua = $persistentStore.read(KEY.ua) || DEFAULT_UA;
 
@@ -1031,16 +1158,22 @@ async function main() {
   let source = "";
   let attempts = 0;
 
+  // 站点重新构建过 → 缓存的动作 ID 必然失效，直接重扫，不必先撞一次 404
+  let forceScan = cachedChunkStale(pageHtml);
+  if (forceScan) console.log(`[${NAME}] 检测到站点已重新构建，直接重新解析 Action ID`);
+
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     attempts = attempt;
-    const action = await getAction(jar, ua, pageHtml, attempt > 1);
+    const action = await getAction(jar, ua, pageHtml, forceScan);
     source = action.source;
     response = await submitCheckin(jar, ua, action.id, gamble);
     result = analyze(response);
 
     if (result.retry && attempt < 3) {
-      // Action / Token 失效：丢弃缓存并重新从站点 JS 解析
-      $persistentStore.write("", KEY.action);
+      // 动作 ID 失效才丢缓存重扫；令牌失效只需换新 token 重发
+      forceScan = result.kind === "action";
+      // 官方文档：删除键要写 undefined，空字符串/0/false 行为不一致
+      if (forceScan) $persistentStore.write(undefined, KEY.action);
       const session = await renewToken(jar, ua);
       pageHtml = session.body;
       before = mergeUsers(userFrom(session.body), before);
@@ -1068,6 +1201,7 @@ async function main() {
     title: output.title,
     message: output.message,
     log: output.log,
+    attach: output.attach || null,
   };
 }
 
@@ -1110,7 +1244,9 @@ if (typeof $request !== "undefined") {
   main()
     .then((result) => {
       console.log(result.log);
-      $notification.post(NAME, result.title, result.message);
+      // attach 支持 openUrl：文档 $notification.post(title, subtitle, content, attach, delay)
+      if (result.attach) $notification.post(NAME, result.title, result.message, result.attach);
+      else $notification.post(NAME, result.title, result.message);
     })
     .catch((error) => {
       const message = error && error.message ? error.message : String(error);
