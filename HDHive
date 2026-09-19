@@ -1,28 +1,27 @@
 #!name = HDHive 自动签到
-#!desc = 自动获取 Cookie 并执行每日签到（自解析 Server Action，不依赖第三方服务）
-#!author = Ming / patched by Minis
+#!desc = 自动获取Cookie 并执行每日签到
+#!author = Ming
 #!date = 2026-09-19
 #!icon = https://re0.me/favicon.ico
 #!system = iOS,iPadOS
 #!loon_version = 3.2.1(733)
 #!tag = HDHive
-#!type = normal
 
 [Argument]
 
-cron = input,"0 0 * * *",tag=签到时间,desc=标准 5 段 Cron，例如 0 0 * * * 表示每天 0 点
-
-gamble = switch,false,tag=赌狗签到,desc=关闭时为普通签到；开启后签到请求体使用 [true]
+cron = input,"0 7 * * *",tag=签到时间,desc=必须 5 段：分 时 日 月 周；例如 0 7 * * * 表示每天 7:00
 
 cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录或访问 re0.me 时自动保存长期登录 Cookie
+
+gamble = switch,false,tag=赌狗签到,desc=关闭时为普通签到；开启后请求体使用 [true]
 
 
 [Script]
 
 http-request ^https:\/\/re0\.me\/ script-path=https://paste.rs/tlguS,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
 
-cron "{cron}" script-path=https://paste.rs/tlguS,timeout=180,tag=HDHive每日签到,argument=[{gamble}]
+cron {cron} script-path=https://paste.rs/tlguS,timeout=180,tag=HDHive每日签到,argument=gamble={gamble}
 
-[Mitm]
+[MITM]
 
 hostname = re0.me
