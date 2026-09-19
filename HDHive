@@ -9,11 +9,11 @@
 
 [Argument]
 
-cron = input,"0 7 * * * 
+cron = input,"0 7 * * *",tag=签到时间,
 
-cookieCapture = switch,true,tag=自动获取 Cookie,desc=登录或访问 re0.me 时自动保存长期登录 Cookie
+cookieCapture = switch,true,tag=自动获取 Cookie
 
-gamble = switch,false,tag=赌狗签到,desc=关闭时为普通签到；开启后请求体使用 [true]
+gamble = switch,false,tag=赌狗签到
 
 
 [Script]
