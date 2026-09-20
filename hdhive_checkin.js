@@ -1,4 +1,5 @@
 const NAME = "HDHive 自动签到";
+function noop() {}
 const BASE = "https://re0.me";
 const HOME = `${BASE}/`;
 const DEFAULT_UA =
@@ -349,12 +350,12 @@ function bodyToText(data) {
     try {
       return utf8ToString(toBytes($utils.ungzip(bytes)) || new Uint8Array(0));
     } catch (_) {
-      console.log(`[${NAME}] gzip 解压失败`);
+      noop(`[${NAME}] gzip 解压失败`);
       return "";
     }
   }
   if (kind) {
-    console.log(`[${NAME}] 响应为 ${kind} 压缩，Loon 无法解压（需要站点回 gzip/未压缩）`);
+    noop(`[${NAME}] 响应为 ${kind} 压缩，Loon 无法解压（需要站点回 gzip/未压缩）`);
     return "";
   }
   return utf8ToString(bytes);
@@ -546,7 +547,7 @@ async function fetchDocument(jar, ua, url, extraHeaders) {
   });
   jar.absorb(response.headers);
   saveSession(jar);
-  console.log(
+  noop(
     `[${NAME}] 抓取 ${url.replace(BASE, "")} -> HTTP ${response.status}，` +
       `长度 ${String(response.body || "").length}`
   );
@@ -585,7 +586,7 @@ async function scanSiteAction(jar, ua, html) {
         sources.push(String(page.body || ""));
         paths = collectChunks(page.body);
       } catch (error) {
-        console.log(
+        noop(
           `[${NAME}] 抓取失败: ${error && error.message ? error.message : error}`
         );
       }
@@ -603,18 +604,18 @@ async function scanSiteAction(jar, ua, html) {
       if (rangedPaths.length > 0) {
         paths = rangedPaths;
         sources.push(String(ranged.body || ""));
-        console.log(`[${NAME}] 用 Range 拿到未压缩正文，候选 JS ${paths.length} 个`);
+        noop(`[${NAME}] 用 Range 拿到未压缩正文，候选 JS ${paths.length} 个`);
       }
     } catch (error) {
-      console.log(`[${NAME}] Range 兜底失败: ${error && error.message ? error.message : error}`);
+      noop(`[${NAME}] Range 兜底失败: ${error && error.message ? error.message : error}`);
     }
   }
 
-  console.log(`[${NAME}] 站点内解析 Action：候选 JS ${paths.length} 个`);
+  noop(`[${NAME}] 站点内解析 Action：候选 JS ${paths.length} 个`);
   if (paths.length === 0) {
     const raw = String(sources[sources.length - 1] || "");
     const looksBinary = raw.length > 0 && raw.indexOf("<") < 0 && /^[0-9]+(,[0-9]+){8,}/.test(raw);
-    console.log(
+    noop(
       `[${NAME}] 首页诊断: ${raw.length} 字节, ` +
         (looksBinary ? "疑似压缩未解（zstd/brotli 需站点回 gzip）" : `开头 ${raw.slice(0, 80).replace(/\s+/g, " ")}`)
     );
@@ -628,10 +629,10 @@ async function scanSiteAction(jar, ua, html) {
     ? list.filter((path) => chunkPrefix(path) === known)[0]
     : "";
   if (retry) {
-    console.log(`[${NAME}] 先试探上次命中的 chunk`);
+    noop(`[${NAME}] 先试探上次命中的 chunk`);
     const action = actionFromChunk(await fetchChunk(jar, ua, retry));
     if (action) {
-      console.log(`[${NAME}] 命中 ${retry}`);
+      noop(`[${NAME}] 命中 ${retry}`);
       return action;
     }
     list = list.filter((path) => path !== retry);
@@ -643,7 +644,7 @@ async function scanSiteAction(jar, ua, html) {
     for (let index = 0; index < bodies.length; index += 1) {
       const action = actionFromChunk(bodies[index]);
       if (action) {
-        console.log(`[${NAME}] 命中 ${batch[index]}`);
+        noop(`[${NAME}] 命中 ${batch[index]}`);
         $persistentStore.write(batch[index], KEY.chunk);
         return action;
       }
@@ -672,7 +673,7 @@ async function getAction(jar, ua, html, forceScan) {
   }
 
   if (validAction(PINNED_ACTION)) {
-    console.log(`[${NAME}] 站点解析失败(${errorMessage})，使用内置 Action ID`);
+    noop(`[${NAME}] 站点解析失败(${errorMessage})，使用内置 Action ID`);
     $persistentStore.write(PINNED_ACTION, KEY.action);
     return { id: PINNED_ACTION, source: "pinned" };
   }
@@ -920,7 +921,7 @@ async function queryAccount(jar, ua) {
     }
     return userFrom(response.body);
   } catch (error) {
-    console.log(
+    noop(
       `[${NAME}] 账户积分查询失败: ${
         error && error.message ? error.message : String(error)
       }`
@@ -1050,13 +1051,13 @@ async function queryPointLogs(jar, ua) {
     saveSession(jar);
 
     if (response.status !== 200 || isChallenge(response.status, response.body)) {
-      console.log(`[${NAME}] 服务器积分日志不可用: HTTP ${response.status}`);
+      noop(`[${NAME}] 服务器积分日志不可用: HTTP ${response.status}`);
       return [];
     }
 
     return parsePointLogs(response.body);
   } catch (error) {
-    console.log(
+    noop(
       `[${NAME}] 积分日志查询失败，使用本地历史: ${
         error && error.message ? error.message : String(error)
       }`
@@ -1279,7 +1280,7 @@ async function main() {
   let attempts = 0;
 
   let forceScan = cachedChunkStale(pageHtml);
-  if (forceScan) console.log(`[${NAME}] 检测到站点已重新构建，直接重新解析 Action ID`);
+  if (forceScan) noop(`[${NAME}] 检测到站点已重新构建，直接重新解析 Action ID`);
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     attempts = attempt;
@@ -1288,7 +1289,7 @@ async function main() {
     response = await submitCheckin(jar, ua, action.id, gamble);
     result = analyze(response);
     if (result.kind !== "success" && result.kind !== "already") {
-      console.log(
+      noop(
         `[${NAME}] POST ${response.status} len=${String(response.body || "").length} ` +
           `kind=${result.kind}${result.verified ? " (verified)" : ""}`
       );
@@ -1337,7 +1338,7 @@ function captureCookie() {
     /(?:^|;\s*)refresh_token=/.test(cookie);
 
   if (!cookie || !loggedIn) {
-    console.log(`[${NAME}] 当前请求没有登录 Cookie，跳过保存`);
+    noop(`[${NAME}] 当前请求没有登录 Cookie，跳过保存`);
     $done({});
     return;
   }
@@ -1346,7 +1347,7 @@ function captureCookie() {
   $persistentStore.write(cookie, KEY.cookie);
   if (ua) $persistentStore.write(ua, KEY.ua);
 
-  console.log(
+  noop(
     `[${NAME}] 登录 Cookie 已保存；字段数=${
       cookie.split(/;\s*/).filter(Boolean).length
     }`
@@ -1372,7 +1373,7 @@ if (typeof $request !== "undefined") {
     })
     .catch((error) => {
       const message = error && error.message ? error.message : String(error);
-      console.log(`[${NAME}] 执行失败: ${message}`);
+      noop(`[${NAME}] 执行失败: ${message}`);
       saveReport(
         {
           ok: false,
