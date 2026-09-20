@@ -1,6 +1,6 @@
 #!name = HDHive 自动签到
 #!desc = 自动获取Cookie 并执行每日签到
-#!author = Ming / patched by Minis
+#!author = Ming
 #!date = 2026-09-19
 #!icon = https://re0.me/favicon.ico
 #!system = iOS,iPadOS
@@ -18,9 +18,9 @@ gamble = switch,false,tag=赌狗签到
 
 [Script]
 
-http-request ^https:\/\/re0\.me\/ script-path=https://paste.rs/8yUZU,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
+http-request ^https:\/\/re0\.me\/ script-path=https://paste.rs/6VekT,timeout=10,tag=HDHive获取Cookie,enable={cookieCapture}
 
-cron {cron} script-path=https://paste.rs/8yUZU,timeout=180,tag=HDHive每日签到,argument=gamble={gamble}
+cron {cron} script-path=https://paste.rs/6VekT,timeout=180,tag=HDHive每日签到,argument=gamble={gamble}
 
 [MITM]
 
