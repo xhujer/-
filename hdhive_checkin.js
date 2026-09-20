@@ -11,7 +11,7 @@ const CHECKIN_TREE =
   "%5D%7D%2Cnull%2Cnull%2Ctrue%5D";
 const POINTS_TREE = routeTree(["manager", "points-logs"]);
 
-const PINNED_ACTION = "40e54b034c6540e575cd6362e60ae236da33560534";
+const PINNED_ACTION = "4080a19fea2b3d0fa9529be769a60c039cf1a731fc";
 const ACTION_SCAN_LIMIT = 60;
 const ACTION_SCAN_CONCURRENCY = 8;
 
@@ -287,6 +287,79 @@ function routeTree(parts) {
   );
 }
 
+function compressionKind(bytes) {
+  if (!bytes || bytes.length < 4) return "";
+  if (bytes[0] === 0x28 && bytes[1] === 0xb5 && bytes[2] === 0x2f && bytes[3] === 0xfd) return "zstd";
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) return "gzip";
+  if (bytes[0] === 0x42 && bytes[1] === 0x5a && bytes[2] === 0x68) return "bzip2";
+  return "";
+}
+
+function utf8ToString(bytes) {
+  let out = "";
+  let index = 0;
+  const length = bytes.length;
+  while (index < length) {
+    const first = bytes[index];
+    index += 1;
+    if (first < 0x80) {
+      out += String.fromCharCode(first);
+    } else if (first < 0xe0 && index < length) {
+      out += String.fromCharCode(((first & 0x1f) << 6) | (bytes[index] & 0x3f));
+      index += 1;
+    } else if (first < 0xf0 && index + 1 < length) {
+      out += String.fromCharCode(
+        ((first & 0x0f) << 12) | ((bytes[index] & 0x3f) << 6) | (bytes[index + 1] & 0x3f)
+      );
+      index += 2;
+    } else if (index + 2 < length) {
+      const code =
+        ((first & 0x07) << 18) |
+        ((bytes[index] & 0x3f) << 12) |
+        ((bytes[index + 1] & 0x3f) << 6) |
+        (bytes[index + 2] & 0x3f);
+      index += 3;
+      const adjusted = code - 0x10000;
+      out += String.fromCharCode(0xd800 + (adjusted >> 10), 0xdc00 + (adjusted & 0x3ff));
+    }
+  }
+  return out;
+}
+
+function toBytes(data) {
+  if (!data) return null;
+  if (typeof Uint8Array !== "undefined" && data instanceof Uint8Array) return data;
+  if (Object.prototype.toString.call(data) === "[object Array]") return new Uint8Array(data);
+  if (typeof data.length === "number") {
+    try {
+      return new Uint8Array(data);
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function bodyToText(data) {
+  if (typeof data === "string") return data;
+  const bytes = toBytes(data);
+  if (!bytes) return data === null || data === undefined ? "" : String(data);
+  const kind = compressionKind(bytes);
+  if (kind === "gzip") {
+    try {
+      return utf8ToString(toBytes($utils.ungzip(bytes)) || new Uint8Array(0));
+    } catch (_) {
+      console.log(`[${NAME}] gzip 解压失败`);
+      return "";
+    }
+  }
+  if (kind) {
+    console.log(`[${NAME}] 响应为 ${kind} 压缩，Loon 无法解压（需要站点回 gzip/未压缩）`);
+    return "";
+  }
+  return utf8ToString(bytes);
+}
+
 function request(method, options) {
   return new Promise((resolve, reject) => {
     const send = $httpClient[String(method).toLowerCase()];
@@ -307,7 +380,7 @@ function request(method, options) {
       resolve({
         status: Number(rawStatus) || parseInt(String(rawStatus), 10) || 0,
         headers: (response && response.headers) || {},
-        body: data === undefined || data === null ? "" : String(data),
+        body: bodyToText(data),
       });
     });
   });
@@ -336,7 +409,7 @@ function isChallenge(status, body, headers) {
   );
 }
 
-function documentHeaders(ua, jar, referer) {
+function documentHeaders(ua, jar, referer, extra) {
   const headers = {
     Accept:
       "text/html,application/xhtml+xml,application/xml;q=0.9," +
@@ -345,10 +418,12 @@ function documentHeaders(ua, jar, referer) {
     "Cache-Control": "no-cache",
     Pragma: "no-cache",
     "Upgrade-Insecure-Requests": "1",
+    "Accept-Encoding": "gzip, deflate",
     "User-Agent": ua,
   };
   if (jar.header()) headers.Cookie = jar.header();
   if (referer) headers.Referer = referer;
+  if (extra) Object.keys(extra).forEach((key) => { headers[key] = extra[key]; });
   return headers;
 }
 
@@ -460,14 +535,14 @@ function actionFromChunk(text) {
   return match && validAction(match[1]) ? match[1] : "";
 }
 
-async function fetchDocument(jar, ua, url) {
+async function fetchDocument(jar, ua, url, extraHeaders) {
   const response = await request("get", {
     url,
     timeout: 25000,
     alpn: "h2",
     "auto-cookie": false,
     "auto-redirect": true,
-    headers: documentHeaders(ua, jar, HOME),
+    headers: documentHeaders(ua, jar, HOME, extraHeaders),
   });
   jar.absorb(response.headers);
   saveSession(jar);
@@ -517,12 +592,32 @@ async function scanSiteAction(jar, ua, html) {
     }
   }
 
+  if (paths.length === 0) {
+    // Loon 只能解 gzip；若站点回了 zstd/brotli，正文会是空的。
+    // 带 Range 的分段响应 CF 通常不压缩，用它再取一段未压缩正文。
+    try {
+      const ranged = await fetchDocument(jar, ua, `${HOME}?_loon_range=${Date.now()}`, {
+        Range: "bytes=0-262143",
+      });
+      const rangedPaths = collectChunks(ranged.body);
+      if (rangedPaths.length > 0) {
+        paths = rangedPaths;
+        sources.push(String(ranged.body || ""));
+        console.log(`[${NAME}] 用 Range 拿到未压缩正文，候选 JS ${paths.length} 个`);
+      }
+    } catch (error) {
+      console.log(`[${NAME}] Range 兜底失败: ${error && error.message ? error.message : error}`);
+    }
+  }
+
   console.log(`[${NAME}] 站点内解析 Action：候选 JS ${paths.length} 个`);
   if (paths.length === 0) {
-    const sample = String(sources[sources.length - 1] || "")
-      .replace(/\s+/g, " ")
-      .slice(0, 160);
-    console.log(`[${NAME}] 首页样本: ${sample}`);
+    const raw = String(sources[sources.length - 1] || "");
+    const looksBinary = raw.length > 0 && raw.indexOf("<") < 0 && /^[0-9]+(,[0-9]+){8,}/.test(raw);
+    console.log(
+      `[${NAME}] 首页诊断: ${raw.length} 字节, ` +
+        (looksBinary ? "疑似压缩未解（zstd/brotli 需站点回 gzip）" : `开头 ${raw.slice(0, 80).replace(/\s+/g, " ")}`)
+    );
     return "";
   }
 
