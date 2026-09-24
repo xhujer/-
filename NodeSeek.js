@@ -45,7 +45,7 @@ function print(text) {
   }
 }
 
-function notify(title, subtitle = "", body = "") {
+function notify(title, subtitle = "", body = "", attach) {
   let content = cleanText(body);
   if (content.length > 1000) {
     content = content.slice(0, 1000) + "…";
@@ -54,7 +54,8 @@ function notify(title, subtitle = "", body = "") {
   $notification.post(
     cleanText(title) || SCRIPT_NAME,
     cleanText(subtitle),
-    content
+    content,
+    attach
   );
 }
 
@@ -90,6 +91,16 @@ function parseJson(value) {
   } catch {
     return null;
   }
+}
+
+function isRecentIso(value, windowSeconds = 180) {
+  const stamp = Date.parse(String(value || ""));
+  if (!isNumber(stamp)) {
+    return false;
+  }
+
+  const delta = Date.now() - stamp;
+  return delta >= -30 * 1000 && delta <= windowSeconds * 1000;
 }
 
 function isNumber(value) {
@@ -140,16 +151,27 @@ function httpPost(options) {
 function isCloudflarePage(response, data) {
   const code = getStatusCode(response);
   const text = String(data || "").toLowerCase();
+  const marcadores = [
+    "just a moment",
+    "cf-chl-",
+    "challenge-platform",
+    "cloudflare ray id",
+    "attention required",
+    "cf-mitigated"
+  ];
 
-  return (
-    code === 403 ||
-    code === 429 ||
-    text.includes("just a moment") ||
-    text.includes("cf-chl-") ||
-    text.includes("challenge-platform") ||
-    text.includes("cloudflare ray id") ||
-    text.includes("attention required")
-  );
+  if (marcadores.some((marcador) => text.includes(marcador))) {
+    return true;
+  }
+
+  const mitigated = getHeader(response?.headers, "cf-mitigated");
+  if (mitigated && String(mitigated).toLowerCase().includes("challenge")) {
+    return true;
+  }
+
+  // 2026-09-25 实测：站点边缘层拒绝时返回裸 403（text/plain "403"），
+  // 与 Cloudflare 挑战要区分开，否则会误报成"被 Cloudflare 拦截"。
+  return code === 429;
 }
 
 function getArg(name) {
@@ -589,6 +611,11 @@ async function signedRequest({
   let lastResult = null;
 
   for (let attempt = 1; attempt <= 4; attempt += 1) {
+    // 2026-09-25 实测（官方站点、真实登录态）：
+    // 边缘层只要有非空 refract-version（值无关，0.3.34/0.3.35/1 都一样）
+    // 就回 403 text/plain，除非同时带 RSA 挑战换来的 refract-credential；
+    // 不带 refract-version 时 refract-sign/refract-key 被忽略且请求正常放行。
+    // 所以这里不再发送 refract-version。
     const requestHeaders = {
       ...(headers || {}),
       "refract-sign": makeRefractSignature(
@@ -598,7 +625,6 @@ async function signedRequest({
         body,
         protocol.key
       ),
-      "refract-version": protocol.version,
       "refract-key": protocol.key
     };
 
@@ -662,6 +688,22 @@ function parseSignResult(json, httpCode) {
     };
   }
 
+  // 官方实测：Cookie 失效时 POST /api/attendance 返回
+  // HTTP 500 {"success":false,"message":"USER NOT FOUND","status":404}
+  if (
+    /USER NOT FOUND|用户不存在|未登录|请先登录|需要先登录|unauthorized|not logged/i.test(
+      message
+    ) ||
+    Number(payload?.status) === 401 ||
+    Number(payload?.status) === 404
+  ) {
+    return {
+      status: "nologin",
+      message: message || "登录态已失效",
+      gain: null
+    };
+  }
+
   if (payload?.success === true || /签到成功/i.test(message)) {
     return {
       status: "success",
@@ -682,7 +724,8 @@ async function signIn(cookie, userAgent, random) {
     `https://${DOMAIN}/api/attendance` +
     `?random=${random ? "true" : "false"}`;
 
-  const body = "{}";
+  // 官方前端是 fetch(url,{method:"POST"})：无 body、无 Content-Type
+  const body = "";
   const { response, data } = await signedRequest({
     method: "POST",
     url,
@@ -693,7 +736,6 @@ async function signIn(cookie, userAgent, random) {
         userAgent,
         referer: `https://${DOMAIN}/board`
       }),
-      "Content-Type": "application/json;charset=utf-8",
       Origin: `https://${DOMAIN}`
     },
     body
@@ -821,6 +863,7 @@ function getOfficialMember(boardPage) {
     memberId,
     name: cleanText(record.member_name),
     gain: isNumber(record.gain) ? Number(record.gain) : null,
+    createdAt: cleanText(record.created_at),
     rank: Number(boardPage.order),
     total: boardPage.total,
     source: "order",
@@ -840,7 +883,7 @@ async function getOfficialBoardDataSafe(cookie, userAgent) {
     const found = getOfficialMember(boardPage);
 
     if (!found) {
-      throw new Error("登录态排行榜未返回当前账号的 record / order");
+      throw new Error("排行榜未返回当前账号的 record / order（多为未登录或 Cookie 已失效）");
     }
 
     write(found.memberId, KEY_MEMBER_ID);
@@ -934,6 +977,10 @@ function getResultTitle(status) {
 
   if (status === "already") {
     return "🎁 NodeSeek 今日已签到";
+  }
+
+  if (status === "nologin") {
+    return "🔑 NodeSeek 登录态已失效";
   }
 
   if (status === "cloudflare") {
@@ -1032,22 +1079,43 @@ function formatAccountLine(account) {
 
     let board = boardResult.data;
 
-    // 即使签到 POST 被拦截，只要排行榜能找到目标成员，
-    // 就可以确定今天已经签到。
+    // 即使签到 POST 被拦截/被重定向（实测：连续 POST 会返回 303 非 JSON），
+    // 只要排行榜能找到目标成员，就能确定今天已签到；
+    // 若这条 record 是刚刚生成的，说明就是本次签到成功。
     if (
       board &&
       (signResult.status === "fail" ||
         signResult.status === "cloudflare")
     ) {
+      const justSigned = isRecentIso(board.createdAt);
+
       signResult = {
-        status: "already",
-        message: "排行榜确认今天已经签到",
+        status: justSigned ? "success" : "already",
+        message: justSigned
+          ? "排行榜确认刚刚签到成功"
+          : "排行榜确认今天已经签到",
         gain: board.gain
       };
     }
 
     if (board && isNumber(board.gain)) {
       signResult.gain = Number(board.gain);
+    }
+
+    if (signResult.status === "nologin") {
+      const title = getResultTitle("nologin");
+      const message =
+        "Cookie 里的 session 已失效（官方返回：" +
+        `${signResult.message}）。请在 Safari 重新登录 NodeSeek，` +
+        "登录后刷新一次首页即可自动更新 Cookie。";
+
+      print(`签到模式：${signMode.name}\n\n${title}\n\n${message}`);
+
+      notify(title, signMode.name, message, {
+        openUrl: `https://${DOMAIN}/signIn.html`
+      });
+
+      return done();
     }
 
     if (
