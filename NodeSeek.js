@@ -1,4 +1,6 @@
 const SCRIPT_NAME = "NodeSeek签到";
+const SCRIPT_BUILD = "v5-2026-09-25";
+let lastHttpDiagnostic = "";
 const DOMAIN = "www.nodeseek.com";
 
 const KEY_COOKIE = "nodeseek_cookie";
@@ -9,6 +11,7 @@ const KEY_AUTH_SIGNATURE = "nodeseek_identity_signature_v2";
 const KEY_CAPTURE_NOTIFY_TIME = "nodeseek_capture_notify_time";
 const KEY_REFRACT_VERSION = "nodeseek_refract_version";
 const KEY_REFRACT_KEY = "nodeseek_refract_key";
+const KEY_REFRACT_FETCHED_AT = "nodeseek_refract_fetched_at";
 
 // 仅作首次协商兜底；脚本会自动读取 sw.js，并处理 refract-key-update。
 const FALLBACK_REFRACT_VERSION = "0.3.34";
@@ -103,6 +106,53 @@ function isRecentIso(value, windowSeconds = 180) {
   return delta >= -30 * 1000 && delta <= windowSeconds * 1000;
 }
 
+let networkOverride = {};
+
+function getNetworkOptions() {
+  const options = {};
+
+  const alpn = cleanText(getArg("HttpVersion"));
+
+  if (alpn === "h2" || alpn === "h1") {
+    options.alpn = alpn;
+  }
+
+  const node = cleanText(getArg("Node"));
+
+  if (node) {
+    options.node = node;
+  }
+
+  return options;
+}
+
+function withNetwork(options) {
+  return {
+    ...(options || {}),
+    ...getNetworkOptions(),
+    ...(networkOverride || {})
+  };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clearRefractCache() {
+  write("", KEY_REFRACT_FETCHED_AT);
+}
+
+function describeResponse(response, data) {
+  const code = getStatusCode(response);
+  const mitigated = cleanText(getHeader(response?.headers, "cf-mitigated"));
+  const body = cleanText(String(data || "")).slice(0, 100);
+
+  lastHttpDiagnostic =
+    `HTTP ${code} · cf-mitigated=${mitigated || "无"} · 正文=${body || "(空)"}`;
+
+  return lastHttpDiagnostic;
+}
+
 function isNumber(value) {
   return (
     value !== null &&
@@ -118,11 +168,13 @@ function numberOrZero(value) {
 
 function httpGet(options) {
   return new Promise((resolve, reject) => {
-    $httpClient.get(options, (error, response, data) => {
+    $httpClient.get(withNetwork(options), (error, response, data) => {
       if (error) {
         reject(error);
         return;
       }
+
+      describeResponse(response, data);
 
       resolve({
         response: response || {},
@@ -134,11 +186,13 @@ function httpGet(options) {
 
 function httpPost(options) {
   return new Promise((resolve, reject) => {
-    $httpClient.post(options, (error, response, data) => {
+    $httpClient.post(withNetwork(options), (error, response, data) => {
       if (error) {
         reject(error);
         return;
       }
+
+      describeResponse(response, data);
 
       resolve({
         response: response || {},
@@ -152,6 +206,9 @@ function isCloudflarePage(response, data) {
   const code = getStatusCode(response);
   const text = String(data || "").toLowerCase();
   const marcadores = [
+    "__cf$cv$params",
+    "cf_chl_opt",
+    "cdn-cgi/challenge-platform",
     "just a moment",
     "cf-chl-",
     "challenge-platform",
@@ -545,6 +602,7 @@ function makeRefractSignature(method, url, userAgent, body, key) {
 function getRefractProtocol() {
   return {
     version: cleanText(read(KEY_REFRACT_VERSION)) || FALLBACK_REFRACT_VERSION,
+    fetchedAt: numberOrZero(read(KEY_REFRACT_FETCHED_AT)),
     key: cleanText(read(KEY_REFRACT_KEY)) || FALLBACK_REFRACT_KEY
   };
 }
@@ -556,10 +614,28 @@ function saveRefractProtocol(version, key) {
 
   if (cleanText(key)) {
     write(cleanText(key), KEY_REFRACT_KEY);
+  write(Date.now(), KEY_REFRACT_FETCHED_AT);
   }
 }
 
+const REFRACT_CACHE_TTL = 24 * 60 * 60 * 1000;
+
 async function refreshRefractProtocol(userAgent) {
+  const cached = getRefractProtocol();
+
+  // 实测：refract-sign/refract-key 对站点无害且非必需，sw.js 只是为了拿最新密钥；
+  // 每天只协商一次，减少请求数（降低 Cloudflare 风险分）。
+  if (
+    cached.fetchedAt &&
+    Date.now() - cached.fetchedAt < REFRACT_CACHE_TTL
+  ) {
+    print(
+      `协议缓存命中（${Math.round((Date.now() - cached.fetchedAt) / 60000)} 分钟前更新），跳过 sw.js`
+    );
+
+    return cached;
+  }
+
   const stored = getRefractProtocol();
 
   try {
@@ -639,6 +715,32 @@ async function signedRequest({
             url,
             headers: requestHeaders
           });
+
+    // 实测：Loon（NSURLSession）会撞上 Cloudflare 挑战；无延迟连打 4 次只会把
+    // 风险分推得更高，所以改成"退避重试"，最多 3 次。
+    if (isCloudflarePage(lastResult.response, lastResult.data)) {
+      if (attempt >= 3) {
+        networkOverride = {};
+        return lastResult;
+      }
+
+      // 实测：Loon 默认出口/协议被 CF 挑战，而 h2 + 设备自身出口能过。
+      // 第 2 次换直连出口，第 3 次换 HTTP/1.1，都带随机退避。
+      networkOverride = attempt === 1 ? { node: "DIRECT" } : { alpn: "h1" };
+
+      // 退避要克制：原版插件 timeout=60，两次退避总和需留够余量
+      const waitMs = 3000 + Math.floor(Math.random() * 3000) * attempt;
+
+      print(
+        `遇到 Cloudflare 挑战，切换${attempt === 1 ? "直连出口" : "HTTP/1.1"}，` +
+          `${Math.round(waitMs / 1000)}s 后重试（第 ${attempt + 1}/3 次）`
+      );
+
+      clearRefractCache();
+      protocol = getRefractProtocol();
+      await sleep(waitMs);
+      continue;
+    }
 
     const updatedKey = cleanText(
       getHeader(lastResult.response?.headers, "refract-key-update")
@@ -1044,7 +1146,7 @@ function formatAccountLine(account) {
       const message =
         "请开启自动获取 Cookie，然后在 Safari 登录并刷新一次 NodeSeek";
 
-      print(`❌ NodeSeek 签到失败\n\n${message}`);
+      print(`${SCRIPT_NAME} ${SCRIPT_BUILD}\n❌ NodeSeek 签到失败\n\n${message}`);
       notify("❌ NodeSeek 签到失败", "未获取 Cookie", message);
       return done();
     }
@@ -1109,7 +1211,7 @@ function formatAccountLine(account) {
         `${signResult.message}）。请在 Safari 重新登录 NodeSeek，` +
         "登录后刷新一次首页即可自动更新 Cookie。";
 
-      print(`签到模式：${signMode.name}\n\n${title}\n\n${message}`);
+      print(`${SCRIPT_NAME} ${SCRIPT_BUILD}\n签到模式：${signMode.name}\n\n${title}\n\n${message}`);
 
       notify(title, signMode.name, message, {
         openUrl: `https://${DOMAIN}/signIn.html`
@@ -1129,15 +1231,16 @@ function formatAccountLine(account) {
         : "";
 
       print(
-        `签到模式：${signMode.name}\n\n` +
+        `${SCRIPT_NAME} ${SCRIPT_BUILD}\n签到模式：${signMode.name}\n\n` +
           `${title}\n\n` +
-          `${signResult.message}${extra}`
+          `${signResult.message}${extra}` +
+          `\n\n诊断：${lastHttpDiagnostic || "(无)"}`
       );
 
       notify(
         title,
         signMode.name,
-        `${signResult.message}${extra}`
+        `${signResult.message}${extra}\n\n诊断：${lastHttpDiagnostic || "(无)"}`
       );
 
       return done();
@@ -1164,7 +1267,7 @@ function formatAccountLine(account) {
     const accountLine = formatAccountLine(account);
 
     print(
-      `签到模式：${signMode.name}\n\n` +
+      `${SCRIPT_NAME} ${SCRIPT_BUILD}\n签到模式：${signMode.name}\n\n` +
         `${title}\n\n` +
         `${boardLine}\n\n` +
         `${accountLine}`
@@ -1180,7 +1283,7 @@ function formatAccountLine(account) {
   } catch (error) {
     const message = `❌ 脚本异常：${cleanText(error?.message || error)}`;
 
-    print(message);
+    print(`${SCRIPT_NAME} ${SCRIPT_BUILD}\n${message}`);
     notify(SCRIPT_NAME, "❌ 脚本异常", message);
     return done();
   }
