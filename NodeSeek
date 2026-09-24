@@ -5,7 +5,7 @@
 #!homepage=https://www.nodeseek.com/
 #!system=iOS,iPadOS
 #!loon_version=3.5.0(975)
-#!date=2026-09-25
+#!date=2026-07-25
 #!tag=NodeSeek,签到
 
 [Argument]
@@ -18,9 +18,9 @@ Random = switch,true,tag=随机签到,desc=开启为随机签到，关闭为固�
 
 [Script]
 
-cron {RunTime} script-path=https://paste.rs/v8JnM,tag=NodeSeek签到,timeout=120,argument=[{Random}],enable=true
+cron {RunTime} script-path=https://paste.rs/y1We1,tag=NodeSeek签到,timeout=60,argument=[{Random}],enable=true
 
-http-request ^https?:\/\/(?:www\.)?nodeseek\.com\/ script-path=https://paste.rs/v8JnM,tag=NodeSeek抓Cookie,timeout=10,requires-body=false,enable={CaptureCookie}
+http-request ^https?:\/\/(?:www\.)?nodeseek\.com\/ script-path=https://paste.rs/y1We1,tag=NodeSeek抓Cookie,timeout=10,requires-body=false,enable={CaptureCookie}
 
 [MITM]
 
