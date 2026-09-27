@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "NodeSeek签到";
-const SCRIPT_BUILD = "v12-2026-09-25";
+const SCRIPT_BUILD = "v16-2026-09-27";
 let lastHttpDiagnostic = "";
 const DOMAIN = "www.nodeseek.com";
 
@@ -9,13 +9,11 @@ const KEY_RANDOM = "nodeseek_random";
 const KEY_MEMBER_ID = "nodeseek_verified_member_id";
 const KEY_AUTH_SIGNATURE = "nodeseek_identity_signature_v2";
 const KEY_CAPTURE_NOTIFY_TIME = "nodeseek_capture_notify_time";
-const KEY_REFRACT_VERSION = "nodeseek_refract_version";
 const KEY_REFRACT_KEY = "nodeseek_refract_key";
-const KEY_REFRACT_FETCHED_AT = "nodeseek_refract_fetched_at";
 const KEY_NOTIFY_DAY = "nodeseek_notify_day";
 const KEY_BROWSER_HEADERS = "nodeseek_browser_headers";
 
-// 参考 ZenmoFeiShi/Qx 的 Nodeseek_NsCheckin.js：把浏览器真实的请求头整套抓下来重放
+// 抓浏览器真实请求头重放（参考 ZenmoFeiShi/Qx）
 const PICK_KEYS = [
   "Accept",
   "Accept-Encoding",
@@ -28,8 +26,6 @@ const PICK_KEYS = [
   "Referer"
 ];
 
-// 仅作首次协商兜底；脚本会自动读取 sw.js，并处理 refract-key-update。
-const FALLBACK_REFRACT_VERSION = "0.3.34";
 const FALLBACK_REFRACT_KEY = "CHICZkKViFoZmVbIH1Y6";
 
 const DEFAULT_USER_AGENT =
@@ -121,35 +117,14 @@ function isRecentIso(value, windowSeconds = 180) {
   return delta >= -30 * 1000 && delta <= windowSeconds * 1000;
 }
 
+// alpn=h2 / timeout 15s 固定值；仅 CF 重试时会临时覆盖 alpn
+const REQUEST_NETWORK = { alpn: "h2", timeout: 15000 };
 let networkOverride = {};
-
-function getNetworkOptions() {
-  // 官方文档：$httpClient 默认 alpn="h1"（浏览器都是 h2）、默认 timeout=5000ms。
-  // 这里显式给 h2 + 更长超时，尽量贴近浏览器、避免慢响应被判超时。
-  const options = {
-    alpn: "h2",
-    timeout: 15000
-  };
-
-  const alpn = cleanText(getArg("HttpVersion"));
-
-  if (alpn === "h2" || alpn === "h1") {
-    options.alpn = alpn;
-  }
-
-  const node = cleanText(getArg("Node"));
-
-  if (node) {
-    options.node = node;
-  }
-
-  return options;
-}
 
 function withNetwork(options) {
   return {
     ...(options || {}),
-    ...getNetworkOptions(),
+    ...REQUEST_NETWORK,
     ...(networkOverride || {})
   };
 }
@@ -159,8 +134,7 @@ function todayStamp() {
   return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
 }
 
-// 一天内允许多次尝试（CF 是动态判定，晚点再试常常就过了），
-// 但通知每天只弹一次，避免刷屏；签到成功则每次都弹。
+// 已签到/失败每天只通知一次；签到成功每次都通知
 function shouldNotify(force) {
   const today = todayStamp();
 
@@ -179,10 +153,6 @@ function shouldNotify(force) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function clearRefractCache() {
-  write("", KEY_REFRACT_FETCHED_AT);
 }
 
 function describeResponse(response, data) {
@@ -209,13 +179,17 @@ function numberOrZero(value) {
   return isNumber(value) ? Number(value) : 0;
 }
 
+function failRequest(error, reject) {
+  lastHttpDiagnostic = `网络错误：${cleanText(error) || "未知错误"}`;
+  print(`请求失败：${cleanText(error)}`);
+  reject(error);
+}
+
 function httpGet(options) {
   return new Promise((resolve, reject) => {
     $httpClient.get(withNetwork(options), (error, response, data) => {
       if (error) {
-        lastHttpDiagnostic = `网络错误：${cleanText(error) || "未知错误"}`;
-        print(`请求失败：${cleanText(error)}`);
-        reject(error);
+        failRequest(error, reject);
         return;
       }
 
@@ -233,9 +207,7 @@ function httpPost(options) {
   return new Promise((resolve, reject) => {
     $httpClient.post(withNetwork(options), (error, response, data) => {
       if (error) {
-        lastHttpDiagnostic = `网络错误：${cleanText(error) || "未知错误"}`;
-        print(`请求失败：${cleanText(error)}`);
-        reject(error);
+        failRequest(error, reject);
         return;
       }
 
@@ -273,8 +245,7 @@ function isCloudflarePage(response, data) {
     return true;
   }
 
-  // 2026-09-25 实测：站点边缘层拒绝时返回裸 403（text/plain "403"），
-  // 与 Cloudflare 挑战要区分开，否则会误报成"被 Cloudflare 拦截"。
+  // 边缘层的裸 403 不算 CF 挑战，否则会误报
   return code === 429;
 }
 
@@ -486,7 +457,7 @@ async function captureRequest() {
     write(cookie, KEY_COOKIE);
   }
 
-  // 非文档请求（XHR/API）→ 记下浏览器真实请求头，供定时任务原样重放
+  // 非文档请求里抓一份浏览器真实头
   if (!isDocumentRequest(headers)) {
     const picked = {};
 
@@ -529,10 +500,9 @@ function getCapturedHeaders() {
   }
 }
 
-function buildCommonHeaders({ userAgent, referer, cookie = "", accept }) {
+function buildCommonHeaders({ userAgent, referer, cookie = "" }) {
   const headers = {
-    // 浏览器风格兜底
-    Accept: accept || "*/*",
+    Accept: "*/*",
     "Accept-Encoding": "gzip, deflate",
     "Accept-Language": "zh-CN,zh-Hans;q=0.9,en;q=0.8",
     Connection: "keep-alive",
@@ -540,20 +510,16 @@ function buildCommonHeaders({ userAgent, referer, cookie = "", accept }) {
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-origin",
-    // 抓到的真实浏览器头优先（这是模仿得最像的一份）
+    // 抓到的真实浏览器头优先
     ...getCapturedHeaders(),
-    // 本次请求必须固定的值
     Referer: referer || `https://${DOMAIN}/board`,
     Origin: `https://${DOMAIN}`,
-    // 社区实测（A1me7n/nodeseek-checkin）：签到请求少了这个头会被判
-    // high risk action —— 缺请求头导致的，不是风控。
+    // 缺这个头会被判 high risk action（社区实测）
     "x-csrf-challenge": "simple-token",
     "User-Agent": userAgent || DEFAULT_USER_AGENT
   };
 
-  // 仅在调用方明确传入时添加 Cookie。
-  // Loon 只能解 gzip/deflate（br/zstd 会解不开），所以强制覆盖掉抓到的
-  // Accept-Encoding，避免上游用 brotli 回包。
+  // Loon 解不了 br/zstd，强制 gzip, deflate
   headers["Accept-Encoding"] = "gzip, deflate";
 
   if (cookie) {
@@ -577,7 +543,7 @@ function toHex32(value) {
   return output;
 }
 
-// 与 NodeSeek sw.js 中 crypto.subtle.digest("SHA-1", ...) 的结果一致。
+// 与官方 sw.js 的 crypto.subtle.digest("SHA-1") 等价
 function sha1(value) {
   const text = unescape(encodeURIComponent(String(value)));
   const words = [];
@@ -688,91 +654,17 @@ function makeRefractSignature(method, url, userAgent, body, key) {
   );
 }
 
-function getRefractProtocol() {
-  return {
-    version: cleanText(read(KEY_REFRACT_VERSION)) || FALLBACK_REFRACT_VERSION,
-    fetchedAt: numberOrZero(read(KEY_REFRACT_FETCHED_AT)),
-    key: cleanText(read(KEY_REFRACT_KEY)) || FALLBACK_REFRACT_KEY
-  };
+function getRefractKey() {
+  return cleanText(read(KEY_REFRACT_KEY)) || FALLBACK_REFRACT_KEY;
 }
 
-function saveRefractProtocol(version, key) {
-  if (cleanText(version)) {
-    write(cleanText(version), KEY_REFRACT_VERSION);
-  }
-
+function saveRefractKey(key) {
   if (cleanText(key)) {
     write(cleanText(key), KEY_REFRACT_KEY);
-  write(Date.now(), KEY_REFRACT_FETCHED_AT);
   }
 }
 
-const REFRACT_CACHE_TTL = 24 * 60 * 60 * 1000;
-
-async function refreshRefractProtocol(userAgent) {
-  const cached = getRefractProtocol();
-
-  // 实测：refract-sign/refract-key 对站点无害且非必需，sw.js 只是为了拿最新密钥；
-  // 每天只协商一次，减少请求数（降低 Cloudflare 风险分）。
-  if (
-    cached.fetchedAt &&
-    Date.now() - cached.fetchedAt < REFRACT_CACHE_TTL
-  ) {
-    print(
-      `协议缓存命中（${Math.round((Date.now() - cached.fetchedAt) / 60000)} 分钟前更新），跳过 sw.js`
-    );
-
-    return cached;
-  }
-
-  const stored = getRefractProtocol();
-
-  try {
-    const { response, data } = await httpGet({
-      url: `https://${DOMAIN}/sw.js?_=${Date.now()}`,
-      headers: buildCommonHeaders({
-        userAgent,
-        referer: `https://${DOMAIN}/`,
-        accept: "application/javascript, text/javascript, */*;q=0.8"
-      })
-    });
-
-    const code = getStatusCode(response);
-    const text = String(data || "");
-
-    if (code < 200 || code >= 300 || !text) {
-      return stored;
-    }
-
-    const versionMatch = text.match(
-      /self\.version\s*=\s*["']([^"']+)["']/
-    );
-
-    const keyMatch = text.match(
-      /this\.refractKey\s*=\s*["']([^"']+)["']/
-    );
-
-    const version = cleanText(versionMatch?.[1]) || stored.version;
-    const defaultKey = cleanText(keyMatch?.[1]);
-    const versionChanged = version !== stored.version;
-    const key = versionChanged && defaultKey ? defaultKey : stored.key;
-
-    saveRefractProtocol(version, key);
-    return { version, key };
-  } catch {
-    return stored;
-  }
-}
-
-async function signedRequest(options) {
-  try {
-    return await signedRequestInner(options);
-  } finally {
-    networkOverride = {};
-  }
-}
-
-async function signedRequestInner({
+async function signedRequest({
   method,
   url,
   userAgent,
@@ -780,15 +672,13 @@ async function signedRequestInner({
   body = ""
 }) {
   const requestMethod = String(method || "GET").toUpperCase();
-  let protocol = getRefractProtocol();
+  let refractKey = getRefractKey();
+
+  networkOverride = {};
   let lastResult = null;
 
   for (let attempt = 1; attempt <= 4; attempt += 1) {
-    // 2026-09-25 实测（官方站点、真实登录态）：
-    // 边缘层只要有非空 refract-version（值无关，0.3.34/0.3.35/1 都一样）
-    // 就回 403 text/plain，除非同时带 RSA 挑战换来的 refract-credential；
-    // 不带 refract-version 时 refract-sign/refract-key 被忽略且请求正常放行。
-    // 所以这里不再发送 refract-version。
+    // 带 refract-version 会被边缘层裸 403，故不发送
     const requestHeaders = {
       ...(headers || {}),
       "refract-sign": makeRefractSignature(
@@ -796,9 +686,9 @@ async function signedRequestInner({
         url,
         userAgent,
         body,
-        protocol.key
+        refractKey
       ),
-      "refract-key": protocol.key
+      "refract-key": refractKey
     };
 
     lastResult =
@@ -813,20 +703,16 @@ async function signedRequestInner({
             headers: requestHeaders
           });
 
-    // 实测：Loon（NSURLSession）会撞上 Cloudflare 挑战；无延迟连打 4 次只会把
-    // 风险分推得更高，所以改成"退避重试"，最多 3 次。
+    // CF 挑战时退避重试，连打只会推高风险分
     if (isCloudflarePage(lastResult.response, lastResult.data)) {
-      // 受原版插件 timeout=60 约束：只给一次换协议的补试机会
+      // timeout=60 约束下只补试一次
       if (attempt >= 2) {
-        networkOverride = {};
         return lastResult;
       }
 
-      // 2026-09-25 实测：node:"DIRECT"（直连）在必须走代理的网络下会
-      // Request timeout，所以不再尝试直连；只切 HTTP 版本与退避。
+      // DIRECT 直连会超时，只切 HTTP 版本
       networkOverride = attempt === 1 ? { alpn: "h1" } : {};
 
-      // 退避要克制：原版插件 timeout=60，两次退避总和需留够余量
       const waitMs = 2000 + Math.floor(Math.random() * 2000) * attempt;
 
       print(
@@ -834,8 +720,7 @@ async function signedRequestInner({
           `${Math.round(waitMs / 1000)}s 后重试（第 2/2 次）`
       );
 
-      clearRefractCache();
-      protocol = getRefractProtocol();
+      refractKey = getRefractKey();
       await sleep(waitMs);
       continue;
     }
@@ -846,15 +731,12 @@ async function signedRequestInner({
 
     if (
       updatedKey &&
-      updatedKey !== protocol.key &&
+      updatedKey !== refractKey &&
       updatedKey.length <= 512
     ) {
-      protocol = {
-        ...protocol,
-        key: updatedKey
-      };
+      refractKey = updatedKey;
 
-      saveRefractProtocol(protocol.version, protocol.key);
+      saveRefractKey(refractKey);
       continue;
     }
 
@@ -888,8 +770,7 @@ function parseSignResult(json, httpCode) {
     };
   }
 
-  // 官方实测：Cookie 失效时 POST /api/attendance 返回
-  // HTTP 500 {"success":false,"message":"USER NOT FOUND","status":404}
+  // Cookie 失效时官方返回 USER NOT FOUND / status 404
   if (
     /USER NOT FOUND|用户不存在|未登录|请先登录|需要先登录|unauthorized|not logged/i.test(
       message
@@ -924,7 +805,7 @@ async function signIn(cookie, userAgent, random) {
     `https://${DOMAIN}/api/attendance` +
     `?random=${random ? "true" : "false"}`;
 
-  // 官方前端是 fetch(url,{method:"POST"})：无 body、无 Content-Type
+  // 对齐官方前端：无 body、无 Content-Type
   const body = "";
   const { response, data } = await signedRequest({
     method: "POST",
@@ -990,18 +871,9 @@ function parseBoardPage(json, page) {
   };
 }
 
-function buildBoardUrl(page) {
+async function getBoardPage(page, userAgent, cookie) {
   const pageNumber = Math.max(1, Number(page) || 1);
-  return `https://${DOMAIN}/api/attendance/board?page=${pageNumber}`;
-}
-
-async function getBoardPage(
-  page,
-  userAgent,
-  { cookie = "", requestName = "" } = {}
-) {
-  const pageNumber = Math.max(1, Number(page) || 1);
-  const url = buildBoardUrl(pageNumber);
+  const url = `https://${DOMAIN}/api/attendance/board?page=${pageNumber}`;
 
   const { response, data } = await signedRequest({
     method: "GET",
@@ -1019,9 +891,7 @@ async function getBoardPage(
   });
 
   const code = getStatusCode(response);
-  const label =
-    cleanText(requestName) ||
-    (cookie ? "签到排行榜" : "零 Cookie 签到排行榜");
+  const label = "登录态签到排行榜";
 
   if (isCloudflarePage(response, data)) {
     throw new Error(`${label}被 Cloudflare 拦截（HTTP ${code}）`);
@@ -1037,13 +907,6 @@ async function getBoardPage(
   }
 
   return parseBoardPage(json, pageNumber);
-}
-
-async function getAuthenticatedBoardPage(page, cookie, userAgent) {
-  return getBoardPage(page, userAgent, {
-    cookie,
-    requestName: "登录态签到排行榜"
-  });
 }
 
 function getOfficialMember(boardPage) {
@@ -1074,11 +937,7 @@ function getOfficialMember(boardPage) {
 
 async function getOfficialBoardDataSafe(cookie, userAgent) {
   try {
-    const boardPage = await getAuthenticatedBoardPage(
-      1,
-      cookie,
-      userAgent
-    );
+    const boardPage = await getBoardPage(1, userAgent, cookie);
 
     const found = getOfficialMember(boardPage);
 
@@ -1254,8 +1113,6 @@ function formatAccountLine(account) {
 
     const signMode = getSignMode();
 
-    await refreshRefractProtocol(userAgent);
-
     let signResult;
 
     try {
@@ -1279,9 +1136,7 @@ function formatAccountLine(account) {
 
     let board = boardResult.data;
 
-    // 即使签到 POST 被拦截/被重定向（实测：连续 POST 会返回 303 非 JSON），
-    // 只要排行榜能找到目标成员，就能确定今天已签到；
-    // 若这条 record 是刚刚生成的，说明就是本次签到成功。
+    // POST 被拦时以排行榜 record 为准；刚生成的 record 视为本次签到成功
     if (
       board &&
       (signResult.status === "fail" ||
