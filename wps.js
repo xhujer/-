@@ -68,6 +68,13 @@ async function saveCookieFromRequest() {
         $.msg("WPS", "⚠️ 抓到的不是活动页请求", `这是 OPTIONS 预检(${$request.url})。\n请用 Safari 打开 WPS 活动页,不要手动运行抓包脚本`);
         return;
     }
+    // 插件「调试模式」开关 → 持久化到 wps_debug(cron 运行时会打印接口原始响应)
+    const wantDebug = debugSwitchOn() ? "true" : "false";
+    if (($.getdata("wps_debug") || "false") !== wantDebug) {
+        $.setdata(wantDebug, "wps_debug");
+        $.msg("WPS", wantDebug === "true" ? "🔍 调试模式已开启" : "🔍 调试模式已关闭",
+            "下次运行 cron 时会" + (wantDebug === "true" ? "打印接口原始响应" : "恢复正常日志"));
+    }
     // 开关开启时清空账号；只有首次实际清除数据时通知，避免同一页面重复弹窗
     if (shouldClearAll()) {
         const hadAccounts = getAccounts().length > 0;
@@ -125,25 +132,30 @@ async function saveCookieFromRequest() {
     }
 }
 
-// 插件「清空全部账号」开关:argument=[{清空全部账号}] → $argument = {"清空全部账号": true/false}
-function shouldClearAll() {
+// 插件 argument 布尔开关的通用读取:支持对象 / JSON 字符串 / 键值串三种形态
+function argFlag(keys) {
     try {
         const a = $argument;
-        if (a && typeof a === "object") {
-            return isTrueValue(a["清空全部账号"] ?? a.clearAll);
-        }
+        const pick = (o) => keys.some((k) => isTrueValue(o[k]));
+        if (a && typeof a === "object") return pick(a);
         if (typeof a === "string" && a.trim() !== "") {
             const text = a.trim();
             try {
                 const parsed = JSON.parse(text);
-                if (parsed && typeof parsed === "object") {
-                    return isTrueValue(parsed["清空全部账号"] ?? parsed.clearAll);
-                }
+                if (parsed && typeof parsed === "object") return pick(parsed);
             } catch (e) { /* 非 JSON 字符串继续按键值格式解析 */ }
-            return /(?:^|[,&;\s])(?:清空全部账号|clearAll)\s*=\s*(?:true|1)(?=$|[,&;\s])/i.test(text);
+            return keys.some((k) => new RegExp(`(?:^|[,&;\\s])${k}\\s*=\\s*(?:true|1)(?=$|[,&;\\s])`, "i").test(text));
         }
     } catch (e) { /* 解析失败按关闭处理 */ }
     return false;
+}
+// 插件「清空全部账号」开关
+function shouldClearAll() {
+    return argFlag(["清空全部账号", "clearAll"]);
+}
+// 插件「调试模式」开关:打开后随便抓一次包即写入 wps_debug=true,再抓一次(关掉开关)即恢复
+function debugSwitchOn() {
+    return argFlag(["调试模式", "debug"]);
 }
 
 function isTrueValue(v) {
@@ -577,6 +589,7 @@ async function taskHot() {
         const ranked = details.slice().sort((a, b) => score(b) - score(a));
 
         let done = false;
+        let lastReason = "";
         for (const d of ranked) {
             const reqObj = {
                 component_uniq_number: {
@@ -597,9 +610,14 @@ async function taskHot() {
                 done = true;
                 break;
             }
+            // 记下服务端最后一次的拒绝理由,比笼统的「没抢到」有用得多
+            lastReason = inner.reason || (j && (j.msg || j.ext_msg)) || "";
             debug(`${tag} ${d.title}(pid ${d.privilege_id})未中: ${(r.body || "").slice(0, 200)}`);
         }
-        if (!done) $.results.push(`⚠️ ${tag}:未领到(超级会员已秒光、其余也没抢到)`);
+        if (!done) {
+            const say = lastReason ? `：${lastReason.length > 40 ? lastReason.slice(0, 40) + "…" : lastReason}` : "";
+            $.results.push(`⚠️ ${tag}:未领到${say}`);
+        }
     } catch (e) {
         $.results.push(`❌ ${tag}:异常`);
         $.log(`[ERROR] ${tag}: ${e}`);
@@ -634,43 +652,54 @@ async function taskFragment() {
             return;
         }
 
-        const isNew = !seriesId;
-        const reqObj = {
-            component_uniq_number: {
-                activity_number: FLZX.activity_number,
-                page_number: FLZX.page_number,
-                component_number: comp.component_number,
-                component_node_id: comp.component_node_id,
-            },
-            component_type: comp.type,
-            component_action: "fragment_collect.sign_in",
-            fragment_collect: { sign_date: today, series_id: seriesId, is_new_sign_series: isNew },
-        };
-        const r = await httpReq("POST", COMPONENT, { body: JSON.stringify(reqObj) });
-        const j = safeJson(r.body);
-        if (!j) {
-            $.results.push(`❌ ${tag}:无响应`);
-            debug(`${tag} 响应: ${r.body.slice(0, 300)}`);
-            return;
+        // 诊断串:序列号 + 最近几天记录,失败时附在通知里(否则只有一句被截断的服务端文案,没法定位)
+        const diag = `序列 ${seriesId || "(空)"} · 读到 ${records.length} 天${records.length ? " " + records.slice(-4).map((x) => String(x.sign_date).slice(5) + (x.sign_status === "signed" ? "✓" : "✗")).join(" ") : ""}`;
+
+        let res = await signFragment(today, seriesId, !seriesId);
+        let usedNew = !seriesId;
+        // 服务端明确说这个日期不在序列里 = 序列中间断了(比如漏签一天),老序列再也签不上。
+        // 此时只有开新序列能续上——连续天数反正已经断了,不算额外的损失。
+        if (!res.ok && /not in se/i.test(res.msg)) {
+            debug(`${tag} 原序列被拒(${res.msg}),改用新序列重试`);
+            res = await signFragment(today, "", true);
+            usedNew = true;
         }
-        if (j.result !== "ok") {
-            const st = classify(j.msg || j.ext_msg, "已打卡");
-            $.results.push(`${st.e} ${tag}:${st.t}`);
-            if (st.e !== "✅") debug(`${tag} 响应: ${r.body.slice(0, 300)}`);
-            return;
-        }
-        const inner = (j.data || {}).fragment_collect || {};
-        if (inner.success === true) {
-            $.results.push(`✅ ${tag}:成功${isNew ? "(新序列)" : ""}`);
+
+        const st = classify(res.msg, "已打卡");
+        if (res.ok) {
+            $.results.push(`✅ ${tag}:成功${usedNew && seriesId ? "(原序列已断,开新序列)" : usedNew ? "(新序列)" : ""}`);
         } else {
-            const st = classify(inner.reason || j.msg, "已打卡");
             $.results.push(`${st.e} ${tag}:${st.t}`);
-            if (st.e !== "✅") debug(`${tag} 响应: ${r.body.slice(0, 300)}`);
+            $.results.push(`   ↳ ${diag}`);
+            if (st.e !== "✅") debug(`${tag} 响应: ${String(res.raw).slice(0, 300)}`);
         }
     } catch (e) {
         $.results.push(`❌ ${tag}:异常`);
         $.log(`[ERROR] ${tag}: ${e}`);
     }
+}
+
+// 发一次打卡请求,统一返回 {ok, msg, raw}
+async function signFragment(signDate, seriesId, isNew) {
+    const comp = COMPONENTS.fragment;
+    const reqObj = {
+        component_uniq_number: {
+            activity_number: FLZX.activity_number,
+            page_number: FLZX.page_number,
+            component_number: comp.component_number,
+            component_node_id: comp.component_node_id,
+        },
+        component_type: comp.type,
+        component_action: "fragment_collect.sign_in",
+        fragment_collect: { sign_date: signDate, series_id: seriesId, is_new_sign_series: isNew },
+    };
+    const r = await httpReq("POST", COMPONENT, { body: JSON.stringify(reqObj) });
+    const j = safeJson(r.body);
+    if (!j) return { ok: false, msg: "无响应", raw: r.body };
+    if (j.result !== "ok") return { ok: false, msg: j.msg || j.ext_msg || "服务端返回非 ok", raw: r.body };
+    const inner = (j.data || {}).fragment_collect || {};
+    if (inner.success === true) return { ok: true, msg: "", raw: r.body };
+    return { ok: false, msg: inner.reason || j.msg || "未成功", raw: r.body };
 }
 
 // ============ 任务:天天抽奖(免费次数 10 点后才刷新)============
@@ -894,7 +923,7 @@ async function taskAppletLottery() {
             return;
         }
         const times = Number(tj.data) || 0;
-        if (times < 1) { $.results.push(`✅ ${tag}:无可用次数`); return; }
+        if (times < 1) { $.results.push(`✅ ${tag}:无可用次数(次数靠浏览任务获得,需在微信小程序里做)`); return; }
 
         // 组件号现取,不写死;session_id 也从 page_info 读
         const filter = encodeURIComponent(JSON.stringify(APPLET.filter));
@@ -1014,7 +1043,7 @@ function classify(msg, doneLabel) {
     if (/无.*次数|没有.*次数|次数.*(用完|不足|为0)|达到?.*上限|已达.*上限|超(出|过).*次数|reach limit|out of limit|上限/i.test(m)) return { e: "✅", t: "已达上限" };
     if (/售罄|领完|抢完|发完|抢光|领光|out of stock|库存(不足)?|no stock|sold out|stock/i.test(m)) return { e: "⚠️", t: "已领完" };
     if (/资格|不满足|未满足|不符合|无权限|没有权限|没有资格|not (match|qualified)|不在.*(范围|名单)|未达条件/i.test(m)) return { e: "⚠️", t: "没资格" };
-    return { e: "⚠️", t: m.length > 30 ? m.slice(0, 30) + "…" : m };
+    return { e: "⚠️", t: m.length > 60 ? m.slice(0, 60) + "…" : m };
 }
 
 // 北京时间 YYYY-MM-DD(服务器可能为 UTC,固定 +8)
