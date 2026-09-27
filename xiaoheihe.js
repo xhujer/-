@@ -871,7 +871,7 @@ async function executeSign(account) {
   if (firstStatus !== OK_STATE) {
     return { ok: false, message: apiFailureMessage(first, "签到失败") };
   }
-  await sleep(800);
+  await sleep(1200);
   const finalPayload = await appGet(account, PATH_SIGN_STATE);
   const result =
     finalPayload && finalPayload.result && typeof finalPayload.result === "object"
