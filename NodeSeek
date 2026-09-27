@@ -7,7 +7,7 @@
 
 [Argument]
 
-RunTime = input,"0 0 * * *",tag=每日签到时间,desc=默认每天凌晨 00:00 执行签到
+RunTime = input,"0 0 * * *",tag=签到时间,desc=默认每天凌晨 00:00 执行签到
 
 CaptureCookie = switch,true,tag=自动获取 Cookie,desc=开启后访问 NodeSeek 自动更新 Cookie 和 User-Agent
 
