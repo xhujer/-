@@ -63,7 +63,11 @@ let ACTIVE_CSRF = "";
 
 // ===== http-request 抓包模式:保存 Cookie 到数组(自动追加+去重) =====
 async function saveCookieFromRequest() {
-    if ($request.method === "OPTIONS") return;
+    if ($request.method === "OPTIONS") {
+        $.log("[WARN] 这是 OPTIONS 预检请求,跳过");
+        $.msg("WPS", "⚠️ 抓到的不是活动页请求", `这是 OPTIONS 预检(${$request.url})。\n请用 Safari 打开 WPS 活动页,不要手动运行抓包脚本`);
+        return;
+    }
     // 开关开启时清空账号；只有首次实际清除数据时通知，避免同一页面重复弹窗
     if (shouldClearAll()) {
         const hadAccounts = getAccounts().length > 0;
@@ -71,6 +75,8 @@ async function saveCookieFromRequest() {
         $.setdata("", CK_KEY);
         if (hadAccounts) {
             $.msg("WPS", "", "✅ 全部账号 Cookie 已清除(插件开关触发),请重新抓取");
+        } else {
+            $.msg("WPS", "ℹ️ 账号本来就是空的", "「清空全部账号」开关记得关掉,否则会一直清");
         }
         return;
     }
@@ -79,7 +85,12 @@ async function saveCookieFromRequest() {
         const cookie = String($request.headers["Cookie"] || $request.headers["cookie"] || "");
         const m = cookie.match(/(?:^|;\s*)wps_sid=([^;]+)/);
         if (!m) {
-            $.log("[WARN] 请求头里没找到 wps_sid,可能该请求未带登录态,换个活动页重试");
+            const has = getAccounts().length > 0;
+            $.log(`[WARN] 请求头里没找到 wps_sid;该请求携带的 Cookie 键: ${(cookie.match(/(?:^|;\s*)([^=;]+)=/g) || []).join(",") || "(无)"}`);
+            // 已有账号时不打扰(可能只是打开了未登录的页面);一个账号都没有时必须说清楚
+            if (!has) {
+                $.msg("WPS", "⚠️ 没抓到登录态", `这次请求里没有 wps_sid。\n请先在 WPS/浏览器里登录,再打开活动页`);
+            }
             return;
         }
         const sid = m[1];
@@ -224,12 +235,20 @@ const ACTION_GAP = [5, 10];
 
 // ===== 双模式入口 =====
 // http-request(抓包):保存 Cookie 到数组;cron(签到):遍历所有账号依次签(参考 glados 同款单脚本双模式)
+// 每次运行第一行都会打印 build,用来确认 Loon 跑的到底是哪一版(改完脚本必看这一行)
+const SCRIPT_BUILD = "2026-09-27";
+const RUN_MODE = typeof $request !== "undefined" ? "抓Cookie" : "cron签到";
+$.log(`[WPS] 脚本启动 build=${SCRIPT_BUILD} mode=${RUN_MODE}`);
+
 if (typeof $request !== "undefined") {
+    $.log(`[WPS] 抓包请求: ${$request.method} ${$request.url}`);
     saveCookieFromRequest()
         .catch((e) => $.log(`[ERROR] Cookie 抓取流程异常: ${e}`))
         .finally(() => $.done());
 } else {
     $.results = [];
+    const accts = getAccounts();
+    $.log(`[WPS] 已存账号 ${accts.length} 个${accts.length ? "" : "(还没抓过 Cookie,先打开一次 WPS 活动页)"}`);
     // 兼容旧版持久化开关：wps_clear=true 时清空全部账号
     if (isTrueValue($.getdata("wps_clear"))) {
         $.setdata("[]", LIST_KEY);
@@ -1307,7 +1326,11 @@ function Env(s) {
     this.name = s;
     this.log = (...a) => console.log(a.join("\n"));
     this.msg = (t = this.name, s = "", b = "") => {
-        $notification.post(t, s, b);
+        try {
+            $notification.post(t, s, b);
+        } catch (e) {
+            this.log(`[WARN] 通知发送失败(不影响任务): ${e}`);
+        }
         console.log(["", "====📣" + t + "====", s, b].filter(Boolean).join("\n"));
     };
     this.getdata = (k) => $persistentStore.read(k);
