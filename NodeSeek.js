@@ -1,5 +1,4 @@
 const SCRIPT_NAME = "NodeSeek签到";
-const SCRIPT_BUILD = "v16-2026-09-27";
 let lastHttpDiagnostic = "";
 const DOMAIN = "www.nodeseek.com";
 
@@ -1103,7 +1102,7 @@ function formatAccountLine(account) {
       const message =
         "请开启自动获取 Cookie，然后在 Safari 登录并刷新一次 NodeSeek";
 
-      print(`${SCRIPT_NAME} ${SCRIPT_BUILD}\n❌ NodeSeek 签到失败\n\n${message}`);
+      print(`❌ NodeSeek 签到失败\n\n${message}`);
       notify("❌ NodeSeek 签到失败", "未获取 Cookie", message);
       return done();
     }
@@ -1164,7 +1163,7 @@ function formatAccountLine(account) {
         `${signResult.message}）。请在 Safari 重新登录 NodeSeek，` +
         "登录后刷新一次首页即可自动更新 Cookie。";
 
-      print(`${SCRIPT_NAME} ${SCRIPT_BUILD}\n签到模式：${signMode.name}\n\n${title}\n\n${message}`);
+      print(`签到模式：${signMode.name}\n\n${title}\n\n${message}`);
 
       if (shouldNotify(false)) {
         notify(title, signMode.name, message, {
@@ -1186,7 +1185,7 @@ function formatAccountLine(account) {
         : "";
 
       print(
-        `${SCRIPT_NAME} ${SCRIPT_BUILD}\n签到模式：${signMode.name}\n\n` +
+        `签到模式：${signMode.name}\n\n` +
           `${title}\n\n` +
           `${signResult.message}${extra}` +
           `\n\n诊断：${lastHttpDiagnostic || "(无)"}`
@@ -1224,7 +1223,7 @@ function formatAccountLine(account) {
     const accountLine = formatAccountLine(account);
 
     print(
-      `${SCRIPT_NAME} ${SCRIPT_BUILD}\n签到模式：${signMode.name}\n\n` +
+      `签到模式：${signMode.name}\n\n` +
         `${title}\n\n` +
         `${boardLine}\n\n` +
         `${accountLine}`
@@ -1236,15 +1235,13 @@ function formatAccountLine(account) {
         signMode.name,
         `${boardLine}\n\n${accountLine}`
       );
-    } else {
-      print("（今天已经通知过一次，本次仅记录日志）");
     }
 
     return done();
   } catch (error) {
     const message = `❌ 脚本异常：${cleanText(error?.message || error)}`;
 
-    print(`${SCRIPT_NAME} ${SCRIPT_BUILD}\n${message}`);
+    print(message);
     notify(SCRIPT_NAME, "❌ 脚本异常", message);
     return done();
   }
