@@ -1,9 +1,11 @@
 /**
- * WPS · 每日签到 + 福利中心(打卡/抽奖/会员试用申请/限量爆款领取)+ 小程序每日打卡,送积分与会员时长
+ * WPS · 每日签到 + 福利中心(打卡/抽奖/会员试用申请/限量爆款领取)+ PC 任务中心(自动做任务/抽奖)+ 小程序每日打卡,送积分与会员时长
  * 多账号版:单脚本双模式(http-request 抓 Cookie 入数组 / cron 遍历全部账号签到)
  *
  * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip> | 多账号改造 by Ming
- * @Updated: 2026-08-12
+ * @Updated: 2026-09-27
+ *   账号存储由「只存 wps_sid」改为「sid + 整个 Cookie 串」(旧数据自动迁移,不丢账号);
+ *   新增 PC 端「WPS任务中心」:签到清单 + 自动完成几十个任务 + 抽奖(组件号从 page_info 现取)。
  */
 
 const $ = new Env("WPS");
@@ -13,52 +15,59 @@ const CK_KEY = "wps_sid"; // 兼容旧版单账号数据
 // ===== 多账号支持(glados 式数组存储) =====
 // 所有账号 wps_sid 存 wps_sid_list JSON 数组,cron 一次跑完;兼容旧单账号 key wps_sid(自动迁移并入)
 const LIST_KEY = "wps_sid_list";
+// 账号记录格式:{ sid: "wps_sid 的值", ck: "整个 Cookie 串" }
+// 之所以存整串:PC 端「WPS任务中心」的 component_action 要带 act_csrf_token(在 Cookie 里),
+// 只存 wps_sid 拿不到。旧版存的纯字符串会自动补成 { sid, ck } 并原地迁移,不会丢账号。
 function accountTag(n) {
     return `[账号${n}]`;
 }
-function getSidList() {
+function normAcc(a) {
+    if (typeof a === "string") return a ? { sid: a, ck: `wps_sid=${a}; wps_sids=${a}` } : null;
+    if (a && a.sid) return { sid: a.sid, ck: a.ck || `wps_sid=${a.sid}; wps_sids=${a.sid}` };
+    return null;
+}
+function saveAccounts(list) {
+    $.setdata(JSON.stringify(list.map((a) => ({ sid: a.sid, ck: a.ck }))), LIST_KEY);
+}
+function getAccounts() {
+    let raw = [];
     try {
         const v = JSON.parse($.getdata(LIST_KEY) || "[]");
-        return Array.isArray(v) ? v : [];
+        raw = Array.isArray(v) ? v : [];
     } catch (e) {
-        return [];
+        raw = [];
     }
-}
-function saveSidList(list) {
-    $.setdata(JSON.stringify(list), LIST_KEY);
-}
-function collectAccounts() {
-    const list = getSidList();
-    // 兼容旧版单账号 key：迁移到数组后始终清理旧 key
+    const list = raw.map(normAcc).filter(Boolean);
+    // 兼容旧版单账号 key：迁移进数组后始终清理旧 key
     const old = $.getdata(CK_KEY);
     if (old) {
-        if (!list.includes(old)) list.unshift(old);
-        saveSidList(list);
+        if (!list.some((a) => a.sid === old)) list.unshift(normAcc(old));
+        saveAccounts(list);
         $.setdata("", CK_KEY);
     }
-    return list.map((sid, i) => ({ n: i + 1, sid }));
+    return list;
+}
+function collectAccounts() {
+    return getAccounts().map((a, i) => ({ n: i + 1, sid: a.sid, ck: a.ck }));
 }
 
 // 登录态明确失效时,把该 sid 从账号列表移除(避免每天重复报错;重抓后自动回到列表)
 function removeAccount(sid) {
-    const list = getSidList();
-    const idx = list.indexOf(sid);
-    if (idx >= 0) {
-        list.splice(idx, 1);
-        saveSidList(list);
-    }
+    saveAccounts(getAccounts().filter((a) => a.sid !== sid));
 }
 
-// 多账号:当前正在签到的账号 sid(mainForAccount 设置,httpReq/taskClockIn 优先使用;未设置时回退单账号存储)
+// 多账号:当前正在签到的账号(mainForAccount 设置,httpReq/taskClockIn 优先使用;未设置时回退单账号存储)
 let ACTIVE_SID = "";
+let ACTIVE_CK = "";
+let ACTIVE_CSRF = "";
 
 // ===== http-request 抓包模式:保存 Cookie 到数组(自动追加+去重) =====
 async function saveCookieFromRequest() {
     if ($request.method === "OPTIONS") return;
     // 开关开启时清空账号；只有首次实际清除数据时通知，避免同一页面重复弹窗
     if (shouldClearAll()) {
-        const hadAccounts = getSidList().length > 0 || !!$.getdata(CK_KEY);
-        saveSidList([]);
+        const hadAccounts = getAccounts().length > 0;
+        saveAccounts([]);
         $.setdata("", CK_KEY);
         if (hadAccounts) {
             $.msg("WPS", "", "✅ 全部账号 Cookie 已清除(插件开关触发),请重新抓取");
@@ -66,8 +75,8 @@ async function saveCookieFromRequest() {
         return;
     }
     try {
-        // page_info 请求头里带整套 cookie,从中只取 wps_sid(域 wps.cn 的持久登录态,不轮换、无需刷新)
-        const cookie = ($request.headers["Cookie"] || $request.headers["cookie"] || "");
+        // page_info 请求头里带整套 cookie,取 wps_sid 去重、整串 cookie 留用
+        const cookie = String($request.headers["Cookie"] || $request.headers["cookie"] || "");
         const m = cookie.match(/(?:^|;\s*)wps_sid=([^;]+)/);
         if (!m) {
             $.log("[WARN] 请求头里没找到 wps_sid,可能该请求未带登录态,换个活动页重试");
@@ -75,12 +84,18 @@ async function saveCookieFromRequest() {
         }
         const sid = m[1];
 
-        const list = getSidList();
-        if (list.includes(sid)) {
+        const accts = getAccounts();
+        const idx = accts.findIndex((a) => a.sid === sid);
+        if (idx >= 0) {
+            // 已抓过:顺手刷新 Cookie 串(比如这次才带上 act_csrf_token)
+            if (accts[idx].ck !== cookie) {
+                accts[idx].ck = cookie;
+                saveAccounts(accts);
+            }
             return;
         }
-        list.push(sid);
-        saveSidList(list);
+        accts.push({ sid, ck: cookie });
+        saveAccounts(accts);
 
         let uid = "";
         try {
@@ -93,7 +108,7 @@ async function saveCookieFromRequest() {
         }
 
         const identity = uid ? `账号ID:${uid}\n` : "";
-        $.msg("WPS", "✅ WPS Cookie 获取成功", `${identity}第 ${list.length} 个账号已保存,共 ${list.length} 个;重复抓取会自动去重`);
+        $.msg("WPS", "✅ WPS Cookie 获取成功", `${identity}第 ${accts.length} 个账号已保存,共 ${accts.length} 个;重复抓取会自动去重`);
     } catch (e) {
         $.log("[ERROR] cookie 抓取失败: " + e);
     }
@@ -150,6 +165,15 @@ const CLOCK_IN = "https://personal-bus.wps.cn/activity/clock_in/v1/clock_in";
 const CLOCK_REWARD = "https://personal-bus.wps.cn/activity/clock_in/v1/reward"; // 领取昨日打卡奖励(同套 Signature)
 const CLOCK_CONF = "https://personal-act.wpscdn.cn/srcapi/act/rubik-service/honeycomb-adapter/client/module-info?pid=113&mg_id=47736&id=48312";
 
+// ===== 小程序抽奖(小程序打卡页自己的抽奖,与福利中心抽奖是两套)=====
+// 次数走 personal-bus(只要 wps_sid),组件号从 page_info 现取;浏览任务拿次数的那条路走不通(见 README),这里只做抽奖
+const APPLET = {
+    activity_number: "HD2024082815116866",
+    page_number: "YM2024082815122017",
+    filter: { virtualPayEnabled: "1" },
+    lottery_times: "https://personal-bus.wps.cn/activity/clock_in/v1/task/lottery_times?position=wx_xcx_clock_activity",
+};
+
 // ===== 福利中心活动「WPS618 天天领福利」的组件标识(活动换期需更新) =====
 const FLZX = { activity_number: "HD2025031721339450", page_number: "YM2025060910400185" };
 // page_info 必带 position(否则组件无用户态,打卡序列读不到会误判新建);mk_key 渠道追踪留空即可
@@ -170,6 +194,30 @@ const COMPONENTS = {
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WpsiOS/26.6.1";
 // 小程序打卡走微信小程序 UA(打卡接口在 personal-bus 域,不带 APP 的 Origin/Referer)
 const MINI_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.49(0x18003123) NetType/WIFI Language/zh_CN miniProgram";
+// PC 端「WPS任务中心」按 Web 客户端下发任务清单,UA/Referer 必须与 position 匹配,不能复用 App UA
+const PC_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0";
+
+// ===== 任务中心活动(独立活动页,与上面的福利中心不是同一页)=====
+// 网页版任务中心:每日签到 + 自动完成几十个任务 + 抽奖。任务清单由服务端按 position 下发,组件号从 page_info 现取
+const TC = {
+    activity_number: "HD2025031821201822",
+    page_number: "YM2025040908558269",
+    filter: {
+        cs_from: "web_vipcenter_banner_inpublic",
+        mk_key: "4b9deqIfqNO3KCZrgH17WPH1kdzMoKUEvya",
+        position: "pc_aty_ban3_kaixue_test_b",
+    },
+    lottery_session: 2, // 抽奖 session_id,page_info 里读不到时兜底
+};
+const TC_REFERER = `https://personal-act.wps.cn/rubik2/portal/${TC.activity_number}/${TC.page_number}`
+    + `?cs_from=${TC.filter.cs_from}&mk_key=${TC.filter.mk_key}&position=${TC.filter.position}`;
+const TC_TASK_INFO = "https://personal-act.wps.cn/activity-rubik/user/task_center/task_info";
+const TC_TASK_FINISH = "https://personal-act.wps.cn/activity-rubik/user/task_center/task_finish";
+// 这些任务要么做不了(要真人操作/消费/绑定),要么是站外跳转,直接跳过不浪费请求
+const SKIP_KEYWORDS = ["邀请", "PDF转换", "PDF合并", "语音速记", "关注", "消费", "开通会员", "认证", "上喜马拉雅", "微博", "苏宁易购", "添加"];
+// 浏览类任务每个要真等十几秒,单轮限制个数,免得一轮 cron 跑不完
+const TC_MAX_BROWSE = 8;
+const TC_BROWSE_WAIT = 25; // 单次浏览等待上限(秒)
 
 // 动作间隔：每一步在指定秒数范围内独立随机等待
 const ACTION_GAP = [5, 10];
@@ -208,17 +256,20 @@ async function mainAll() {
     for (let i = 0; i < accounts.length; i++) {
         if (i > 0) await sleep(3000);
         $.results = [];
-        await mainForAccount(accounts[i].sid, accounts[i].n, report);
+        await mainForAccount(accounts[i].sid, accounts[i].n, report, accounts[i].ck);
     }
     if (report.length) {
         $.msg(`WPS 多账号签到(${accounts.length} 个账号)`, "", report.join("\n\n"));
     }
 }
 
-async function mainForAccount(sid, accountNo, report) {
+async function mainForAccount(sid, accountNo, report, ck) {
     const TAG = accountTag(accountNo);
     let LABEL = `账号${accountNo}`;
-    ACTIVE_SID = sid;
+    ACTIVE_SID = sid || "";
+    ACTIVE_CK = ck || (sid ? `wps_sid=${sid}; wps_sids=${sid}` : "");
+    const cm = ACTIVE_CK.match(/(?:^|;\s*)act_csrf_token=([^;]+)/);
+    ACTIVE_CSRF = cm ? cm[1] : "";
     if (!sid) {
         if (report && Array.isArray(report)) report.push(`【${LABEL}】🚫 缺少 Cookie`);
         else $.msg("WPS" + TAG, "🚫 缺少 Cookie", "请先开启 cookie 抓取脚本,打开 WPS APP 进任意活动页停留 1 秒");
@@ -255,14 +306,16 @@ async function mainForAccount(sid, accountNo, report) {
         return;
     }
 
-    // 任务清单：限量爆款排在最前；小程序打卡排在最后
+    // 任务清单：限量爆款排在最前；任务中心(PC 页)排在抽奖之后；小程序打卡排在最后
     const tasks = [
         ["wps_task_hot", () => taskHot()],
         ["wps_task_trial", () => taskTrial()],
         ["wps_task_signin", () => taskSignIn(uid)],
         ["wps_task_fragment", () => taskFragment()],
         ["wps_task_lottery", () => taskLottery()],
+        ["wps_task_center", () => taskCenter()],
         ["wps_task_clockin", () => taskClockIn()],
+        ["wps_task_applet_lottery", () => taskAppletLottery()],
     ];
     let ran = 0;
     for (const [key, run] of tasks) {
@@ -274,6 +327,155 @@ async function mainForAccount(sid, accountNo, report) {
 
     if (report && Array.isArray(report)) report.push(`【${LABEL}】\n${$.results.join("\n")}`);
     else $.msg("WPS 任务汇总" + TAG, "", $.results.join("\n"));
+}
+
+// ============ 任务:PC 端「WPS任务中心」(签到 + 自动做任务 + 抽奖)============
+// 这是独立活动页(HD2025031821201822),和上面的福利中心不是一页;任务清单由服务端下发,组件号现取不硬编码。
+
+async function fetchPageInfoPC() {
+    const filter = encodeURIComponent(JSON.stringify(TC.filter));
+    const pi = await httpReq("GET",
+        `${PAGE_INFO}?activity_number=${TC.activity_number}&page_number=${TC.page_number}&filter_params=${filter}`,
+        { pc: true });
+    const pj = safeJson(pi.body);
+    if (!pj || pj.result !== "ok" || !Array.isArray(pj.data)) {
+        debug(`任务中心 page_info 异常: ${(pi.body || "").slice(0, 300)}`);
+        return null;
+    }
+    return pj.data;
+}
+
+// 任务中心的通用动作:start / finish / reward,成功时服务端可能回 token(浏览任务要用)
+async function tcAction(uq, ctype, action, taskId) {
+    const reqObj = {
+        component_uniq_number: uq,
+        component_type: ctype,
+        component_action: action,
+        task_center: { task_id: taskId },
+    };
+    const r = await httpReq("POST", COMPONENT, { body: JSON.stringify(reqObj), pc: true });
+    const j = safeJson(r.body);
+    const inner = (j && j.data && j.data.task_center) || {};
+    if (j && j.result === "ok" && inner.success === true) return inner.token || true;
+    debug(`任务中心 ${action} #${taskId} 未成功: ${(r.body || "").slice(0, 200)}`);
+    return false;
+}
+
+// 浏览任务第 1 步:服务端返回 start_at(毫秒时长),加上本地起算时间 = 可以上报完成的 batch_tag
+async function tcTaskInfo(token) {
+    const started = Date.now();
+    const r = await httpReq("GET", `${TC_TASK_INFO}?batch_tag=${started}&token=${encodeURIComponent(token)}`, { pc: true });
+    const j = safeJson(r.body);
+    if (j && j.result === "ok" && j.data && typeof j.data.start_at === "number") return started + j.data.start_at;
+    debug(`task_info 异常: ${(r.body || "").slice(0, 200)}`);
+    return 0;
+}
+
+async function tcTaskFinish(token, batchTag) {
+    const r = await httpReq("POST", TC_TASK_FINISH, { body: JSON.stringify({ batch_tag: batchTag, token }), pc: true });
+    const j = safeJson(r.body);
+    if (j && j.result === "ok") return true;
+    debug(`task_finish 异常: ${(r.body || "").slice(0, 200)}`);
+    return false;
+}
+
+async function taskCenter() {
+    const tag = "任务中心";
+    try {
+        const list = await fetchPageInfoPC();
+        if (!list) { $.results.push(`❌ ${tag}:page_info 无响应`); return; }
+        const comp = list.find((c) => c && c.task_center);
+        if (!comp) { $.results.push(`⚠️ ${tag}:未找到任务组件(可能已换期)`); return; }
+
+        const uq = {
+            activity_number: TC.activity_number,
+            page_number: TC.page_number,
+            component_number: comp.number,
+            component_node_id: comp.component_node_id,
+            filter_params: TC.filter,
+        };
+        const all = (comp.task_center.task_list || []).filter((t) => t && t.task_id);
+        let ok = 0, skipped = 0, failed = 0, browse = 0;
+
+        for (const t of all) {
+            const title = String(t.title || "");
+            if (t.task_status === 2) { skipped++; continue; }
+            if (SKIP_KEYWORDS.some((k) => title.indexOf(k) >= 0)) { skipped++; continue; }
+            const isBrowse = title.indexOf("浏览") >= 0;
+            if (isBrowse && browse >= TC_MAX_BROWSE) { skipped++; continue; }
+
+            await sleep(jitter([1, 3]));
+            let done = false;
+            if (isBrowse) {
+                browse++;
+                // 浏览任务三步:start 拿 token → task_info 拿 batch_tag → 等够时长 → task_finish
+                const token = await tcAction(uq, comp.type, "task_center.start", t.task_id);
+                if (typeof token === "string" && token) {
+                    const batchTag = await tcTaskInfo(token);
+                    if (batchTag) {
+                        const wait = Math.min(TC_BROWSE_WAIT, Math.max(8, batchTag - Date.now()));
+                        await sleep(wait * 1000 + 1000);
+                        done = await tcTaskFinish(token, batchTag);
+                    }
+                }
+            } else {
+                done = (await tcAction(uq, comp.type, "task_center.finish", t.task_id)) !== false;
+            }
+
+            if (done) {
+                await sleep(jitter([1, 2]));
+                await tcAction(uq, comp.type, "task_center.reward", t.task_id);
+                ok++;
+            } else {
+                failed++;
+            }
+        }
+        $.results.push(`${failed ? "⚠️" : "✅"} ${tag}:完成 ${ok} · 跳过 ${skipped} · 失败 ${failed}(共 ${all.length})`);
+        await tcLottery(list);
+    } catch (e) {
+        $.results.push(`❌ ${tag}:异常`);
+        $.log(`[ERROR] ${tag}: ${e}`);
+    }
+}
+
+// 任务中心抽奖(session_id 优先取 page_info 里的,取不到用常量兜底)
+async function tcLottery(list) {
+    const tag = "任务中心抽奖";
+    const comp = (list || []).find((c) => c && c.lottery_v2 && Array.isArray(c.lottery_v2.lottery_list));
+    if (!comp) { $.results.push(`⚠️ ${tag}:未找到抽奖组件`); return; }
+    const sessions = comp.lottery_v2.lottery_list || [];
+    const sess = sessions.find((s) => s && s.session_id === TC.lottery_session) || sessions[0];
+    const times = (sess && sess.times) || 0;
+    if (times < 1) { $.results.push(`✅ ${tag}:今日暂无次数`); return; }
+
+    const got = [];
+    const cap = Math.min(times, 10);
+    for (let i = 0; i < cap; i++) {
+        const reqObj = {
+            component_uniq_number: {
+                activity_number: TC.activity_number,
+                page_number: TC.page_number,
+                component_number: comp.number,
+                component_node_id: comp.component_node_id,
+                filter_params: TC.filter,
+            },
+            component_type: comp.type,
+            component_action: "lottery_v2.exec",
+            lottery_v2: { session_id: (sess && sess.session_id) || TC.lottery_session },
+        };
+        const r = await httpReq("POST", COMPONENT, { body: JSON.stringify(reqObj), pc: true });
+        const j = safeJson(r.body);
+        const inner = (j && j.data && j.data.lottery_v2) || {};
+        if (j && j.result === "ok" && inner.success === true) {
+            got.push(inner.reward_name || "奖品");
+            await sleep(jitter([1, 2]));
+            continue;
+        }
+        const st = classify(inner.send_msg || (j && j.msg), "次数用完");
+        $.results.push(`${st.e} ${tag}:抽 ${got.length} 次${got.length ? " " + got.join("/") : ""}（${st.t}）`);
+        return;
+    }
+    $.results.push(`✅ ${tag}:抽 ${got.length} 次${got.length ? " " + got.join("/") : ""}`);
 }
 
 // ============ 任务:每日签到(请求体加密)============
@@ -654,6 +856,74 @@ async function claimClockInRewards(infBody, sid, s_key, ss) {
     }
 }
 
+// ============ 任务:小程序抽奖 ============
+// 与上面的「天天抽奖」不是一回事:这是小程序打卡活动自己的抽奖池(page_info 里 session_id=1)
+
+async function taskAppletLottery() {
+    const tag = "小程序抽奖";
+    try {
+        const sid = ACTIVE_SID || $.getdata(CK_KEY);
+
+        // 次数:personal-bus 接口,实测只认 wps_sid 这个 cookie
+        const t = await rawReq("GET", APPLET.lottery_times, { sid });
+        const tj = safeJson(t.body);
+        if (!tj || tj.result !== "ok") {
+            const msg = (tj && tj.msg) || (t.body || "").slice(0, 60) || "无响应";
+            // 「无效的wpssid」= 登录态问题,交给上面的 islogin 逻辑处理,这里如实报
+            $.results.push(`⚠️ ${tag}:次数查询失败(${msg})`);
+            debug(`${tag} 次数响应: ${(t.body || "").slice(0, 200)}`);
+            return;
+        }
+        const times = Number(tj.data) || 0;
+        if (times < 1) { $.results.push(`✅ ${tag}:无可用次数`); return; }
+
+        // 组件号现取,不写死;session_id 也从 page_info 读
+        const filter = encodeURIComponent(JSON.stringify(APPLET.filter));
+        const pi = await httpReq("GET",
+            `${PAGE_INFO}?activity_number=${APPLET.activity_number}&page_number=${APPLET.page_number}&filter_params=${filter}`);
+        const pj = safeJson(pi.body);
+        const node = ((pj && pj.data) || []).find((c) => c && c.lottery_v2 && Array.isArray(c.lottery_v2.lottery_list));
+        if (!node) {
+            $.results.push(`⚠️ ${tag}:未找到抽奖组件(可能已换期)`);
+            debug(`${tag} page_info: ${(pi.body || "").slice(0, 300)}`);
+            return;
+        }
+        const sess = (node.lottery_v2.lottery_list || []).find((s) => s && s.session_id != null) || {};
+        const req = {
+            component_uniq_number: {
+                activity_number: APPLET.activity_number,
+                page_number: APPLET.page_number,
+                component_number: node.number,
+                component_node_id: node.component_node_id,
+                filter_params: APPLET.filter,
+            },
+            component_type: node.type || 45,
+            component_action: "lottery_v2.exec",
+            lottery_v2: { session_id: sess.session_id != null ? sess.session_id : 1 },
+        };
+
+        const got = [];
+        for (let i = 0; i < Math.min(times, 10); i++) {
+            const r = await httpReq("POST", COMPONENT, { body: JSON.stringify(req) });
+            const j = safeJson(r.body);
+            const inner = (j && j.data && j.data.lottery_v2) || {};
+            if (j && j.result === "ok" && inner.success === true) {
+                got.push(inner.reward_name || "奖品");
+                await sleep(jitter([1, 2]));
+                continue;
+            }
+            const st = classify(inner.send_msg || (j && j.msg), "次数用完");
+            $.results.push(`${st.e} ${tag}:抽 ${got.length} 次${got.length ? " " + got.join("/") : ""}（${st.t}）`);
+            debug(`${tag} 响应: ${(r.body || "").slice(0, 200)}`);
+            return;
+        }
+        $.results.push(`✅ ${tag}:抽 ${got.length} 次${got.length ? " " + got.join("/") : ""}`);
+    } catch (e) {
+        $.results.push(`❌ ${tag}:异常`);
+        $.log(`[ERROR] ${tag}: ${e}`);
+    }
+}
+
 // 小程序打卡专用请求:personal-bus 域,X-CSRFToken + Signature 鉴权(与 personal-act 系列 header 不同,单独隔离)
 function rawReq(method, url, { sid, body, date, signature } = {}) {
     const headers = { "User-Agent": MINI_UA, "Accept": "*/*", "X-CSRFToken": "1234567890" };
@@ -691,16 +961,17 @@ function requestUserId(sid) {
     });
 }
 
-function httpReq(method, url, { body, token } = {}) {
+function httpReq(method, url, { body, token, pc } = {}) {
     const sid = ACTIVE_SID || $.getdata(CK_KEY);
     const headers = {
-        "User-Agent": UA,
-        "Cookie": `wps_sid=${sid}; wps_sids=${sid}`,
+        "User-Agent": pc ? PC_UA : UA,
+        "Cookie": ACTIVE_CK || `wps_sid=${sid}; wps_sids=${sid}`,
         "Origin": "https://personal-act.wps.cn",
-        "Referer": "https://personal-act.wps.cn/",
+        "Referer": pc ? TC_REFERER : "https://personal-act.wps.cn/",
     };
     if (body) headers["Content-Type"] = "application/json";
     if (token) headers["token"] = token;
+    if (pc && ACTIVE_CSRF) headers["X-Act-CSRFToken"] = ACTIVE_CSRF;
     return new Promise((resolve, reject) => {
         const req = { url, headers, body };
         const cb = (err, resp, data) => {
