@@ -1,5 +1,5 @@
 const SCRIPT_NAME = "NodeSeek签到";
-const SCRIPT_BUILD = "v5-2026-09-25";
+const SCRIPT_BUILD = "v12-2026-09-25";
 let lastHttpDiagnostic = "";
 const DOMAIN = "www.nodeseek.com";
 
@@ -12,6 +12,21 @@ const KEY_CAPTURE_NOTIFY_TIME = "nodeseek_capture_notify_time";
 const KEY_REFRACT_VERSION = "nodeseek_refract_version";
 const KEY_REFRACT_KEY = "nodeseek_refract_key";
 const KEY_REFRACT_FETCHED_AT = "nodeseek_refract_fetched_at";
+const KEY_NOTIFY_DAY = "nodeseek_notify_day";
+const KEY_BROWSER_HEADERS = "nodeseek_browser_headers";
+
+// 参考 ZenmoFeiShi/Qx 的 Nodeseek_NsCheckin.js：把浏览器真实的请求头整套抓下来重放
+const PICK_KEYS = [
+  "Accept",
+  "Accept-Encoding",
+  "Accept-Language",
+  "Priority",
+  "Connection",
+  "Sec-Fetch-Dest",
+  "Sec-Fetch-Mode",
+  "Sec-Fetch-Site",
+  "Referer"
+];
 
 // 仅作首次协商兜底；脚本会自动读取 sw.js，并处理 refract-key-update。
 const FALLBACK_REFRACT_VERSION = "0.3.34";
@@ -109,7 +124,12 @@ function isRecentIso(value, windowSeconds = 180) {
 let networkOverride = {};
 
 function getNetworkOptions() {
-  const options = {};
+  // 官方文档：$httpClient 默认 alpn="h1"（浏览器都是 h2）、默认 timeout=5000ms。
+  // 这里显式给 h2 + 更长超时，尽量贴近浏览器、避免慢响应被判超时。
+  const options = {
+    alpn: "h2",
+    timeout: 15000
+  };
 
   const alpn = cleanText(getArg("HttpVersion"));
 
@@ -132,6 +152,29 @@ function withNetwork(options) {
     ...getNetworkOptions(),
     ...(networkOverride || {})
   };
+}
+
+function todayStamp() {
+  const now = new Date();
+  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+}
+
+// 一天内允许多次尝试（CF 是动态判定，晚点再试常常就过了），
+// 但通知每天只弹一次，避免刷屏；签到成功则每次都弹。
+function shouldNotify(force) {
+  const today = todayStamp();
+
+  if (force) {
+    write(today, KEY_NOTIFY_DAY);
+    return true;
+  }
+
+  if (cleanText(read(KEY_NOTIFY_DAY)) === today) {
+    return false;
+  }
+
+  write(today, KEY_NOTIFY_DAY);
+  return true;
 }
 
 function sleep(ms) {
@@ -170,6 +213,8 @@ function httpGet(options) {
   return new Promise((resolve, reject) => {
     $httpClient.get(withNetwork(options), (error, response, data) => {
       if (error) {
+        lastHttpDiagnostic = `网络错误：${cleanText(error) || "未知错误"}`;
+        print(`请求失败：${cleanText(error)}`);
         reject(error);
         return;
       }
@@ -188,6 +233,8 @@ function httpPost(options) {
   return new Promise((resolve, reject) => {
     $httpClient.post(withNetwork(options), (error, response, data) => {
       if (error) {
+        lastHttpDiagnostic = `网络错误：${cleanText(error) || "未知错误"}`;
+        print(`请求失败：${cleanText(error)}`);
         reject(error);
         return;
       }
@@ -439,6 +486,23 @@ async function captureRequest() {
     write(cookie, KEY_COOKIE);
   }
 
+  // 非文档请求（XHR/API）→ 记下浏览器真实请求头，供定时任务原样重放
+  if (!isDocumentRequest(headers)) {
+    const picked = {};
+
+    for (const key of PICK_KEYS) {
+      const value = cleanText(getHeader(headers, key));
+
+      if (value) {
+        picked[key] = value;
+      }
+    }
+
+    if (Object.keys(picked).length >= 3) {
+      write(JSON.stringify(picked), KEY_BROWSER_HEADERS);
+    }
+  }
+
   write(newIdentitySignature, KEY_AUTH_SIGNATURE);
 
   if (
@@ -455,18 +519,43 @@ async function captureRequest() {
   }
 }
 
+function getCapturedHeaders() {
+  try {
+    const raw = cleanText(read(KEY_BROWSER_HEADERS));
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function buildCommonHeaders({ userAgent, referer, cookie = "", accept }) {
   const headers = {
-    Accept: accept || "application/json, text/plain, */*",
+    // 浏览器风格兜底
+    Accept: accept || "*/*",
+    "Accept-Encoding": "gzip, deflate",
     "Accept-Language": "zh-CN,zh-Hans;q=0.9,en;q=0.8",
-    Referer: referer || `https://${DOMAIN}/board`,
+    Connection: "keep-alive",
+    Priority: "u=3, i",
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-origin",
+    // 抓到的真实浏览器头优先（这是模仿得最像的一份）
+    ...getCapturedHeaders(),
+    // 本次请求必须固定的值
+    Referer: referer || `https://${DOMAIN}/board`,
+    Origin: `https://${DOMAIN}`,
+    // 社区实测（A1me7n/nodeseek-checkin）：签到请求少了这个头会被判
+    // high risk action —— 缺请求头导致的，不是风控。
+    "x-csrf-challenge": "simple-token",
     "User-Agent": userAgent || DEFAULT_USER_AGENT
   };
 
   // 仅在调用方明确传入时添加 Cookie。
+  // Loon 只能解 gzip/deflate（br/zstd 会解不开），所以强制覆盖掉抓到的
+  // Accept-Encoding，避免上游用 brotli 回包。
+  headers["Accept-Encoding"] = "gzip, deflate";
+
   if (cookie) {
     headers.Cookie = cookie;
   }
@@ -675,7 +764,15 @@ async function refreshRefractProtocol(userAgent) {
   }
 }
 
-async function signedRequest({
+async function signedRequest(options) {
+  try {
+    return await signedRequestInner(options);
+  } finally {
+    networkOverride = {};
+  }
+}
+
+async function signedRequestInner({
   method,
   url,
   userAgent,
@@ -719,21 +816,22 @@ async function signedRequest({
     // 实测：Loon（NSURLSession）会撞上 Cloudflare 挑战；无延迟连打 4 次只会把
     // 风险分推得更高，所以改成"退避重试"，最多 3 次。
     if (isCloudflarePage(lastResult.response, lastResult.data)) {
-      if (attempt >= 3) {
+      // 受原版插件 timeout=60 约束：只给一次换协议的补试机会
+      if (attempt >= 2) {
         networkOverride = {};
         return lastResult;
       }
 
-      // 实测：Loon 默认出口/协议被 CF 挑战，而 h2 + 设备自身出口能过。
-      // 第 2 次换直连出口，第 3 次换 HTTP/1.1，都带随机退避。
-      networkOverride = attempt === 1 ? { node: "DIRECT" } : { alpn: "h1" };
+      // 2026-09-25 实测：node:"DIRECT"（直连）在必须走代理的网络下会
+      // Request timeout，所以不再尝试直连；只切 HTTP 版本与退避。
+      networkOverride = attempt === 1 ? { alpn: "h1" } : {};
 
       // 退避要克制：原版插件 timeout=60，两次退避总和需留够余量
-      const waitMs = 3000 + Math.floor(Math.random() * 3000) * attempt;
+      const waitMs = 2000 + Math.floor(Math.random() * 2000) * attempt;
 
       print(
-        `遇到 Cloudflare 挑战，切换${attempt === 1 ? "直连出口" : "HTTP/1.1"}，` +
-          `${Math.round(waitMs / 1000)}s 后重试（第 ${attempt + 1}/3 次）`
+        `遇到 Cloudflare 挑战，切换${attempt === 1 ? "HTTP/1.1" : "HTTP/2"}，` +
+          `${Math.round(waitMs / 1000)}s 后重试（第 2/2 次）`
       );
 
       clearRefractCache();
@@ -838,7 +936,7 @@ async function signIn(cookie, userAgent, random) {
         userAgent,
         referer: `https://${DOMAIN}/board`
       }),
-      Origin: `https://${DOMAIN}`
+      "Content-Type": "text/plain;charset=UTF-8"
     },
     body
   });
@@ -1213,9 +1311,11 @@ function formatAccountLine(account) {
 
       print(`${SCRIPT_NAME} ${SCRIPT_BUILD}\n签到模式：${signMode.name}\n\n${title}\n\n${message}`);
 
-      notify(title, signMode.name, message, {
-        openUrl: `https://${DOMAIN}/signIn.html`
-      });
+      if (shouldNotify(false)) {
+        notify(title, signMode.name, message, {
+          openUrl: `https://${DOMAIN}/signIn.html`
+        });
+      }
 
       return done();
     }
@@ -1237,11 +1337,13 @@ function formatAccountLine(account) {
           `\n\n诊断：${lastHttpDiagnostic || "(无)"}`
       );
 
-      notify(
-        title,
-        signMode.name,
-        `${signResult.message}${extra}\n\n诊断：${lastHttpDiagnostic || "(无)"}`
-      );
+      if (shouldNotify(false)) {
+        notify(
+          title,
+          signMode.name,
+          `${signResult.message}${extra}\n\n诊断：${lastHttpDiagnostic || "(无)"}`
+        );
+      }
 
       return done();
     }
@@ -1273,11 +1375,15 @@ function formatAccountLine(account) {
         `${accountLine}`
     );
 
-    notify(
-      title,
-      signMode.name,
-      `${boardLine}\n\n${accountLine}`
-    );
+    if (shouldNotify(signResult.status === "success")) {
+      notify(
+        title,
+        signMode.name,
+        `${boardLine}\n\n${accountLine}`
+      );
+    } else {
+      print("（今天已经通知过一次，本次仅记录日志）");
+    }
 
     return done();
   } catch (error) {
