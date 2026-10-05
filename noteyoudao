@@ -23,13 +23,13 @@ debug = switch,false,tag=调试模式,desc=输出每个接口的原始响应，�
 
 [Script]
 # 抓取登录状态：从 App / 网页版流量中取出 Cookie，校验通过后保存（多账号自动追加）
-request if ${url} ~= /^https?:\/\/note\.youdao\.com\// then script("https://x0.at/IFSm.txt", {${clearAllAccounts}, ${debug}}) with tag="🟡有道云笔记获取账号", enable=${capture}, timeout=15, debug=${debug}
+request if ${url} ~= /^https?:\/\/note\.youdao\.com\// then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js", {${clearAllAccounts}, ${debug}}) with tag="🟡有道云笔记获取账号", enable=${capture}, timeout=15, debug=${debug}
 
 # 定时签到：刷新会话 → 登录奖励 → 签到 → 看广告 → 通知
-cron ${cron} then script("https://x0.at/IFSm.txt", {${enableNotify}, ${adPrompt}, ${adRandom}, ${adCount}, ${debug}}) with tag="🟡有道云笔记自动签到", timeout=600, debug=${debug}
+cron ${cron} then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js", {${enableNotify}, ${adPrompt}, ${adRandom}, ${adCount}, ${debug}}) with tag="🟡有道云笔记自动签到", timeout=600, debug=${debug}
 
 # 手动录入 Cookie 并立即执行一次签到（App 中手动运行）
-generic then script("https://x0.at/IFSm.txt", {${manualCookie}, ${enableNotify}, ${adPrompt}, ${adRandom}, ${adCount}, ${debug}}) with tag="🟡有道云笔记手动录入", img_url="note.text", timeout=600, debug=${debug}
+generic then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js", {${manualCookie}, ${enableNotify}, ${adPrompt}, ${adRandom}, ${adCount}, ${debug}}) with tag="🟡有道云笔记手动录入", img_url="note.text", timeout=600, debug=${debug}
 
 [Mitm]
 hostname = note.youdao.com
