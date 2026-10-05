@@ -1,6 +1,6 @@
 /*
  * 有道云笔记 · 自动签到 + 看广告领空间（Loon）
- * v1.6.0 · 接口按网页版 bundle 与 iOS App 抓包校对
+ * v1.7.2 · 接口按网页版 bundle 与 iOS App 抓包校对
  *
  * GET  /login/acc/pe/getsess?product=YNOTE    刷新会话
  * POST /yws/api/daupromotion?method=sync      每日登录奖励
@@ -15,7 +15,7 @@
  * 定时/手动：刷新会话 → 空间快照 → 登录奖励 → 签到 → 看广告 → 空间对账 → 通知
  */
 
-var SCRIPT_VERSION = "1.6.0";
+var SCRIPT_VERSION = "1.7.2";
 var HOST = "https://note.youdao.com";
 var KEY_ACCOUNTS = "noteyoudao_accounts";
 var KEY_BUSY = "noteyoudao_validating";
@@ -541,8 +541,8 @@ function watchAd(cookie, method) {
 }
 
 function notify(title, subtitle, body, attach) {
-  var text = title + "\n" + subtitle + "\n" + body;
-  log("通知 → " + text.replace(/\n/g, " | "));
+  debug("通知内容 → " + (title + " | " + subtitle + " | " + body).replace(/\n/g, " "));
+  log((CFG.enableNotify ? "通知已发送" : "通知已关闭") + " · " + subtitle);
   if (!CFG.enableNotify) return;
   try {
     if (attach) $notification.post(title, subtitle, body, attach);
@@ -571,8 +571,6 @@ async function runOne(acc, index) {
     log(label + " self 校验失败(" + me.error + ")，改用 sync 判定");
   }
   result.lines.push("👤 " + label);
-
-  var before = await userSpace(cookie);
 
   var sync = await dailySync(cookie);
   if (!sync.ok) {
@@ -622,33 +620,27 @@ async function runOne(acc, index) {
   result.space += adSpace;
 
   var after = await userSpace(cookie);
-  var spaceLine = "";
-  if (before && after) {
-    var grow = after.total - before.total;
-    spaceLine = "空间 " + fmtSize(before.total) + " → " + fmtSize(after.total) + "（实测 +" + fmtSize(grow) + "）";
-    if (after.used) spaceLine += " · 已用 " + fmtSize(after.used);
-    if (result.space - grow >= 1048576) {
-      spaceLine += " ⚠️ 接口声称 +" + fmtSize(result.space) + "，实际入账 +" + fmtSize(grow);
-    } else if (grow <= 0 && result.space > 0) {
-      spaceLine += " ⚠️ 服务端空间未变化";
-    }
-    debug("空间对账：声明 +" + fmtSize(result.space) + " / 实测 +" + fmtSize(grow));
-  }
+  var spaceLine = after
+    ? "空间 " + fmtSize(after.total) + (after.used ? " · 已用 " + fmtSize(after.used) : "")
+    : "";
 
   result.ok = true;
-  var days = (sync.continuousDays === undefined || sync.continuousDays === null || sync.continuousDays === "")
-    ? "" : " · 连签 " + sync.continuousDays + " 天";
+  result.days = (sync.continuousDays === undefined || sync.continuousDays === null || sync.continuousDays === "")
+    ? "" : String(sync.continuousDays);
+  result.spaceText = after ? fmtSize(after.total) : "";
+  var days = result.days ? " · 连签 " + result.days + " 天" : "";
   var head = "✅ " + label + days + " · 本次 " + (result.space > 0 ? "+" + fmtSize(result.space) : "无新增（今日已领过）");
   var detail = "登录 " + (sync.already ? "已领" : "+" + fmtSize(loginSpace)) +
     " · 签到 " + (ci.already ? "已签" : "+" + fmtSize(ci.space)) +
     " · 视频奖励 " + (rw.space > 0 ? "+" + fmtSize(rw.space) : "无") +
-    " · 广告 " + (adSpace > 0 ? "+" + fmtSize(adSpace) : "无额度") + (adNote ? "（" + adNote + "）" : "") +
-    " · 本月已签 " + monthDays(acc.key) + " 天";
+    " · 广告 " + (adSpace > 0 ? "+" + fmtSize(adSpace) : "无额度") + (adNote ? "（" + adNote + "）" : "");
+  result.detail = detail;
   result.lines.push(head);
   result.lines.push("　" + detail);
   if (spaceLine) result.lines.push("　" + spaceLine);
   log(head);
-  log(detail);
+  log(detail + " · 本月已签 " + monthDays(acc.key) + " 天");
+  if (spaceLine) log(spaceLine);
   return result;
 }
 
@@ -674,28 +666,33 @@ async function runCheckin() {
     return;
   }
 
-  var lines = [];
+  var blocks = [];
   var okCount = 0;
-  var totalSpace = 0;
+  var failed = 0;
   var authFailed = 0;
 
   for (var i = 0; i < accounts.length; i++) {
     var r = await runOne(accounts[i], i);
     if (r.ok) {
       okCount++;
-      totalSpace += r.space;
-      lines.push("【" + (i + 1) + "】" + r.lines.join("\n"));
+      blocks.push([
+        "用户昵称：" + r.label,
+        "连续签到：" + (r.days ? r.days + " 天" : "未知"),
+        "当前空间：" + (r.spaceText || "未知"),
+        r.detail
+      ].join("\n"));
     } else {
+      failed++;
       if (r.auth) authFailed++;
-      lines.push("【" + (i + 1) + "】" + r.label + " " + r.lines.join("\n"));
+      var errLines = r.lines.filter(function (l) { return l.indexOf("👤") !== 0; });
+      blocks.push("用户昵称：" + r.label + "\n" + errLines.join("\n"));
     }
   }
 
-  var sub = okCount + "/" + accounts.length + " 个账号成功";
-  if (totalSpace > 0) sub += " · 共 +" + fmtSize(totalSpace);
-  if (authFailed) sub += " · " + authFailed + " 个需重新抓取";
-  var tail = authFailed ? "\n\n⚠️ 有账号登录态失效：点这条通知打开网页版登录，插件会自动重新抓取。" : "";
-  notify("有道云笔记签到 v" + SCRIPT_VERSION, sub, lines.join("\n") + tail,
+  var sub = "今天已完成签到";
+  if (failed === accounts.length) sub = authFailed === failed ? "登录态已失效，请重新抓取" : "签到失败";
+  else if (failed > 0) sub = failed + " 个账号失败，其余已完成签到";
+  notify("📌 有道云笔记每日签到", sub, blocks.join("\n\n"),
     authFailed ? { openUrl: "https://note.youdao.com/web/" } : null);
 }
 
