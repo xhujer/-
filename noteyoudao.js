@@ -1,4 +1,5 @@
-* 有道云笔记 · 自动签到 + 看广告领空间（Loon）
+/*
+ * 有道云笔记 · 自动签到 + 看广告领空间（Loon）
  * v1.6.0 · 接口按网页版 bundle 与 iOS App 抓包校对
  *
  * GET  /login/acc/pe/getsess?product=YNOTE    刷新会话
