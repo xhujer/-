@@ -1,7 +1,7 @@
-#!name = 有道云笔记签到
-#!desc = 自动完成每日登录奖励、签到与看广告领空间。打开「有道云笔记」App 或网页版即自动抓取登录状态，支持多账号，失效自动提醒重新抓取。
+name = 有道云笔记签到
+#!desc = 每日自动完成登录奖励、签到、看广告领空间并做空间对账；打开 App 或网页版自动抓取登录状态
 #!author = Ming
-#!version = 1.1.0
+#!version = 1.4.1
 #!date = 2026-10-05
 #!system = iOS,iPadOS
 #!system_version = 15
@@ -11,25 +11,11 @@
 #!icon = https://note.youdao.com/favicon.ico
 
 [Argument]
-cron = input,"30 8 * * *",tag=定时执行,desc=默认每天 08:30 自动签到
-capture = switch,true,tag=自动获取账号,desc=打开有道云笔记 App 或网页版刷新一次即自动保存登录状态，多账号自动追加
-clearAllAccounts = switch,false,tag=清空全部账号,desc=开启后打开一次有道云笔记即清空全部已保存账号；清完后请关闭本开关
-manualCookie = input,"",tag=手动录入Cookie,desc=自动抓取失败时使用：粘贴网页版整段 Cookie，再手动运行「🟡有道云笔记手动录入」
-enableNotify = switch,true,tag=结果通知,desc=签到结束后发送一条通知
-adPrompt = switch,true,tag=普通广告,desc=执行 adPrompt 领取广告空间
-adRandom = switch,true,tag=视频广告,desc=执行 adRandomPrompt 领取视频广告空间
-adCount = input,"3",tag=每种广告次数,desc=默认 3 次，范围 0~10
-debug = switch,false,tag=调试模式,desc=输出每个接口的原始响应，便于排查问题
+cron = input,"30 8 * * *",tag=定时执行,desc=每天 08:30 自动签到，支持五段/六段 Cron
 
 [Script]
-# 抓取登录状态：从 App / 网页版流量中取出 Cookie，校验通过后保存（多账号自动追加）
-request if ${url} ~= /^https?:\/\/note\.youdao\.com\// then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js", {${clearAllAccounts}, ${debug}}) with tag="🟡有道云笔记获取账号", enable=${capture}, timeout=15, debug=${debug}
-
-# 定时签到：刷新会话 → 登录奖励 → 签到 → 看广告 → 通知
-cron ${cron} then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js", {${enableNotify}, ${adPrompt}, ${adRandom}, ${adCount}, ${debug}}) with tag="🟡有道云笔记自动签到", timeout=600, debug=${debug}
-
-# 手动录入 Cookie 并立即执行一次签到（App 中手动运行）
-generic then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js", {${manualCookie}, ${enableNotify}, ${adPrompt}, ${adRandom}, ${adCount}, ${debug}}) with tag="🟡有道云笔记手动录入", img_url="note.text", timeout=600, debug=${debug}
+request if ${url} ~= /^https?:\/\/note\.youdao\.com\/(yws|login)\// then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js") with tag="🟡有道云笔记获取账号", timeout=15
+cron ${cron} then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js") with tag="🟡有道云笔记自动签到", timeout=600
 
 [Mitm]
 hostname = note.youdao.com
