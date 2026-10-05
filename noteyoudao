@@ -1,21 +1,18 @@
-name = 有道云笔记签到
-#!desc = 每日自动完成登录奖励、签到、看广告领空间并做空间对账；打开 App 或网页版自动抓取登录状态
+#!name = 有道云笔记签到
+#!desc = 每日自动完成登录奖励、签到、视频奖励；打开 App 或网页版自动抓取登录状态，支持多账号
 #!author = Ming
-#!version = 1.4.1
+#!version = 1.0
 #!date = 2026-10-05
-#!system = iOS,iPadOS
-#!system_version = 15
-#!loon_version = 3.5.1(983)
 #!type = normal
 #!tag = 有道云笔记,云笔记,签到
 #!icon = https://note.youdao.com/favicon.ico
 
 [Argument]
-cron = input,"30 8 * * *",tag=定时执行,desc=每天 08:30 自动签到，支持五段/六段 Cron
+cron = input,"30 8 * * *",tag=定时执行,desc=每天 08:30 自动签到
 
 [Script]
-request if ${url} ~= /^https?:\/\/note\.youdao\.com\/(yws|login)\// then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js") with tag="🟡有道云笔记获取账号", timeout=15
-cron ${cron} then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js") with tag="🟡有道云笔记自动签到", timeout=600
+request if ${url} ~= /^https?:\/\/note\.youdao\.com\/(yws|login)\// then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js") with tag="有道云笔记获取账号", timeout=15
+cron ${cron} then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/noteyoudao.js") with tag="有道云笔记自动签到", timeout=600
 
 [Mitm]
 hostname = note.youdao.com
