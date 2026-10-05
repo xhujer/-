@@ -15,14 +15,16 @@
  * 定时/手动：刷新会话 → 空间快照 → 登录奖励 → 签到 → 看广告 → 空间对账 → 通知
  */
 
-var SCRIPT_VERSION = "1.4.1";
+var SCRIPT_VERSION = "1.5.0";
 var HOST = "https://note.youdao.com";
 var KEY_ACCOUNTS = "noteyoudao_accounts";
 var KEY_BUSY = "noteyoudao_validating";
 var KEY_DEVICE = "noteyoudao_device";
 var UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-var UA_IOS = "YNote/7.5.560 (iPhone; iOS 18.2.1; Scale/3.00)";
+var UA_IOS = "YNote/7.5.760 (iPhone; iOS 27.2; Scale/3.00)";
 var IDFA_ZERO = "00000000-0000-0000-0000-000000000000";
+var APP_VER = "7.5.760";
+var APP_KEYFROM = "note." + APP_VER + ".iPhone";
 var HTTP_TIMEOUT = 15000;
 
 var isRequest = typeof $request !== "undefined";
@@ -236,9 +238,25 @@ function deviceInfo() {
       if (d && d.appUser) return d;
     } catch (e) {}
   }
-  var dev = { appUser: randHex(32), deviceId: randHex(16) };
+  var dev = {
+    appUser: randHex(32),
+    deviceId: randHex(16),
+    uuid: randUuid(),
+    imeiHash: randHex(32),
+    firstTime: nowText(),
+    launch: 1
+  };
   $persistentStore.write(JSON.stringify(dev), KEY_DEVICE);
   return dev;
+}
+function randUuid() {
+  return (randHex(8) + "-" + randHex(4) + "-" + randHex(4) + "-" + randHex(4) + "-" + randHex(12)).toUpperCase();
+}
+function nowText() {
+  var d = new Date();
+  function p(n) { return (n < 10 ? "0" : "") + n; }
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+    " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
 }
 function webParams(cookie, extra) {
   var dev = deviceInfo();
@@ -384,29 +402,74 @@ function signStatus(cookie) {
     return { signed: Number(json.isSignIn) === 1 };
   });
 }
-function iosBody() {
-  return "IDFA=" + IDFA_ZERO + "&_appName=ynote&_cityCode=&_cityName=&_device=iPhone&_idfa=" + IDFA_ZERO +
-    "&_launch=0&_manufacturer=apple&_network=wifi&_operator=UNKNOWN&_platform=ios&_sbp=true" +
-    "&_screenHeight=926&_screenWidth=428&_system=iOS&_systemVersion=18.2.1&_vendor=AppStore&_version=7.5.560" +
-    "&client_ver=7.5.560&device_model=iPhone&device_name=iPhone&device_type=iPhone&keyfrom=note.7.5.560.iPhone" +
-    "&level=user&login=netease&mid=18.2.1&model=iPhone&net=wifi&os=iOS&os_ver=18.2.1&phoneVersion=iPhone" +
-    "&sec=v1&sev=j1&strategy=VIP_MULTIPLY&vendor=AppStore";
+/* App 客户端参数（真机 HAR 抓到的字段，值用本机设备参数填充） */
+function iosBody(extra) {
+  var dev = deviceInfo();
+  var p = {
+    IDFA: IDFA_ZERO,
+    _appName: "ynote",
+    _appuser: dev.appUser,
+    _cityCode: "",
+    _cityName: "",
+    _device: "iPhone",
+    _firstTime: dev.firstTime,
+    _idfa: IDFA_ZERO,
+    _imei: dev.imeiHash,
+    _launch: String(dev.launch),
+    _manufacturer: "apple",
+    _network: "wifi",
+    _operator: "UNKNOWN",
+    _platform: "ios",
+    _sbp: "true",
+    _screenHeight: "956",
+    _screenWidth: "440",
+    _system: "iOS",
+    _systemVersion: "27.2",
+    _vendor: "AppStore",
+    _version: APP_VER,
+    client_ver: APP_VER,
+    device_id: "iPhone-" + dev.uuid,
+    device_model: "iPhone",
+    device_name: "iPhone",
+    device_type: "iPhone",
+    imei: dev.uuid,
+    keyfrom: APP_KEYFROM,
+    level: "user",
+    login: "phone",
+    mid: "27.2",
+    model: "iPhone",
+    net: "wifi",
+    os: "iOS",
+    os_ver: "27.2",
+    phoneVersion: "iPhone",
+    sec: "v1",
+    sev: "j1",
+    strategy: "VIP_MULTIPLY",
+    vendor: "AppStore"
+  };
+  if (extra) {
+    for (var k in extra) {
+      if (Object.prototype.hasOwnProperty.call(extra, k)) p[k] = extra[k];
+    }
+  }
+  return qs(p);
+}
+function appRequest(url, cookie, extra) {
+  var h = apiHeaders(cookie);
+  h["User-Agent"] = UA_IOS;
+  h["Accept"] = "*/*";
+  h["Content-Type"] = "application/x-www-form-urlencoded";
+  return httpPost(url, h, iosBody(extra));
 }
 function checkinRequest(mode, cookie) {
-  if (mode === "ios") {
-    var h = apiHeaders(cookie);
-    h["User-Agent"] = UA_IOS;
-    h["Accept"] = "*/*";
-    h["Content-Type"] = "application/x-www-form-urlencoded";
-    return httpPost(HOST + "/yws/mapi/user?method=checkin", h, iosBody());
-  }
+  if (mode === "ios") return appRequest(HOST + "/yws/mapi/user?method=checkin", cookie);
   if (mode === "web") return webPost({ method: "checkin", device_type: "PC" }, cookie);
   return httpPost(HOST + "/yws/mapi/user?method=checkin", apiHeaders(cookie));
 }
 async function checkin(cookie) {
   var order = CFG.checkinMode === "web" ? ["web", "basic"]
     : CFG.checkinMode === "ios" ? ["ios", "basic"]
-      : cstkOf(cookie) ? ["web", "ios", "basic"] : ["ios", "basic"];
+      : ["ios", "web", "basic"];
   var last = { error: "unknown" };
   for (var i = 0; i < order.length; i++) {
     var r = await checkinRequest(order[i], cookie);
@@ -417,6 +480,19 @@ async function checkin(cookie) {
     if (i < order.length - 1) debug(order[i] + " 被拒，改用 " + order[i + 1] + " 重试");
   }
   return apiError(last);
+}
+
+/* 视频广告奖励：POST /yws/mapi/user?method=reward（真机 HAR 里返回 {"success":1,"space":1048576}） */
+function claimAdReward(cookie) {
+  return appRequest(HOST + "/yws/mapi/user?method=reward", cookie, {
+    businessType: "ADVERT_VIDEO",
+    businessCode: "150"
+  }).then(function (r) {
+    var json = safeJson(r.body) || {};
+    debug("reward HTTP " + r.status + " → " + shortBody(r.body, 300));
+    if (json.error || !json.success) return { ok: false, space: 0 };
+    return { ok: true, space: Number(json.space) || 0 };
+  });
 }
 
 function watchAd(cookie, method) {
@@ -482,6 +558,9 @@ async function runOne(acc, index) {
   }
   result.space += ci.already ? 0 : ci.space;
 
+  var rw = await claimAdReward(cookie);
+  result.space += rw.space;
+
   var adSpace = 0;
   var adNote = "";
   if (CFG.adCount > 0) {
@@ -520,6 +599,7 @@ async function runOne(acc, index) {
   var head = "✅ " + label + days + " · 本次 +" + fmtSize(result.space);
   var detail = "登录 +" + fmtSize(loginSpace) + (sync.already ? "(已领)" : "") +
     " · 签到 " + (ci.already ? "已签" : "+" + fmtSize(ci.space)) +
+    " · 视频奖励 +" + fmtSize(rw.space) +
     " · 广告 +" + fmtSize(adSpace) + (adNote ? "（" + adNote + "）" : "");
   result.lines.push(head);
   result.lines.push("　" + detail);
