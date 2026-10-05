@@ -13,11 +13,12 @@
  * 定时/手动：刷新会话 → 登录奖励 → 签到 → 看广告 → 汇总通知
  */
 
-var SCRIPT_VERSION = "1.1.0";
+var SCRIPT_VERSION = "1.2.0";
 var HOST = "https://note.youdao.com";
 var KEY_ACCOUNTS = "noteyoudao_accounts";
 var KEY_BUSY = "noteyoudao_validating";
-var UA = "ynote-android";
+var KEY_DEVICE = "noteyoudao_device";
+var UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 var HTTP_TIMEOUT = 15000;
 
 var isRequest = typeof $request !== "undefined";
@@ -108,9 +109,10 @@ function maskAccount(key) {
   if (s.length <= 6) return s;
   return s.slice(0, 3) + "***" + s.slice(-3);
 }
-function shortBody(text) {
+function shortBody(text, limit) {
+  var max = limit || 160;
   var s = String(text || "").replace(/[\r\n\t]+/g, " ").trim();
-  return s.length > 160 ? s.slice(0, 160) + "…" : s;
+  return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
 function readAccounts() {
@@ -170,10 +172,10 @@ function httpGet(url, headers, extra) {
     });
   });
 }
-function httpPost(url, headers) {
+function httpPost(url, headers, body) {
   return new Promise(function (resolve) {
     var opt = requestOptions(url, headers);
-    opt.body = "";
+    opt.body = body === undefined ? "" : body;
     $httpClient.post(opt, function (err, resp, data) {
       resolve(normalize(err, resp, data));
     });
@@ -203,7 +205,67 @@ function apiHeaders(cookie) {
   return {
     "Cookie": cookie,
     "User-Agent": UA,
-    "Accept": "*/*"
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://note.youdao.com/web/"
+  };
+}
+function formHeaders(cookie) {
+  var h = apiHeaders(cookie);
+  h["Content-Type"] = "application/x-www-form-urlencoded;charset=utf-8";
+  return h;
+}
+function cstkOf(cookie) {
+  return cookieToObj(cookie).YNOTE_CSTK || "";
+}
+function qs(obj) {
+  var list = [];
+  for (var k in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) list.push(encodeURIComponent(k) + "=" + encodeURIComponent(obj[k]));
+  }
+  return list.join("&");
+}
+function randHex(len) {
+  var s = "";
+  while (s.length < len) s += Math.floor(Math.random() * 16).toString(16);
+  return s;
+}
+/* 网页版客户端会带一组设备参数，这里生成一次后固定下来 */
+function deviceInfo() {
+  var raw = $persistentStore.read(KEY_DEVICE);
+  if (raw) {
+    try {
+      var d = JSON.parse(raw);
+      if (d && d.appUser) return d;
+    } catch (e) { }
+  }
+  var dev = { appUser: randHex(32), deviceId: randHex(16) };
+  $persistentStore.write(JSON.stringify(dev), KEY_DEVICE);
+  return dev;
+}
+function webParams(method, cookie) {
+  var dev = deviceInfo();
+  return {
+    method: method,
+    device_type: "PC",
+    _system: "web",
+    _systemVersion: "",
+    _screenWidth: "1920",
+    _screenHeight: "1080",
+    _appName: "ynote",
+    _appuser: dev.appUser,
+    _vendor: "official-website",
+    _launch: "0",
+    _firstTime: "",
+    _deviceId: dev.deviceId,
+    _platform: "web",
+    _cityCode: "",
+    _cityName: "",
+    _product: "YNote-Web",
+    _version: "",
+    sev: "j1",
+    sec: "v1",
+    keyfrom: "web",
+    cstk: cstkOf(cookie)
   };
 }
 function collectSetCookie(headers) {
@@ -268,7 +330,7 @@ function apiError(json) {
 function dailySync(cookie) {
   return httpPost(HOST + "/yws/api/daupromotion?method=sync", apiHeaders(cookie)).then(function (r) {
     var json = safeJson(r.body) || {};
-    debug("sync HTTP " + r.status + " → " + shortBody(r.body));
+    debug("sync HTTP " + r.status + " → " + shortBody(r.body, 400));
     if (json.error) return apiError(json);
     return {
       ok: true,
@@ -279,23 +341,41 @@ function dailySync(cookie) {
   });
 }
 
+function isAlreadySigned(json, text) {
+  return json.success === 0 || /already|today|已签|已经签|重复签/.test(String(text || ""));
+}
+function checkinOk(json, text) {
+  return {
+    ok: true,
+    already: isAlreadySigned(json, text),
+    space: (Number(json.space) || 0) + (Number(json.rewardSpace) || 0)
+  };
+}
+/* 网页版签到：URL 带客户端参数，表单体带 cstk（对齐网页端拦截器抓到的请求）。
+ * 被服务端拒绝时退回基础 POST，保证不会比旧版更差。 */
 function checkin(cookie) {
-  return httpPost(HOST + "/yws/mapi/user?method=checkin", apiHeaders(cookie)).then(function (r) {
+  var p = webParams("checkin", cookie);
+  var url = HOST + "/yws/mapi/user?" + qs(p);
+  return httpPost(url, formHeaders(cookie), "cstk=" + encodeURIComponent(p.cstk)).then(function (r) {
+    debug("checkin(web) HTTP " + r.status + " → " + shortBody(r.body, 400));
     var json = safeJson(r.body) || {};
-    debug("checkin HTTP " + r.status + " → " + shortBody(r.body));
-    if (json.error) return apiError(json);
-    return {
-      ok: true,
-      already: json.success === 0,
-      space: (Number(json.space) || 0) + (Number(json.rewardSpace) || 0)
-    };
+    if (json.error && !isAlreadySigned(json, r.body)) {
+      debug("网页版参数被拒，改用基础请求重试");
+      return httpPost(HOST + "/yws/mapi/user?method=checkin", apiHeaders(cookie)).then(function (r2) {
+        var j2 = safeJson(r2.body) || {};
+        debug("checkin(basic) HTTP " + r2.status + " → " + shortBody(r2.body, 400));
+        if (j2.error && !isAlreadySigned(j2, r2.body)) return apiError(j2);
+        return checkinOk(j2, r2.body);
+      });
+    }
+    return checkinOk(json, r.body);
   });
 }
 
 function watchAd(cookie, method) {
   return httpPost(HOST + "/yws/mapi/user?method=" + method, apiHeaders(cookie)).then(function (r) {
     var json = safeJson(r.body) || {};
-    debug(method + " HTTP " + r.status + " → " + shortBody(r.body));
+    debug(method + " HTTP " + r.status + " → " + shortBody(r.body, 400));
     if (json.error) return { ok: false, space: 0 };
     return { ok: true, space: (Number(json.space) || 0) + (Number(json.rewardSpace) || 0) };
   });
@@ -349,7 +429,7 @@ async function runOne(acc, index) {
     log(label + " 签到失败: " + ci.message);
     return result;
   }
-  result.space += ci.space;
+  result.space += ci.already ? 0 : ci.space;
 
   var adSpace = 0;
   var adNote = "";
