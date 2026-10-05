@@ -13,7 +13,7 @@
  * 定时/手动：刷新会话 → 登录奖励 → 签到 → 看广告 → 汇总通知
  */
 
-var SCRIPT_VERSION = "1.2.0";
+var SCRIPT_VERSION = "1.3.0";
 var HOST = "https://note.youdao.com";
 var KEY_ACCOUNTS = "noteyoudao_accounts";
 var KEY_BUSY = "noteyoudao_validating";
@@ -242,11 +242,9 @@ function deviceInfo() {
   $persistentStore.write(JSON.stringify(dev), KEY_DEVICE);
   return dev;
 }
-function webParams(method, cookie) {
+function webParams(cookie, extra) {
   var dev = deviceInfo();
-  return {
-    method: method,
-    device_type: "PC",
+  var p = {
     _system: "web",
     _systemVersion: "",
     _screenWidth: "1920",
@@ -267,6 +265,12 @@ function webParams(method, cookie) {
     keyfrom: "web",
     cstk: cstkOf(cookie)
   };
+  if (extra) {
+    for (var k in extra) {
+      if (Object.prototype.hasOwnProperty.call(extra, k)) p[k] = extra[k];
+    }
+  }
+  return p;
 }
 function collectSetCookie(headers) {
   var raw = getHeader(headers, "Set-Cookie");
@@ -351,10 +355,40 @@ function checkinOk(json, text) {
     space: (Number(json.space) || 0) + (Number(json.rewardSpace) || 0)
   };
 }
+/* 绝对值显示：3.05GB / 66.0MB */
+function fmtSize(bytes) {
+  var n = Math.abs(Number(bytes) || 0);
+  if (n >= 1073741824) return (n / 1073741824).toFixed(2) + "GB";
+  if (n >= 1048576) return (n / 1048576).toFixed(n >= 104857600 ? 0 : 1) + "MB";
+  if (n >= 1024) return (n / 1024).toFixed(0) + "KB";
+  return n > 0 ? n + "B" : "0MB";
+}
+/* 账号空间：网页版用户面板用的就是这个接口（q 总量 / u 已用 / nn 昵称） */
+function userSpace(cookie) {
+  var url = HOST + "/yws/mapi/user?" + qs(webParams(cookie, { method: "get", vendor: "", multilevelEnable: "true" }));
+  return httpGet(url, apiHeaders(cookie)).then(function (r) {
+    var json = safeJson(r.body) || {};
+    debug("userSpace HTTP " + r.status + " → " + shortBody(r.body, 400));
+    var q = Number(json.q) || 0;
+    if (json.error || !q) return null;
+    return { total: q, used: Number(json.u) || 0, name: json.nn || "" };
+  });
+}
+/* 今日是否已签到（服务端权威状态） */
+function signStatus(cookie) {
+  var p = webParams(cookie, { method: "getSignStatus", device_type: "PC" });
+  return httpPost(HOST + "/yws/mapi/user?" + qs(p), formHeaders(cookie), "cstk=" + encodeURIComponent(p.cstk))
+    .then(function (r) {
+      var json = safeJson(r.body) || {};
+      debug("signStatus HTTP " + r.status + " → " + shortBody(r.body, 200));
+      if (json.error || json.isSignIn === undefined) return null;
+      return { signed: Number(json.isSignIn) === 1 };
+    });
+}
 /* 网页版签到：URL 带客户端参数，表单体带 cstk（对齐网页端拦截器抓到的请求）。
  * 被服务端拒绝时退回基础 POST，保证不会比旧版更差。 */
 function checkin(cookie) {
-  var p = webParams("checkin", cookie);
+  var p = webParams(cookie, { method: "checkin", device_type: "PC" });
   var url = HOST + "/yws/mapi/user?" + qs(p);
   return httpPost(url, formHeaders(cookie), "cstk=" + encodeURIComponent(p.cstk)).then(function (r) {
     debug("checkin(web) HTTP " + r.status + " → " + shortBody(r.body, 400));
@@ -412,6 +446,8 @@ async function runOne(acc, index) {
   }
   result.lines.push("👤 " + label);
 
+  var before = await userSpace(cookie);
+
   var sync = await dailySync(cookie);
   if (!sync.ok) {
     result.auth = !!sync.auth || !me.ok;
@@ -422,7 +458,8 @@ async function runOne(acc, index) {
   var loginSpace = sync.already ? 0 : sync.rewardSpace;
   result.space += loginSpace;
 
-  var ci = await checkin(cookie);
+  var st = await signStatus(cookie);
+  var ci = (st && st.signed) ? { ok: true, already: true, space: 0 } : await checkin(cookie);
   if (!ci.ok) {
     result.auth = !!ci.auth;
     result.lines.push("❌ 签到失败：" + ci.message);
@@ -453,6 +490,16 @@ async function runOne(acc, index) {
   }
   result.space += adSpace;
 
+  var after = await userSpace(cookie);
+  var spaceLine = "";
+  if (before && after) {
+    var grow = after.total - before.total;
+    spaceLine = "空间 " + fmtSize(before.total) + " → " + fmtSize(after.total) + "（实测 +" + fmtSize(grow) + "）";
+    if (after.used) spaceLine += " · 已用 " + fmtSize(after.used);
+    if (grow <= 0 && result.space > 0) spaceLine += " ⚠️ 服务端空间未变化";
+    debug("空间对账：声明 +" + fmtSize(result.space) + " / 实测 +" + fmtSize(grow));
+  }
+
   result.ok = true;
   var days = (sync.continuousDays === undefined || sync.continuousDays === null || sync.continuousDays === "")
     ? "" : " · 连签 " + sync.continuousDays + " 天";
@@ -462,6 +509,7 @@ async function runOne(acc, index) {
     " · 广告 +" + mb(adSpace) + (adNote ? "（" + adNote + "）" : "");
   result.lines.push(head);
   result.lines.push("　" + detail);
+  if (spaceLine) result.lines.push("　" + spaceLine);
   log(head);
   log(detail);
   return result;
