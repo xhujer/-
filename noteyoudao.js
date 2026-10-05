@@ -1,6 +1,5 @@
-/*
- * 有道云笔记 · 自动签到 + 看广告领空间（Loon）
- * v1.5.2 · 接口按网页版 bundle 与 iOS App 抓包校对
+* 有道云笔记 · 自动签到 + 看广告领空间（Loon）
+ * v1.6.0 · 接口按网页版 bundle 与 iOS App 抓包校对
  *
  * GET  /login/acc/pe/getsess?product=YNOTE    刷新会话
  * POST /yws/api/daupromotion?method=sync      每日登录奖励
@@ -15,11 +14,12 @@
  * 定时/手动：刷新会话 → 空间快照 → 登录奖励 → 签到 → 看广告 → 空间对账 → 通知
  */
 
-var SCRIPT_VERSION = "1.5.2";
+var SCRIPT_VERSION = "1.6.0";
 var HOST = "https://note.youdao.com";
 var KEY_ACCOUNTS = "noteyoudao_accounts";
 var KEY_BUSY = "noteyoudao_validating";
 var KEY_DEVICE = "noteyoudao_device";
+var KEY_DAYS = "noteyoudao_days";
 var UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 var UA_IOS = "YNote/7.5.760 (iPhone; iOS 27.2; Scale/3.00)";
 var IDFA_ZERO = "00000000-0000-0000-0000-000000000000";
@@ -114,6 +114,34 @@ function shortBody(text, limit) {
   var max = limit || 160;
   var s = String(text || "").replace(/[\r\n\t]+/g, " ").trim();
   return s.length > max ? s.slice(0, max) + "…" : s;
+}
+
+function today() {
+  var d = new Date();
+  function p(n) { return (n < 10 ? "0" : "") + n; }
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+}
+function readDays() {
+  try {
+    var o = JSON.parse($persistentStore.read(KEY_DAYS) || "{}");
+    return (o && typeof o === "object") ? o : {};
+  } catch (e) {
+    return {};
+  }
+}
+/* 记录今天签到成功（只留当月，避免数据无限增长） */
+function markDay(key) {
+  var o = readDays();
+  var month = today().slice(0, 7);
+  var list = (o[key] || []).filter(function (d) { return String(d).slice(0, 7) === month; });
+  if (list.indexOf(today()) < 0) list.push(today());
+  o[key] = list;
+  $persistentStore.write(JSON.stringify(o), KEY_DAYS);
+}
+function monthDays(key) {
+  var month = today().slice(0, 7);
+  var list = readDays()[key] || [];
+  return list.filter(function (d) { return String(d).slice(0, 7) === month; }).length;
 }
 
 function readAccounts() {
@@ -328,22 +356,29 @@ function refreshSession(cookie) {
 function fetchSelf(cookie) {
   return httpGet(HOST + "/yws/api/self?method=get", apiHeaders(cookie)).then(function (r) {
     var json = safeJson(r.body);
-    if (json && !json.error) {
+    if (json && !hasError(json)) {
       return { ok: true, name: json.name || "", uid: json.userId || json.userid || "" };
     }
     return {
       ok: false,
-      error: json && json.error ? String(json.error) : ("HTTP " + r.status),
+      error: json && (json.error || json.errorCode) ? String(json.error || json.errorCode) : ("HTTP " + r.status),
       message: json && json.message ? String(json.message) : shortBody(r.body)
     };
   });
 }
 
+/* 接口报错判定：error / errorCode / "not login" 文案任一命中 */
+function hasError(json) {
+  if (!json) return false;
+  return !!(json.error || json.errorCode || /not login/i.test(String(json.message || "")));
+}
 function apiError(json) {
+  var code = String(json.error || json.errorCode || "");
+  var msg = String(json.message || "");
   return {
     ok: false,
-    auth: String(json.error) === "207" || /AUTHENTICATION_FAILURE/i.test(String(json.message || "")),
-    message: String(json.message || json.error)
+    auth: code === "207" || /AUTHENTICATION_FAILURE|not login/i.test(code + " " + msg),
+    message: msg || code
   };
 }
 
@@ -351,7 +386,7 @@ function dailySync(cookie) {
   return httpPost(HOST + "/yws/api/daupromotion?method=sync", apiHeaders(cookie)).then(function (r) {
     var json = safeJson(r.body) || {};
     debug("sync HTTP " + r.status + " → " + shortBody(r.body, 400));
-    if (json.error) return apiError(json);
+    if (hasError(json)) return apiError(json);
     return {
       ok: true,
       already: json.accept === false,
@@ -390,7 +425,7 @@ function userSpace(cookie) {
     var json = safeJson(r.body) || {};
     debug("userSpace HTTP " + r.status + " → " + shortBody(r.body, 400));
     var q = Number(json.q) || 0;
-    if (json.error || !q) return null;
+    if (hasError(json) || !q) return null;
     return { total: q, used: Number(json.u) || 0 };
   });
 }
@@ -475,7 +510,7 @@ async function checkin(cookie) {
     var r = await checkinRequest(order[i], cookie);
     var json = safeJson(r.body) || {};
     debug("checkin(" + order[i] + ") HTTP " + r.status + " → " + shortBody(r.body, 400));
-    if (!json.error || isAlreadySigned(json, r.body)) return checkinOk(json, r.body);
+    if (!hasError(json) || isAlreadySigned(json, r.body)) return checkinOk(json, r.body);
     last = json;
     if (i < order.length - 1) debug(order[i] + " 被拒，改用 " + order[i + 1] + " 重试");
   }
@@ -499,7 +534,7 @@ function watchAd(cookie, method) {
   return httpPost(HOST + "/yws/mapi/user?method=" + method, apiHeaders(cookie)).then(function (r) {
     var json = safeJson(r.body) || {};
     debug(method + " HTTP " + r.status + " → " + shortBody(r.body, 400));
-    if (json.error) return { ok: false, space: 0 };
+    if (hasError(json)) return { ok: false, space: 0 };
     return { ok: true, space: (Number(json.space) || 0) + (Number(json.rewardSpace) || 0) };
   });
 }
@@ -558,6 +593,7 @@ async function runOne(acc, index) {
     return result;
   }
   result.space += ci.already ? 0 : ci.space;
+  markDay(acc.key);
 
   var rw = await claimAdReward(cookie);
   result.space += rw.space;
@@ -601,11 +637,12 @@ async function runOne(acc, index) {
   result.ok = true;
   var days = (sync.continuousDays === undefined || sync.continuousDays === null || sync.continuousDays === "")
     ? "" : " · 连签 " + sync.continuousDays + " 天";
-  var head = "✅ " + label + days + " · 本次 +" + fmtSize(result.space);
-  var detail = "登录 +" + fmtSize(loginSpace) + (sync.already ? "(已领)" : "") +
+  var head = "✅ " + label + days + " · 本次 " + (result.space > 0 ? "+" + fmtSize(result.space) : "无新增（今日已领过）");
+  var detail = "登录 " + (sync.already ? "已领" : "+" + fmtSize(loginSpace)) +
     " · 签到 " + (ci.already ? "已签" : "+" + fmtSize(ci.space)) +
-    " · 视频奖励 +" + fmtSize(rw.space) +
-    " · 广告 +" + fmtSize(adSpace) + (adNote ? "（" + adNote + "）" : "");
+    " · 视频奖励 " + (rw.space > 0 ? "+" + fmtSize(rw.space) : "无") +
+    " · 广告 " + (adSpace > 0 ? "+" + fmtSize(adSpace) : "无额度") + (adNote ? "（" + adNote + "）" : "") +
+    " · 本月已签 " + monthDays(acc.key) + " 天";
   result.lines.push(head);
   result.lines.push("　" + detail);
   if (spaceLine) result.lines.push("　" + spaceLine);
