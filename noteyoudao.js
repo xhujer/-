@@ -1,6 +1,6 @@
 /*
  * 有道云笔记 · 自动签到 + 看广告领空间（Loon）
- * v1.4.1 · 接口按网页版 bundle 与 iOS App 抓包校对
+ * v1.5.2 · 接口按网页版 bundle 与 iOS App 抓包校对
  *
  * GET  /login/acc/pe/getsess?product=YNOTE    刷新会话
  * POST /yws/api/daupromotion?method=sync      每日登录奖励
@@ -15,7 +15,7 @@
  * 定时/手动：刷新会话 → 空间快照 → 登录奖励 → 签到 → 看广告 → 空间对账 → 通知
  */
 
-var SCRIPT_VERSION = "1.5.0";
+var SCRIPT_VERSION = "1.5.2";
 var HOST = "https://note.youdao.com";
 var KEY_ACCOUNTS = "noteyoudao_accounts";
 var KEY_BUSY = "noteyoudao_validating";
@@ -549,7 +549,8 @@ async function runOne(acc, index) {
   result.space += loginSpace;
 
   var st = await signStatus(cookie);
-  var ci = (st && st.signed) ? { ok: true, already: true, space: 0 } : await checkin(cookie);
+  if (st && st.signed) debug("状态接口说今天已签到，仍以签到接口的实际返回为准");
+  var ci = await checkin(cookie);
   if (!ci.ok) {
     result.auth = !!ci.auth;
     result.lines.push("❌ 签到失败：" + ci.message);
@@ -589,7 +590,11 @@ async function runOne(acc, index) {
     var grow = after.total - before.total;
     spaceLine = "空间 " + fmtSize(before.total) + " → " + fmtSize(after.total) + "（实测 +" + fmtSize(grow) + "）";
     if (after.used) spaceLine += " · 已用 " + fmtSize(after.used);
-    if (grow <= 0 && result.space > 0) spaceLine += " ⚠️ 服务端空间未变化";
+    if (result.space - grow >= 1048576) {
+      spaceLine += " ⚠️ 接口声称 +" + fmtSize(result.space) + "，实际入账 +" + fmtSize(grow);
+    } else if (grow <= 0 && result.space > 0) {
+      spaceLine += " ⚠️ 服务端空间未变化";
+    }
     debug("空间对账：声明 +" + fmtSize(result.space) + " / 实测 +" + fmtSize(grow));
   }
 
