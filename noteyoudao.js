@@ -1,24 +1,28 @@
 /*
  * 有道云笔记 · 自动签到 + 看广告领空间（Loon）
- * v1.1.0 · 接口与 Loon Script API 按官方文档校对：nsloon.app/docs
+ * v1.4.1 · 接口按网页版 bundle 与 iOS App 抓包校对
  *
- * GET  /login/acc/pe/getsess?product=YNOTE   刷新会话
- * POST /yws/api/daupromotion?method=sync     每日登录奖励
- * POST /yws/mapi/user?method=checkin         每日签到
- * POST /yws/mapi/user?method=adPrompt        广告（普通）
- * POST /yws/mapi/user?method=adRandomPrompt  广告（视频）
- * GET  /yws/api/self?method=get              账号信息 / Cookie 校验
+ * GET  /login/acc/pe/getsess?product=YNOTE    刷新会话
+ * POST /yws/api/daupromotion?method=sync      每日登录奖励
+ * POST /yws/mapi/user?method=checkin          每日签到（web / ios / basic 自动重试）
+ * POST /yws/mapi/user?method=adPrompt         广告（普通）
+ * POST /yws/mapi/user?method=adRandomPrompt   广告（视频）
+ * POST /yws/mapi/user?method=getSignStatus    今日是否已签到
+ * GET  /yws/mapi/user?method=get              空间 q/u、昵称 nn（对账用）
+ * GET  /yws/api/self?method=get               账号信息 / Cookie 校验
  *
  * 抓取模式：从 note.youdao.com 流量取 Cookie，校验后入库（多账号自动追加）
- * 定时/手动：刷新会话 → 登录奖励 → 签到 → 看广告 → 汇总通知
+ * 定时/手动：刷新会话 → 空间快照 → 登录奖励 → 签到 → 看广告 → 空间对账 → 通知
  */
 
-var SCRIPT_VERSION = "1.3.0";
+var SCRIPT_VERSION = "1.4.1";
 var HOST = "https://note.youdao.com";
 var KEY_ACCOUNTS = "noteyoudao_accounts";
 var KEY_BUSY = "noteyoudao_validating";
 var KEY_DEVICE = "noteyoudao_device";
 var UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+var UA_IOS = "YNote/7.5.560 (iPhone; iOS 18.2.1; Scale/3.00)";
+var IDFA_ZERO = "00000000-0000-0000-0000-000000000000";
 var HTTP_TIMEOUT = 15000;
 
 var isRequest = typeof $request !== "undefined";
@@ -45,7 +49,8 @@ var CFG = {
   adRandom: boolArg(arg.adRandom, true),
   adCount: Math.max(0, Math.min(10, Math.round(numArg(arg.adCount, 3)))),
   debug: boolArg(arg.debug, false),
-  manualCookie: strArg(arg.manualCookie, "").trim()
+  manualCookie: strArg(arg.manualCookie, "").trim(),
+  checkinMode: strArg(arg.checkinMode, "auto").toLowerCase()
 };
 
 function emit(tag, args) {
@@ -69,12 +74,6 @@ function getHeader(headers, name) {
     if (String(k).toLowerCase() === lower) return String(headers[k]);
   }
   return "";
-}
-function mb(bytes) {
-  var n = Number(bytes);
-  if (!isFinite(n) || n <= 0) return "0MB";
-  var v = n / 1048576;
-  return (v >= 100 ? v.toFixed(0) : v.toFixed(v >= 10 ? 1 : 2)) + "MB";
 }
 function cookieToObj(cookie) {
   var out = {};
@@ -142,6 +141,12 @@ function setBusy(on) {
     $persistentStore.write(on ? String(Date.now()) : undefined, KEY_BUSY);
   } catch (e) {}
 }
+function indexOfKey(list, key) {
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].key === key) return i;
+  }
+  return -1;
+}
 function upsertAccount(cookie, info) {
   var list = readAccounts();
   var key = accountKey(cookie);
@@ -152,15 +157,9 @@ function upsertAccount(cookie, info) {
     uid: (info && info.uid) || uidOf(cookie),
     updatedAt: Date.now()
   };
-  var found = false;
-  for (var i = 0; i < list.length; i++) {
-    if (list[i].key === key) {
-      list[i] = Object.assign({}, list[i], rec);
-      found = true;
-      break;
-    }
-  }
-  if (!found) list.push(rec);
+  var idx = indexOfKey(list, key);
+  if (idx < 0) list.push(rec);
+  else list[idx] = Object.assign({}, list[idx], rec);
   saveAccounts(list);
   return list.length;
 }
@@ -229,14 +228,13 @@ function randHex(len) {
   while (s.length < len) s += Math.floor(Math.random() * 16).toString(16);
   return s;
 }
-/* 网页版客户端会带一组设备参数，这里生成一次后固定下来 */
 function deviceInfo() {
   var raw = $persistentStore.read(KEY_DEVICE);
   if (raw) {
     try {
       var d = JSON.parse(raw);
       if (d && d.appUser) return d;
-    } catch (e) { }
+    } catch (e) {}
   }
   var dev = { appUser: randHex(32), deviceId: randHex(16) };
   $persistentStore.write(JSON.stringify(dev), KEY_DEVICE);
@@ -355,7 +353,6 @@ function checkinOk(json, text) {
     space: (Number(json.space) || 0) + (Number(json.rewardSpace) || 0)
   };
 }
-/* 绝对值显示：3.05GB / 66.0MB */
 function fmtSize(bytes) {
   var n = Math.abs(Number(bytes) || 0);
   if (n >= 1073741824) return (n / 1073741824).toFixed(2) + "GB";
@@ -363,47 +360,63 @@ function fmtSize(bytes) {
   if (n >= 1024) return (n / 1024).toFixed(0) + "KB";
   return n > 0 ? n + "B" : "0MB";
 }
-/* 账号空间：网页版用户面板用的就是这个接口（q 总量 / u 已用 / nn 昵称） */
+function webGet(extra, cookie) {
+  return httpGet(HOST + "/yws/mapi/user?" + qs(webParams(cookie, extra)), apiHeaders(cookie));
+}
+function webPost(extra, cookie) {
+  var p = webParams(cookie, extra);
+  return httpPost(HOST + "/yws/mapi/user?" + qs(p), formHeaders(cookie), "cstk=" + encodeURIComponent(p.cstk));
+}
 function userSpace(cookie) {
-  var url = HOST + "/yws/mapi/user?" + qs(webParams(cookie, { method: "get", vendor: "", multilevelEnable: "true" }));
-  return httpGet(url, apiHeaders(cookie)).then(function (r) {
+  return webGet({ method: "get", vendor: "", multilevelEnable: "true" }, cookie).then(function (r) {
     var json = safeJson(r.body) || {};
     debug("userSpace HTTP " + r.status + " → " + shortBody(r.body, 400));
     var q = Number(json.q) || 0;
     if (json.error || !q) return null;
-    return { total: q, used: Number(json.u) || 0, name: json.nn || "" };
+    return { total: q, used: Number(json.u) || 0 };
   });
 }
-/* 今日是否已签到（服务端权威状态） */
 function signStatus(cookie) {
-  var p = webParams(cookie, { method: "getSignStatus", device_type: "PC" });
-  return httpPost(HOST + "/yws/mapi/user?" + qs(p), formHeaders(cookie), "cstk=" + encodeURIComponent(p.cstk))
-    .then(function (r) {
-      var json = safeJson(r.body) || {};
-      debug("signStatus HTTP " + r.status + " → " + shortBody(r.body, 200));
-      if (json.error || json.isSignIn === undefined) return null;
-      return { signed: Number(json.isSignIn) === 1 };
-    });
-}
-/* 网页版签到：URL 带客户端参数，表单体带 cstk（对齐网页端拦截器抓到的请求）。
- * 被服务端拒绝时退回基础 POST，保证不会比旧版更差。 */
-function checkin(cookie) {
-  var p = webParams(cookie, { method: "checkin", device_type: "PC" });
-  var url = HOST + "/yws/mapi/user?" + qs(p);
-  return httpPost(url, formHeaders(cookie), "cstk=" + encodeURIComponent(p.cstk)).then(function (r) {
-    debug("checkin(web) HTTP " + r.status + " → " + shortBody(r.body, 400));
+  return webPost({ method: "getSignStatus", device_type: "PC" }, cookie).then(function (r) {
     var json = safeJson(r.body) || {};
-    if (json.error && !isAlreadySigned(json, r.body)) {
-      debug("网页版参数被拒，改用基础请求重试");
-      return httpPost(HOST + "/yws/mapi/user?method=checkin", apiHeaders(cookie)).then(function (r2) {
-        var j2 = safeJson(r2.body) || {};
-        debug("checkin(basic) HTTP " + r2.status + " → " + shortBody(r2.body, 400));
-        if (j2.error && !isAlreadySigned(j2, r2.body)) return apiError(j2);
-        return checkinOk(j2, r2.body);
-      });
-    }
-    return checkinOk(json, r.body);
+    debug("signStatus HTTP " + r.status + " → " + shortBody(r.body, 200));
+    if (json.error || json.isSignIn === undefined) return null;
+    return { signed: Number(json.isSignIn) === 1 };
   });
+}
+function iosBody() {
+  return "IDFA=" + IDFA_ZERO + "&_appName=ynote&_cityCode=&_cityName=&_device=iPhone&_idfa=" + IDFA_ZERO +
+    "&_launch=0&_manufacturer=apple&_network=wifi&_operator=UNKNOWN&_platform=ios&_sbp=true" +
+    "&_screenHeight=926&_screenWidth=428&_system=iOS&_systemVersion=18.2.1&_vendor=AppStore&_version=7.5.560" +
+    "&client_ver=7.5.560&device_model=iPhone&device_name=iPhone&device_type=iPhone&keyfrom=note.7.5.560.iPhone" +
+    "&level=user&login=netease&mid=18.2.1&model=iPhone&net=wifi&os=iOS&os_ver=18.2.1&phoneVersion=iPhone" +
+    "&sec=v1&sev=j1&strategy=VIP_MULTIPLY&vendor=AppStore";
+}
+function checkinRequest(mode, cookie) {
+  if (mode === "ios") {
+    var h = apiHeaders(cookie);
+    h["User-Agent"] = UA_IOS;
+    h["Accept"] = "*/*";
+    h["Content-Type"] = "application/x-www-form-urlencoded";
+    return httpPost(HOST + "/yws/mapi/user?method=checkin", h, iosBody());
+  }
+  if (mode === "web") return webPost({ method: "checkin", device_type: "PC" }, cookie);
+  return httpPost(HOST + "/yws/mapi/user?method=checkin", apiHeaders(cookie));
+}
+async function checkin(cookie) {
+  var order = CFG.checkinMode === "web" ? ["web", "basic"]
+    : CFG.checkinMode === "ios" ? ["ios", "basic"]
+      : cstkOf(cookie) ? ["web", "ios", "basic"] : ["ios", "basic"];
+  var last = { error: "unknown" };
+  for (var i = 0; i < order.length; i++) {
+    var r = await checkinRequest(order[i], cookie);
+    var json = safeJson(r.body) || {};
+    debug("checkin(" + order[i] + ") HTTP " + r.status + " → " + shortBody(r.body, 400));
+    if (!json.error || isAlreadySigned(json, r.body)) return checkinOk(json, r.body);
+    last = json;
+    if (i < order.length - 1) debug(order[i] + " 被拒，改用 " + order[i + 1] + " 重试");
+  }
+  return apiError(last);
 }
 
 function watchAd(cookie, method) {
@@ -415,12 +428,13 @@ function watchAd(cookie, method) {
   });
 }
 
-function notify(title, subtitle, body) {
+function notify(title, subtitle, body, attach) {
   var text = title + "\n" + subtitle + "\n" + body;
   log("通知 → " + text.replace(/\n/g, " | "));
   if (!CFG.enableNotify) return;
   try {
-    $notification.post(title, subtitle, body);
+    if (attach) $notification.post(title, subtitle, body, attach);
+    else $notification.post(title, subtitle, body);
   } catch (e) {
     log("通知发送失败: " + e);
   }
@@ -503,10 +517,10 @@ async function runOne(acc, index) {
   result.ok = true;
   var days = (sync.continuousDays === undefined || sync.continuousDays === null || sync.continuousDays === "")
     ? "" : " · 连签 " + sync.continuousDays + " 天";
-  var head = "✅ " + label + days + " · 本次 +" + mb(result.space);
-  var detail = "登录 +" + mb(loginSpace) + (sync.already ? "(已领)" : "") +
-    " · 签到 " + (ci.already ? "已签" : "+" + mb(ci.space)) +
-    " · 广告 +" + mb(adSpace) + (adNote ? "（" + adNote + "）" : "");
+  var head = "✅ " + label + days + " · 本次 +" + fmtSize(result.space);
+  var detail = "登录 +" + fmtSize(loginSpace) + (sync.already ? "(已领)" : "") +
+    " · 签到 " + (ci.already ? "已签" : "+" + fmtSize(ci.space)) +
+    " · 广告 +" + fmtSize(adSpace) + (adNote ? "（" + adNote + "）" : "");
   result.lines.push(head);
   result.lines.push("　" + detail);
   if (spaceLine) result.lines.push("　" + spaceLine);
@@ -518,13 +532,11 @@ async function runOne(acc, index) {
 function updateStoredCookie(key, cookie) {
   try {
     var list = readAccounts();
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].key === key) {
-        list[i].cookie = cookie;
-        list[i].updatedAt = Date.now();
-        saveAccounts(list);
-        return;
-      }
+    var idx = indexOfKey(list, key);
+    if (idx >= 0) {
+      list[idx].cookie = cookie;
+      list[idx].updatedAt = Date.now();
+      saveAccounts(list);
     }
   } catch (e) {
     log("回写 Cookie 失败: " + e);
@@ -557,12 +569,20 @@ async function runCheckin() {
   }
 
   var sub = okCount + "/" + accounts.length + " 个账号成功";
-  if (totalSpace > 0) sub += " · 共 +" + mb(totalSpace);
+  if (totalSpace > 0) sub += " · 共 +" + fmtSize(totalSpace);
   if (authFailed) sub += " · " + authFailed + " 个需重新抓取";
-  var tail = authFailed ? "\n\n⚠️ 有账号登录态失效：打开有道云笔记 App 或网页版重新刷新一次即可自动更新。" : "";
-  notify("有道云笔记签到 v" + SCRIPT_VERSION, sub, lines.join("\n") + tail);
+  var tail = authFailed ? "\n\n⚠️ 有账号登录态失效：点这条通知打开网页版登录，插件会自动重新抓取。" : "";
+  notify("有道云笔记签到 v" + SCRIPT_VERSION, sub, lines.join("\n") + tail,
+    authFailed ? { openUrl: "https://note.youdao.com/web/" } : null);
 }
 
+async function verifyAccount(cookie) {
+  var me = await fetchSelf(cookie);
+  if (me.ok) return me;
+  var probe = await dailySync(cookie);
+  if (!probe.ok) return { ok: false, error: me.error, message: me.message };
+  return { ok: true, name: "", uid: uidOf(cookie) };
+}
 function isYoudaoAuthCookie(cookie) {
   var c = cookieToObj(cookie);
   return !!(c.YNOTE_PERS || c.YNOTE_SESS || c.YNOTE_LOGIN || c.YNOTE_CSTK);
@@ -589,10 +609,8 @@ async function runCapture() {
 
   var key = accountKey(cookie);
   var list = readAccounts();
-  var existed = null;
-  for (var i = 0; i < list.length; i++) {
-    if (list[i].key === key) { existed = list[i]; break; }
-  }
+  var idx = indexOfKey(list, key);
+  var existed = idx >= 0 ? list[idx] : null;
 
   if (existed && existed.cookie === cookie) return;
 
@@ -605,17 +623,13 @@ async function runCapture() {
   setBusy(true);
   var me;
   try {
-    me = await fetchSelf(cookie);
-    if (!me.ok) {
-      var probe = await dailySync(cookie);
-      if (!probe.ok) {
-        log("抓取到疑似新账号 " + maskAccount(key) + "，但校验失败：" + me.error + " · " + me.message);
-        return;
-      }
-      me = { ok: true, name: "", uid: uidOf(cookie) };
-    }
+    me = await verifyAccount(cookie);
   } finally {
     setBusy(false);
+  }
+  if (!me.ok) {
+    log("抓取到疑似新账号 " + maskAccount(key) + "，但校验失败：" + me.error + " · " + me.message);
+    return;
   }
   var total = upsertAccount(cookie, { name: me.name, uid: me.uid || uidOf(cookie) });
   var who = me.name || maskAccount(key);
@@ -624,20 +638,17 @@ async function runCapture() {
 }
 
 async function runManual() {
-  if (CFG.manualCookie) {
-    var cookie = CFG.manualCookie;
-    if (!isYoudaoAuthCookie(cookie)) {
-      notify("有道云笔记", "手动录入失败", "Cookie 格式不正确：需要包含 YNOTE_PERS / YNOTE_SESS 等字段的完整 Cookie。");
-      log("手动录入的 Cookie 不支持");
+  var cookie = CFG.manualCookie;
+  if (cookie) {
+    var me = isYoudaoAuthCookie(cookie)
+      ? await verifyAccount(cookie)
+      : { ok: false, error: "格式不正确", message: "需要包含 YNOTE_PERS / YNOTE_SESS 等字段的完整 Cookie" };
+    if (me.ok) {
+      var total = upsertAccount(cookie, { name: me.name, uid: me.uid });
+      log("手动录入成功：" + (me.name || maskAccount(accountKey(cookie))) + "（共 " + total + " 个）");
     } else {
-      var me = await fetchSelf(cookie);
-      if (!me.ok) {
-        notify("有道云笔记", "手动录入失败", "Cookie 校验未通过：" + me.error + " · " + me.message);
-        log("手动录入校验失败: " + me.error + " · " + me.message);
-      } else {
-        var total = upsertAccount(cookie, { name: me.name, uid: me.uid });
-        log("手动录入成功：" + (me.name || maskAccount(accountKey(cookie))) + "（共 " + total + " 个）");
-      }
+      log("手动录入失败：" + me.error + " · " + me.message);
+      notify("有道云笔记", "手动录入失败", "Cookie 校验未通过：" + me.error + " · " + me.message);
     }
   }
   await runCheckin();
