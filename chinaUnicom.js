@@ -5202,7 +5202,7 @@
 
   // chinaUnicom.source.js
   var CryptoJS = require_crypto_js();
-  var VERSION = "v1.2.1-loon.5";
+  var VERSION = "v1.2.1-loon.6";
   var STORE_KEY = "cu_accounts_v2";
   var DEVICE_KEY = "cu_device_ids_v2";
   var UA = "Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}";
@@ -5230,6 +5230,7 @@
 
   var CLOUD_TOKEN_KEY = "cu_cloud_token_v1";
   var CAPTURE_KEY = "cu_capture_notified_v1";
+  var CAPTURE_BURST_MS = 30000;
   var HOMETOWN_MOBILE_KEY = "CBWGjFHjZdhTf7h8";
   var HOMETOWN_AES_IV = "wNSOYIB1k1DjY5lA";
   var HOMETOWN_LOTTERY_SECRET = "s8Hf3LqP9xN2vM5bR7tY1wZ4cA6eG0K";
@@ -5509,6 +5510,13 @@
     });
     return run(0);
   }
+  function entryStamp(item) {
+    const ts = safeInt(item && item.ts);
+    if (ts) return ts;
+    const raw = String((item && item.updatedAt) || "").replace(" ", "T");
+    const t = Date.parse(raw);
+    return Number.isFinite(t) ? t : 0;
+  }
   function notifyCapture(isNew, total, token, appId) {
     if (!CFG.enableNotify) return;
     const cache = readJSON(CAPTURE_KEY, {});
@@ -5569,16 +5577,17 @@
     const list = readJSON(STORE_KEY, []);
     // 抓包阶段只追加不弹通知：token 每次登录都不同，直接追加或更新
     // 真正的去重交由登录成功后（onLine 返回 mobile）按手机号合并
-    // \u672A\u9A8C\u8BC1\uFF08mobile \u4E3A\u7A7A\uFF09\u7684\u8BB0\u5F55\u53EA\u4FDD\u7559\u6700\u65B0\u4E00\u6761\uFF1A\u540C\u4E00\u6B21\u767B\u5F55\u4F1A\u89E6\u53D1\u591A\u4E2A\u88AB\u6293\u5305\u89C4\u5219\u5339\u914D\u7684
-    // \u8BF7\u6C42\uFF0Ctoken \u5404\u4E0D\u76F8\u540C\u4F46\u5176\u5B9E\u662F\u540C\u4E00\u4E2A\u53F7\uFF0C\u7559\u7740\u4F1A\u53D8\u6210"\u5E7D\u7075\u8D26\u53F7"\u3002
-    const kept = list.filter((x) => x.mobile || x.tokenOnline === token);
-    if (kept.length !== list.length) {
-      console.log(`[\u4E2D\u56FD\u8054\u901A] \u6E05\u7406 ${list.length - kept.length} \u6761\u672A\u9A8C\u8BC1\u7684\u91CD\u590D\u8BB0\u5F55`);
-      list.length = 0;
-      for (const x of kept) list.push(x);
+    // \u4E00\u6B21\u767B\u5F55\u4F1A\u89E6\u53D1\u591A\u4E2A\u5339\u914D\u8BF7\u6C42\uFF08token \u5404\u4E0D\u76F8\u540C\uFF09\uFF0C\u8FD9\u7C7B"\u540C\u4E00\u6B21\u767B\u5F55"\u7684\u91CD\u590D\u6309\u65F6\u95F4\u7A97\u8BC6\u522B\uFF1A
+    // \u540C appId\u3001\u4E0A\u4E00\u6761\u5C1A\u672A\u9A8C\u8BC1\u3001\u4E14\u95F4\u9694\u5728 CAPTURE_BURST_MS \u4E4B\u5185 \u2192 \u89C6\u4E3A\u91CD\u590D\uFF0C\u5C31\u5730\u66F4\u65B0\uFF1B
+    // \u5426\u5219\uFF08\u4F8B\u5982\u5207\u6362\u53F7\u7801\u91CD\u65B0\u767B\u5F55\uFF09\u7167\u5E38\u8FFD\u52A0\uFF0C\u7EDD\u4E0D\u52A8\u5DF2\u6709\u8D26\u53F7\u3002
+    const prev = list.length ? list[list.length - 1] : null;
+    const burst = prev && !prev.mobile && prev.appId === appId && prev.tokenOnline !== token && nowMs() - entryStamp(prev) < CAPTURE_BURST_MS;
+    if (burst) {
+      console.log(`[\u4E2D\u56FD\u8054\u901A] \u540C\u4E00\u6B21\u767B\u5F55\u7684\u91CD\u590D\u6293\u53D6\uFF0C\u66F4\u65B0\u4E0A\u4E00\u6761\uFF08${String(prev.updatedAt)}\uFF09`);
+      list.pop();
     }
     const index = list.findIndex((x) => x.tokenOnline === token);
-    const item = { tokenOnline: token, appId, updatedAt: dateTime(), mobile: index >= 0 ? list[index].mobile || "" : "" };
+    const item = { tokenOnline: token, appId, updatedAt: dateTime(), ts: nowMs(), mobile: index >= 0 ? list[index].mobile || "" : "" };
     if (index < 0) {
       list.push(item);
     } else {
