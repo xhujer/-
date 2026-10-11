@@ -1,4 +1,4 @@
-"use strict";
+ strict";
 (() => {
   var __getOwnPropNames = Object.getOwnPropertyNames;
   var __commonJS = (cb, mod) => function __require() {
@@ -5202,14 +5202,12 @@
 
   // chinaUnicom.source.js
   var CryptoJS = require_crypto_js();
-  var VERSION = "v1.2.1-loon.6";
+  var VERSION = "v1.2.1-loon.8";
   var STORE_KEY = "cu_accounts_v2";
   var DEVICE_KEY = "cu_device_ids_v2";
   var UA = "Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}";
   var H5_UA = "Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.146 Mobile Safari/537.36; unicom{version:android@11.0802,desmobile:0};devicetype{deviceBrand:Xiaomi,deviceModel:MI 8}";
   var AITING_JF_UA = "Mozilla/5.0 (Linux; Android 12; Redmi K30 Pro Build/SKQ1.220303.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.159 Mobile Safari/537.36 WoReaderApp/Android";
-  var AITING_AES_IV = "16-Bytes--String";
-  var ADDREADTIME_KEY = "UNS#READDAY39COM";
   var SEC_APP_UA = "ChinaUnicom4.x/12.3.1 (com.chinaunicom.mobilebusiness; build:77; iOS 16.6.0) Alamofire/4.7.3 unicom{version:iphone_c@12.0301}";
   var WOSTORE_SIGN_CODE = "Points_Sign_2507";
   var WOSTORE_LOGIN_ACTIVITY_ID = "HD2026033000125";
@@ -5223,7 +5221,6 @@
   var ISLAND_CLOUD_TTL_HOURS = 12;
   var ISLAND_MGTV_BASE = "https://mgcact.api.mgtv.com";
   var ISLAND_MGTV_TEMPLATE_ID = "2104457184351981568";
-  var ISLAND_MGTV_IMG_FID = "";
   var ISLAND_TEMP_PHOTO_PREFIX = "cmfface_";
   var ISLAND_PRIZE_KEY = "cu_island_prizes_v1";
   var ISLAND_ACT_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) LianTongYunPan/6.0.0 (iPhone; iOS 16.6)";
@@ -5252,9 +5249,7 @@
     enableRegional: true,
     enableNotify: true,
     // v1.1.2 已移除已下架的浇水任务
-    marketWater: false,
     marketTask: true,
-    marketMember: true,
     marketDraw: true,
     marketClaim: true,
     grabCoupon: false,
@@ -5266,6 +5261,7 @@
     provinceOverride: "",
     clearAllAccounts: false,
     deleteLastAccount: false,
+    captureVerify: true,
     cloudImageFid: "",
     cloudUploadName: "8648",
     hometownEnable: false,
@@ -5294,9 +5290,7 @@
     enableWostore: bool(arg.enableWostore, DEFAULTS.enableWostore),
     enableRegional: bool(arg.enableRegional, DEFAULTS.enableRegional),
     enableNotify: bool(arg.enableNotify, DEFAULTS.enableNotify),
-    marketWater: bool(arg.marketWater, DEFAULTS.marketWater),
     marketTask: bool(arg.marketTask, DEFAULTS.marketTask),
-    marketMember: bool(arg.marketMember, DEFAULTS.marketMember),
     marketDraw: bool(arg.marketDraw, DEFAULTS.marketDraw),
     marketClaim: bool(arg.marketClaim, DEFAULTS.marketClaim),
     grabCoupon: isGrabJob || bool(arg.grabCoupon, DEFAULTS.grabCoupon),
@@ -5308,6 +5302,7 @@
     provinceOverride: String(arg.provinceOverride || DEFAULTS.provinceOverride).trim(),
     clearAllAccounts: bool(arg["清空全部账号"] !== void 0 ? arg["清空全部账号"] : arg.clearAllAccounts, DEFAULTS.clearAllAccounts),
     deleteLastAccount: bool(arg["\u5220\u9664\u672B\u4F4D\u8D26\u53F7"] !== void 0 ? arg["\u5220\u9664\u672B\u4F4D\u8D26\u53F7"] : arg.deleteLastAccount, DEFAULTS.deleteLastAccount),
+    captureVerify: bool(arg["\u6293\u5305\u6821\u9A8C\u624B\u673A\u53F7"] !== void 0 ? arg["\u6293\u5305\u6821\u9A8C\u624B\u673A\u53F7"] : arg.captureVerify, DEFAULTS.captureVerify),
     cloudImageFid: String(arg.cloudImageFid || DEFAULTS.cloudImageFid).trim(),
     cloudUploadName: String(arg.cloudUploadName || DEFAULTS.cloudUploadName).trim(),
     hometownEnable: bool(arg.hometownEnable, DEFAULTS.hometownEnable),
@@ -5421,6 +5416,23 @@
     for (let i = 0; i < wa.sigBytes; i++) out[i] = wa.words[i >>> 2] >>> (24 - i % 4 * 8) & 255;
     return out;
   }
+  function buildMultipart(boundary, fields, file) {
+    const parts = [];
+    for (const [name, value] of fields) {
+      parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+    }
+    if (file) {
+      parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="${file.name}"; filename="${file.filename}"\r\nContent-Type: ${file.mime}\r\n\r\n`));
+      parts.push(typeof file.bytes === "string" ? asciiBytes(file.bytes) : file.bytes);
+      parts.push(asciiBytes("\r\n"));
+    }
+    parts.push(asciiBytes(`--${boundary}--\r\n`));
+    return concatBytes(parts);
+  }
+  function hmacSignHeaders(secret) {
+    const ts = String(nowMs()), nonce = randomString(8, "0123456789abcdefghijklmnopqrstuvwxyz");
+    return { "x-request-timestamp": ts, "x-request-nonce": nonce, "x-request-signature": sha256HmacHex(nonce + ts, secret) };
+  }
   function asciiBytes(str) {
     const out = new Uint8Array(str.length);
     for (let i = 0; i < str.length; i++) out[i] = str.charCodeAt(i) & 255;
@@ -5517,7 +5529,7 @@
     const t = Date.parse(raw);
     return Number.isFinite(t) ? t : 0;
   }
-  function notifyCapture(isNew, total, token, appId) {
+  function notifyCapture(isNew, total, token, appId, mobile) {
     if (!CFG.enableNotify) return;
     const cache = readJSON(CAPTURE_KEY, {});
     const seen = Array.isArray(cache.tokens) ? cache.tokens : [];
@@ -5525,7 +5537,7 @@
     seen.push(token);
     writeJSON(CAPTURE_KEY, { tokens: seen.slice(-10) });
     console.log(`[\u4E2D\u56FD\u8054\u901A] \u6293\u53D6\u6210\u529F\u901A\u77E5\uFF1A${isNew ? "\u65B0\u589E" : "\u66F4\u65B0"}\u8D26\u53F7\uFF0C\u5171 ${total} \u4E2A`);
-    $notification.post("\u4E2D\u56FD\u8054\u901A \u8D26\u53F7\u6293\u53D6\u6210\u529F", `${isNew ? "\u65B0\u589E" : "\u66F4\u65B0"}\u8D26\u53F7 \u00B7 \u5F53\u524D\u5171 ${total} \u4E2A`, `Token ${mask(token)}\nAppId ${mask(appId)}\n\n\u5982\u9700\u6DFB\u52A0\u5176\u4ED6\u53F7\u7801\uFF1A\u8054\u901A App \u9000\u51FA\u767B\u5F55 \u2192 \u7528\u65B0\u53F7\u7801\u91CD\u65B0\u767B\u5F55\u4E00\u6B21`);
+    $notification.post("\u4E2D\u56FD\u8054\u901A \u8D26\u53F7\u6293\u53D6\u6210\u529F", `${isNew ? "\u65B0\u589E" : "\u66F4\u65B0"}\u8D26\u53F7${mobile ? " " + mask(mobile) : ""} \u00B7 \u5F53\u524D\u5171 ${total} \u4E2A`, `Token ${mask(token)}\nAppId ${mask(appId)}\n\n\u5982\u9700\u6DFB\u52A0\u5176\u4ED6\u53F7\u7801\uFF1A\u8054\u901A App \u9000\u51FA\u767B\u5F55 \u2192 \u7528\u65B0\u53F7\u7801\u91CD\u65B0\u767B\u5F55\u4E00\u6B21`);
   }
   function removeLastAccount() {
     const accounts = readJSON(STORE_KEY, []);
@@ -5580,14 +5592,41 @@
     // \u4E00\u6B21\u767B\u5F55\u4F1A\u89E6\u53D1\u591A\u4E2A\u5339\u914D\u8BF7\u6C42\uFF08token \u5404\u4E0D\u76F8\u540C\uFF09\uFF0C\u8FD9\u7C7B"\u540C\u4E00\u6B21\u767B\u5F55"\u7684\u91CD\u590D\u6309\u65F6\u95F4\u7A97\u8BC6\u522B\uFF1A
     // \u540C appId\u3001\u4E0A\u4E00\u6761\u5C1A\u672A\u9A8C\u8BC1\u3001\u4E14\u95F4\u9694\u5728 CAPTURE_BURST_MS \u4E4B\u5185 \u2192 \u89C6\u4E3A\u91CD\u590D\uFF0C\u5C31\u5730\u66F4\u65B0\uFF1B
     // \u5426\u5219\uFF08\u4F8B\u5982\u5207\u6362\u53F7\u7801\u91CD\u65B0\u767B\u5F55\uFF09\u7167\u5E38\u8FFD\u52A0\uFF0C\u7EDD\u4E0D\u52A8\u5DF2\u6709\u8D26\u53F7\u3002
+    // \u6293\u5305\u9636\u6BB5\u7528 token \u6362\u4E00\u6B21\u624B\u673A\u53F7\uFF1A\u62FF\u5230\u53F7\u7801\u624D\u80FD\u771F\u6B63\u6309\u53F7\u53BB\u91CD\uFF08\u5355\u9760 token \u65E0\u6CD5\u8BC6\u522B
+    // "\u540C\u4E00\u4E2A\u53F7\u91CD\u65B0\u767B\u5F55"\uFF09\u3002\u5DF2\u6709\u540C token \u8BB0\u5F55\u65F6\u8DF3\u8FC7\uFF0C\u4E0D\u4EA7\u751F\u989D\u5916\u8BF7\u6C42\u3002
+    let mobile = "";
+    const knownIdx = list.findIndex((x) => x.tokenOnline === token);
+    if (knownIdx < 0 && CFG.captureVerify) {
+      try {
+        const vr = await http("post", "https://m.client.10010.com/mobileService/onLine.htm", {
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA },
+          body: form({ isFirstInstall: "1", netWay: "Wifi", version: "android@11.0000", token_online: token, provinceChanel: "general", deviceModel: "ALN-AL10", step: "dingshi", AndroidId: uuid32().slice(0, 16), appId, reqtime: nowMs() }),
+          timeout: 5000,
+          retries: 0
+        });
+        const vrj = safeJSON(vr.body, {});
+        if (String(vrj.code) === "0" && /^\d{11}$/.test(String(vrj.desmobile || ""))) mobile = String(vrj.desmobile);
+      } catch (e) {
+        console.log(`[\u4E2D\u56FD\u8054\u901A] \u6293\u5305\u6821\u9A8C\u624B\u673A\u53F7\u5931\u8D25\uFF1A${e && e.message || e}`);
+      }
+    }
+    const sameMobileIdx = mobile ? list.findIndex((x) => x.mobile === mobile) : -1;
+    if (sameMobileIdx >= 0 && sameMobileIdx !== list.length - 1) {
+      console.log(`[\u4E2D\u56FD\u8054\u901A] \u53F7\u7801 ${mask(mobile)} \u5DF2\u5B58\u5728\uFF0C\u7528\u65B0 token \u66FF\u6362\u65E7\u8BB0\u5F55`);
+      list.splice(sameMobileIdx, 1);
+    }
     const prev = list.length ? list[list.length - 1] : null;
+    const sameNumber = !!(prev && mobile && prev.mobile === mobile && prev.tokenOnline !== token);
     const burst = prev && !prev.mobile && prev.appId === appId && prev.tokenOnline !== token && nowMs() - entryStamp(prev) < CAPTURE_BURST_MS;
-    if (burst) {
+    if (sameNumber) {
+      console.log(`[\u4E2D\u56FD\u8054\u901A] \u540C\u53F7\u91CD\u65B0\u767B\u5F55\uFF0C\u66F4\u65B0\u4E0A\u4E00\u6761\uFF08${String(prev.updatedAt)}\uFF09`);
+      list.pop();
+    } else if (burst) {
       console.log(`[\u4E2D\u56FD\u8054\u901A] \u540C\u4E00\u6B21\u767B\u5F55\u7684\u91CD\u590D\u6293\u53D6\uFF0C\u66F4\u65B0\u4E0A\u4E00\u6761\uFF08${String(prev.updatedAt)}\uFF09`);
       list.pop();
     }
     const index = list.findIndex((x) => x.tokenOnline === token);
-    const item = { tokenOnline: token, appId, updatedAt: dateTime(), ts: nowMs(), mobile: index >= 0 ? list[index].mobile || "" : "" };
+    const item = { tokenOnline: token, appId, updatedAt: dateTime(), ts: nowMs(), mobile: mobile || (index >= 0 ? list[index].mobile || "" : "") };
     if (index < 0) {
       list.push(item);
     } else {
@@ -5595,7 +5634,7 @@
     }
     writeJSON(STORE_KEY, list);
     console.log(`[\u4E2D\u56FD\u8054\u901A] \u5DF2\u4FDD\u5B58\u8D26\u53F7 (${list.length}\u4E2A)\uFF0CToken=${mask(token)}\uFF0CAppId=${mask(appId)}`);
-    notifyCapture(index < 0, list.length, token, appId);
+    notifyCapture(index < 0, list.length, token, appId, mobile);
     $done({});
   }
   var UserService = class {
@@ -6133,24 +6172,13 @@
     }
     async marketTask() {
       this.log("==== \u6743\u76CA\u8D85\u5E02 ====");
+      this.log("\u6743\u76CA\u8D85\u5E02-\u4F1A\u5458\u4E2D\u5FC3: \u6D4F\u89C8\u79EF\u5206\u4EFB\u52A1\u5DF2\u4E0B\u7EBF\uFF0C\u5DF2\u8DF3\u8FC7");
       const token = await this.marketLogin();
       if (!token) {
         this.log("\u83B7\u53D6 userToken \u5931\u8D25");
         return;
       }
       const h = this.marketHeaders(token);
-      if (CFG.marketWater) {
-        const st = await this.get("https://backward.bol.wo.cn/prod-api/promotion/activityTask/getMultiCycleProcess?activityId=13", h);
-        const d = st.data || {};
-        this.log(`\u6D47\u82B1\u8FDB\u5EA6 ${d.triggeredTime || 0}/${d.triggerTime || 0}`, true);
-        if (!CFG.queryOnly && String(d.createDate || "").slice(0, 10) !== today() && safeInt(d.triggeredTime) < safeInt(d.triggerTime)) {
-          const loginId = this.marketPayload(token).loginId || "";
-          const ts = String(nowMs()), x = "Y1mN8fNYktY0";
-          const sig = sha256HmacB64(`td:433:tp${x}td:334:et${loginId}td:334:et${ts}td:334:et`, loginId);
-          const r = await this.postJSON(`https://backward.bol.wo.cn/prod-api/promotion/activityTaskShare/checkWatering?xbsosjl=${x}&timeVerRan=${ts}&diceid=${loginId}`, {}, { ...h, "X-Signature": sig, "User-Agent": H5_UA });
-          this.log(`\u6D47\u82B1\uFF1A${r.code === 200 ? "\u6210\u529F" : responseMessage(r)}`, true);
-        }
-      }
       if (CFG.queryOnly) {
         await this.marketRecords(token);
         return;
@@ -6167,7 +6195,6 @@
           }
         }
       }
-      if (CFG.marketMember) await this.marketMember(token);
       if (CFG.marketDraw) {
         const ts = nowMs(), q = `id=12&channel=unicomTab&timeVerRan=${ts}`, body = "{}";
         const hs = { ...h, ...this.marketSignature(token, q, body) };
@@ -6180,32 +6207,6 @@
         }
       }
       await this.marketRecords(token);
-    }
-    async marketMember(token) {
-      const h = this.marketHeaders(token);
-      const t = await this.get("https://backward.bol.wo.cn/prod-api/auth/getTicket?channel=pointsPlatform", h);
-      if (t.code !== 200 || !t.data) return;
-      const ticket = t.data;
-      const base = { "origin": "https://m.jf.10010.com", "clienttype": "marketUnicom", "ticket": ticket, "partnersid": "1703", "content-type": "application/json;charset=UTF-8", "pageid": "s782351687947921408", "User-Agent": H5_UA };
-      const secret = await this.get("https://m.jf.10010.com/jf-external-application/jftask/getSecretKey", base);
-      const key = (secret.data || {}).secretKey || "";
-      const signed = () => {
-        const ts = String(nowMs()), nonce = randomString(8, "0123456789abcdefghijklmnopqrstuvwxyz");
-        return { ...base, "x-request-timestamp": ts, "x-request-nonce": nonce, "x-request-signature": sha256HmacHex(`${nonce}${ts}`, key) };
-      };
-      const detail = await this.postJSON("https://m.jf.10010.com/jf-external-application/jftask/taskDetail", {}, signed());
-      const task = (((detail.data || {}).taskDetail || {}).taskList || []).find((x) => x.taskCode === "s769153426294495232");
-      if (!task) return;
-      if (safeInt(task.finish) === 0) {
-        const m = String(task.jumpUrl || "").match(/taskFixId=(\d+)/);
-        const id = m ? m[1] : "90";
-        const d = await this.get(`https://backward.bol.wo.cn/prod-api/promotion/activityTask/getActivityTaskDetailByFixId?taskFixId=${id}`, h);
-        const x = d.data || {};
-        await sleep(Math.max(safeInt(x.content, 17), 15) * 1e3);
-        await this.postJSON(`https://backward.bol.wo.cn/prod-api/promotion/activityTaskShare/checkView?checkKey=${encodeURIComponent(x.param1 || "")}`, {}, h);
-      }
-      const rec = await this.postJSON("https://m.jf.10010.com/jf-external-application/jfmarkettask/receive", { taskCode: "s769153426294495232" }, signed());
-      this.log(`\u4F1A\u5458\u4E2D\u5FC3\uFF1A${rec.code === "0000" ? `\u9886\u53D6 ${(rec.data || {}).score || ""}` : responseMessage(rec)}`, rec.code === "0000");
     }
     async marketRecords(token) {
       const h = this.marketHeaders(token);
@@ -6223,15 +6224,6 @@
     }
     cloudHeaders(client = "1001000035") {
       return { "X-YP-Access-Token": this.cloudToken, "Access-Token": this.cloudToken, "accesstoken": this.cloudToken, "Client-Id": client, "X-YP-Client-Id": client, "App-Version": "yp-app/5.5.0", "app-type": "liantongyunpanapp", "Content-Type": "application/json", "User-Agent": "LianTongYunPan/5.5.0 (Android 9)" };
-    }
-    async cloudSigned(path, key, payload = {}, client = "1001000035") {
-      const ts = await this.postJSON("https://panservice.mail.wo.cn/activity/getTimestamp", { key }, this.cloudHeaders(client));
-      const x = ts.result || {};
-      if (!x.nonce || !x.timestamp) return {};
-      const b = { ...payload, activityId: "Mjg=", nonce: x.nonce, timestamp: x.timestamp };
-      const raw = Object.keys(b).sort().map((k) => `${k}=${b[k]}`).join("&") + "&secret=s8Hf3LqP9xN2vM5bR7tY1wZ4cA6eG0K";
-      b.sign = sha256HmacHex(raw, "s8Hf3LqP9xN2vM5bR7tY1wZ4cA6eG0K");
-      return this.postJSON(`https://panservice.mail.wo.cn${path}`, b, this.cloudHeaders(client));
     }
     async cloudTask() {
       this.log("==== \u8054\u901A\u4E91\u76D8 ====");
@@ -6668,46 +6660,6 @@
       }
       return mapping;
     }
-    async islandUploadPhoto(token, bytes, remoteName) {
-      const fsize = bytes.length;
-      const ext = String(remoteName).toLowerCase().slice(-4);
-      const mime = ext === ".png" ? "image/png" : "image/jpeg";
-      const plain = `{"spaceType":"0","directoryId":"0","batchNo":"${compactTime()}","fileName":"${remoteName}","fileSize":${fsize},"fileType":"1"}`;
-      let fileInfo = "";
-      try {
-        fileInfo = this.cloudEncrypt(plain, token);
-      } catch (e) {
-        return "";
-      }
-      const boundary = `----LoonBoundary${randomString(16, "0123456789abcdef")}`;
-      const parts = [];
-      const field = (name, value) => parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
-      const uniqueId = `${nowMs()}_${randomString(6, "abcdefghijklmnopqrstuvwxyz0123456789")}`;
-      field("uniqueId", uniqueId);
-      field("accessToken", token);
-      field("fileName", remoteName);
-      field("psToken", "undefined");
-      field("fileSize", String(fsize));
-      field("totalPart", "1");
-      field("partSize", String(fsize));
-      field("partIndex", "1");
-      field("channel", "wocloud");
-      field("directoryId", "0");
-      field("fileInfo", fileInfo);
-      parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${remoteName}"\r\nContent-Type: ${mime}\r\n\r\n`));
-      parts.push(bytes);
-      parts.push(asciiBytes(`\r\n--${boundary}--\r\n`));
-      const r = await this.req("post", "https://du.smartont.net:8443/openapi/client/upload2C", {
-        headers: { "Content-Type": `multipart/form-data; boundary=${boundary}`, "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0", origin: "https://pan.wo.cn", referer: "https://pan.wo.cn/", "accept-language": "zh-CN,zh;q=0.9" },
-        body: concatBytes(parts),
-        timeout: 60000
-      });
-      if (r.status !== 200) return "";
-      const fid = this.islandFindFid(r.json);
-      if (fid) return fid;
-      const map = await this.islandCloudPhotoMap(token);
-      return map[remoteName] || "";
-    }
     async islandImageCandidates(token) {
       const candidates = [], seen = new Set();
       const add = (value, name) => {
@@ -6717,7 +6669,7 @@
           candidates.push([v, name]);
         }
       };
-      if (ISLAND_MGTV_IMG_FID) add(ISLAND_MGTV_IMG_FID, "\u6307\u5B9A\u56FE\u7247");
+      if (CFG.cloudImageFid) add(CFG.cloudImageFid, "\u6307\u5B9A\u56FE\u7247");
       const works = await this.islandPost(token, "/wohome/open/v1/ai/getNewYearWorksList", { pageSize: 20, pageNo: 1, type: 0 }, { Referer: `https://panservice.mail.wo.cn/h5/mobile/aiProduct?token=${token}`, "X-YP-Client-Id": "1001000003", clientId: "1001000003" });
       for (const item of ((works.result || {}).result || [])) {
         if (safeInt(item.status) === 1 && safeInt(item.type) === 5) {
@@ -7090,23 +7042,12 @@
       const fileInfo = this.hometownAes(fileInfoPlain, String(token).slice(0, 16));
       const uniqueId = `${nowMs()}_${randomString(6, "abcdefghijklmnopqrstuvwxyz0123456789")}`;
       const boundary = `----LoonBoundary${randomString(16, "0123456789abcdef")}`;
-      const parts = [];
-      const field = (name, value) => parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
-      field("uniqueId", uniqueId);
-      field("accessToken", token);
-      field("fileName", "8648");
-      field("psToken", "undefined");
-      field("fileSize", String(bytes.length));
-      field("totalPart", "1");
-      field("partSize", String(bytes.length));
-      field("partIndex", "1");
-      field("channel", "wocloud");
-      field("directoryId", "0");
-      field("fileInfo", fileInfo);
-      parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="8648"\r\nContent-Type: image/jpeg\r\n\r\n`));
-      parts.push(bytes);
-      parts.push(asciiBytes(`\r\n--${boundary}--\r\n`));
-      const body = concatBytes(parts);
+      const fields = [
+        ["uniqueId", uniqueId], ["accessToken", token], ["fileName", "8648"], ["psToken", "undefined"],
+        ["fileSize", String(bytes.length)], ["totalPart", "1"], ["partSize", String(bytes.length)],
+        ["partIndex", "1"], ["channel", "wocloud"], ["directoryId", "0"], ["fileInfo", fileInfo]
+      ];
+      const body = buildMultipart(boundary, fields, { name: "file", filename: "8648", mime: "image/jpeg", bytes });
       const r = await this.req("post", "https://du.smartont.net:8443/openapi/client/upload2C", {
         headers: {
           "Content-Type": `multipart/form-data; boundary=${boundary}`,
@@ -7287,9 +7228,7 @@
       return h;
     }
     secSignatureHeaders() {
-      if (!this.secSecretKey) return {};
-      const ts = String(nowMs()), nonce = randomString(8, "0123456789abcdefghijklmnopqrstuvwxyz");
-      return { "x-request-timestamp": ts, "x-request-nonce": nonce, "x-request-signature": sha256HmacHex(nonce + ts, this.secSecretKey) };
+      return this.secSecretKey ? hmacSignHeaders(this.secSecretKey) : {};
     }
     async secGetSecretKey(silent = false) {
       if (this.secSecretKey) return this.secSecretKey;
@@ -7432,12 +7371,9 @@
         delete headers["Content-Type"];
         const boundary = `----LoonBoundary${randomString(16, "0123456789abcdef")}`;
         const data = { knowledgeId: kid, fileName: "task_upload.txt", fileType: "text/plain", fileSize: "1", currentPartSize: "1", currentIndex: "1", totalPart: "1", spaceType: "0" };
-        const parts = [];
-        for (const k of Object.keys(data)) parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${data[k]}\r\n`));
-        parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="task_upload.txt"\r\nContent-Type: text/plain\r\n\r\n`));
-        parts.push(asciiBytes(" "));
-        parts.push(asciiBytes(`\r\n--${boundary}--\r\n`));
-        const r = await this.req("post", "https://ai.wo.cn/web-tongtong/knowledge/uploadLocalFileToKnowledge", { headers: { ...headers, "Content-Type": `multipart/form-data; boundary=${boundary}` }, body: concatBytes(parts), timeout: 15000 });
+        const fields = Object.keys(data).map((k) => [k, data[k]]);
+        const body = buildMultipart(boundary, fields, { name: "file", filename: "task_upload.txt", mime: "text/plain", bytes: " " });
+        const r = await this.req("post", "https://ai.wo.cn/web-tongtong/knowledge/uploadLocalFileToKnowledge", { headers: { ...headers, "Content-Type": `multipart/form-data; boundary=${boundary}` }, body, timeout: 15000 });
         const res = r.json || {};
         if (res.code === 0) {
           this.log("\u4E0A\u4F20\u77E5\u8BC6\u5E93\u6587\u4EF6\u6210\u529F");
@@ -7491,19 +7427,6 @@
         this.log(`\u83B7\u53D6\u5206\u4EABkey\u5F02\u5E38\uFF1A${e && e.message || e}`);
       }
       return "";
-    }
-    async secViewShareDetail(key, viewToken) {
-      try {
-        const res = await this.postJSON("https://ai.wo.cn/web-tongtong/historyChat/getShareDetail", { key, pageSize: 10, pageNum: 1 }, this.secWoAiHeaders(true, viewToken));
-        if (res.code === 0) {
-          this.log("\u67E5\u770B\u5206\u4EAB\u5BF9\u8BDD\u6210\u529F");
-          return true;
-        }
-        this.log(`\u67E5\u770B\u5206\u4EAB\u5BF9\u8BDD\u5931\u8D25\uFF1A${res.msg || responseMessage(res)}`);
-      } catch (e) {
-        this.log(`\u67E5\u770B\u5206\u4EAB\u5BF9\u8BDD\u5F02\u5E38\uFF1A${e && e.message || e}`);
-      }
-      return false;
     }
     async secShareAiChat(taskCode = "") {
       try {
@@ -7943,8 +7866,7 @@
         if (!this.aitingSecretKey) this.log(`\u7231\u542C\u4EFB\u52A1: getSecretKey \u5931\u8D25 - ${responseMessage(r.json)}`);
       }
       if (!this.aitingSecretKey) return {};
-      const ts = String(nowMs()), nonce = randomString(8, "0123456789abcdefghijklmnopqrstuvwxyz");
-      return { "x-request-timestamp": ts, "x-request-nonce": nonce, "x-request-signature": sha256HmacHex(nonce + ts, this.aitingSecretKey) };
+      return hmacSignHeaders(this.aitingSecretKey);
     }
     async jfRequest(path, body, opt = {}) {
       const extra = { Origin: "https://m.jf.10010.com" };
