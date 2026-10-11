@@ -5202,11 +5202,39 @@
 
   // chinaUnicom.source.js
   var CryptoJS = require_crypto_js();
-  var VERSION = "v1.1.2-loon.4";
+  var VERSION = "v1.2.1-loon.1";
   var STORE_KEY = "cu_accounts_v2";
   var DEVICE_KEY = "cu_device_ids_v2";
   var UA = "Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}";
   var H5_UA = "Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.146 Mobile Safari/537.36; unicom{version:android@11.0802,desmobile:0};devicetype{deviceBrand:Xiaomi,deviceModel:MI 8}";
+  var AITING_JF_UA = "Mozilla/5.0 (Linux; Android 12; Redmi K30 Pro Build/SKQ1.220303.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.159 Mobile Safari/537.36 WoReaderApp/Android";
+  var AITING_AES_IV = "16-Bytes--String";
+  var ADDREADTIME_KEY = "UNS#READDAY39COM";
+  var SEC_APP_UA = "ChinaUnicom4.x/12.3.1 (com.chinaunicom.mobilebusiness; build:77; iOS 16.6.0) Alamofire/4.7.3 unicom{version:iphone_c@12.0301}";
+  var WOSTORE_SIGN_CODE = "Points_Sign_2507";
+  var WOSTORE_LOGIN_ACTIVITY_ID = "HD2026033000125";
+  var WOSTORE_ACTIVITY_CODES = ["Points_Obtain_2507", "Points_Obtain_2506", "Points_Obtain_2505", "Points_Obtain_2504"];
+  var WOSTORE_LOTTERY_CODES = ["HD2026062200218", "Lottery_251201"];
+  var WOSTORE_POINTS_ACT_CODE = "Points_Exchange_2507";
+  var WOSTORE_GOODS_1 = "2026031001";
+  var WOSTORE_GOODS_10 = "2026031010";
+  var WOSTORE_STOP_PRIZE = "7天体验卡";
+  var ISLAND_ACTIVITY_ID = "NDA=";
+  var ISLAND_CLOUD_TTL_HOURS = 12;
+  var ISLAND_MGTV_BASE = "https://mgcact.api.mgtv.com";
+  var ISLAND_MGTV_TEMPLATE_ID = "2104457184351981568";
+  var ISLAND_MGTV_IMG_FID = "";
+  var ISLAND_TEMP_PHOTO_PREFIX = "cmfface_";
+  var ISLAND_PRIZE_KEY = "cu_island_prizes_v1";
+  var ISLAND_ACT_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) LianTongYunPan/6.0.0 (iPhone; iOS 16.6)";
+
+  var CLOUD_TOKEN_KEY = "cu_cloud_token_v1";
+  var HOMETOWN_MOBILE_KEY = "CBWGjFHjZdhTf7h8";
+  var HOMETOWN_AES_IV = "wNSOYIB1k1DjY5lA";
+  var HOMETOWN_LOTTERY_SECRET = "s8Hf3LqP9xN2vM5bR7tY1wZ4cA6eG0K";
+  var HOMETOWN_OPEN_ACTIVITY_ID = "MjU=";
+  var HOMETOWN_LOTTERY_ACTIVITY_ID = "MzA=";
+  var HOMETOWN_MATERIAL_B64 = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxD/2Q==";
   var DEFAULTS = {
     mode: "all",
     enableSign: true,
@@ -5338,8 +5366,8 @@
   function mask(s) {
     s = String(s || "");
     if (/^\d{11}$/.test(s)) return `${s.slice(0, 3)}****${s.slice(7)}`;
-    if (s.length > 12) return `${s.slice(0, 6)}******${s.slice(-6)}`;
-    return s;
+    if (s.length >= 8) return `${s.slice(0, 4)}******${s.slice(-4)}`;
+    return "****";
   }
   function form(obj) {
     return Object.keys(obj || {}).filter((k) => obj[k] !== void 0 && obj[k] !== null).map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(String(obj[k]))}`).join("&");
@@ -5373,12 +5401,37 @@
   function sha256HmacB64(msg, key) {
     return CryptoJS.HmacSHA256(String(msg), String(key)).toString(CryptoJS.enc.Base64);
   }
-  function aesCbcB64(text, key, iv, hexThenB64 = false, upperHex = false) {
-    const enc = CryptoJS.AES.encrypt(CryptoJS.enc.Utf8.parse(String(text)), CryptoJS.enc.Utf8.parse(String(key)), { iv: CryptoJS.enc.Utf8.parse(String(iv)), mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 });
+  function aesCbcB64(text, key, iv, hexThenB64 = false, upperHex = false) {    const enc = CryptoJS.AES.encrypt(CryptoJS.enc.Utf8.parse(String(text)), CryptoJS.enc.Utf8.parse(String(key)), { iv: CryptoJS.enc.Utf8.parse(String(iv)), mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 });
     if (!hexThenB64) return enc.ciphertext.toString(CryptoJS.enc.Base64);
     let h = enc.ciphertext.toString(CryptoJS.enc.Hex);
     if (upperHex) h = h.toUpperCase();
     return b64Utf8(h);
+  }
+  function aesCbcDecryptB64(b64, key, iv) {
+    const dec = CryptoJS.AES.decrypt({ ciphertext: CryptoJS.enc.Base64.parse(String(b64)) }, CryptoJS.enc.Utf8.parse(String(key)), { iv: CryptoJS.enc.Utf8.parse(String(iv)), mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 });
+    return dec.toString(CryptoJS.enc.Utf8);
+  }
+  function b64ToBytes(b64) {
+    const wa = CryptoJS.enc.Base64.parse(String(b64));
+    const out = new Uint8Array(wa.sigBytes);
+    for (let i = 0; i < wa.sigBytes; i++) out[i] = wa.words[i >>> 2] >>> (24 - i % 4 * 8) & 255;
+    return out;
+  }
+  function asciiBytes(str) {
+    const out = new Uint8Array(str.length);
+    for (let i = 0; i < str.length; i++) out[i] = str.charCodeAt(i) & 255;
+    return out;
+  }
+  function concatBytes(list) {
+    let len = 0;
+    for (const a of list) len += a.length;
+    const out = new Uint8Array(len);
+    let off = 0;
+    for (const a of list) {
+      out.set(a, off);
+      off += a.length;
+    }
+    return out;
   }
   function responseMessage(x) {
     if (!x || typeof x !== "object") return String(x || "\u63A5\u53E3\u8FD4\u56DE\u5F02\u5E38");
@@ -6130,10 +6183,25 @@
     }
     async cloudTask() {
       this.log("==== \u8054\u901A\u4E91\u76D8 ====");
+      this.cloudDisk = {};
       if (!this.ecsToken) return;
-      this.cloudToken = await this.cloudLogin();
-      if (!this.cloudToken) {
-        this.log("\u4E91\u76D8\u767B\u5F55\u5931\u8D25");
+      this.cloudToken = "";
+      const cached = this.islandLoadCachedToken();
+      if (cached && await this.islandTokenValid(cached)) {
+        this.cloudToken = cached;
+        this.cloudDisk.userToken = cached;
+        this.cloudDisk.ticket = "";
+        this.log("\u4E91\u76D8\u4EFB\u52A1: [\u7F13\u5B58\u590D\u7528] \u4E91\u76D8Token\u6709\u6548, \u8DF3\u8FC7\u767B\u5F55\u94FE");
+      } else {
+        this.cloudToken = await this.cloudLogin();
+        if (!this.cloudToken) {
+          this.log("\u4E91\u76D8\u767B\u5F55\u5931\u8D25");
+          return;
+        }
+        this.islandSaveCachedToken(this.cloudToken);
+      }
+      if (CFG.queryOnly) {
+        this.log("\u4E91\u76D8\u4EFB\u52A1: [\u67E5\u8BE2\u6A21\u5F0F] \u767B\u5F55\u6210\u529F\uFF0C\u8DF3\u8FC7\u6D3B\u52A8\u548C\u6587\u4EF6\u6E05\u7406");
         return;
       }
       const phone = aesCbcB64(this.accountMobile, "yEKmse436lnvTsle", "wNSOYIB1k1DjY5lA");
@@ -6142,108 +6210,1561 @@
         const c = await this.postJSON("https://panservice.mail.wo.cn/activity/experience/yp/members", { phone, skuCode: "S251222T1F1M3702758", activityCode: "7IO6ren5HVMw3ouGRTepcSoFBM0r86ZGs9+Fjv6Xjv0=", channel: "6", touchpoint: "300300010005" }, this.cloudHeaders("1001000001"));
         this.log(`\u4E91\u76D8\u4F1A\u5458\u4F53\u9A8C\uFF1A${responseMessage(c)}`);
       }
-      if (!CFG.queryOnly) {
-        const st = await this.cloudSigned("/activity/fragment/status", "activity:fragment:status");
-        this.log(`\u4E58\u98CE\u6D3B\u52A8\u788E\u7247\u9636\u6BB5 ${(st.result || {}).fragmentStep || 0}`);
-        await this.cloudSigned("/activity/fragment/task/activate", "activity:fragment:activate");
-        await this.postJSON("https://panservice.mail.wo.cn/wohome/open/v1/ai/moveFile2Person", { activityId: "Mjg=", fids: ["pNKsm_lDq4EJWsx1rFMP/uVX7f1Gbu4K4uDaFJepfssdrGui4u/poSDp/vKG21xEIiBk//"], taskType: 10, fileType: 2, fileName: "\u4E58\u98CE2026\u7CBE\u5F69\u65F6\u523B-\u96E8\u7231.mp4", directoryId: 0, additionalParams: { aiHeaderSubType: 0 } }, this.cloudHeaders("1001000165"));
-        const t1 = await this.cloudSigned("/activity/aiRole/task1/acquire", "activity:acquire:task1");
-        this.log(`\u4E58\u98CE task1\uFF1A${responseMessage(t1)}`);
-        const times = await this.get("https://panservice.mail.wo.cn/activity/lottery/lottery-times?activityId=Mjg%3D", this.cloudHeaders());
-        let n = typeof times.result === "object" ? safeInt(times.result.lotteryTimes || times.result.times || times.result.count) : safeInt(times.result);
-        while (n-- > 0) {
-          const p = await this.cloudSigned("/activity/lottery", "activity:lottery");
-          this.log(`\u4E58\u98CE\u62BD\u5956\uFF1A${(p.result || {}).prizeName || responseMessage(p)}`, !!(p.result || {}).prizeName);
-          await sleep(1200);
-        }
+      if (CFG.hometownEnable) {
+        await this.hometownTask(this.cloudToken);
+        this.cloudDisk.uploadedFileCount = (this.hometownUploadedFiles || []).length ? 1 : 0;
       }
+      await this.islandTask(this.cloudToken);
       await this.cloudClean();
     }
-    async cloudClean() {
-      const h = this.cloudHeaders();
-      const s = await this.postJSON("https://s.pan.wo.cn/wohome/intelligentClean/getScanStateAndResult", { pathLevelList: [{ levelType: "space", levelName: "\u4E2A\u4EBA\u4E91", busId: "0" }] }, h);
-      const task = ((s.result || {}).subTaskList || []).find((x) => x.taskId);
-      if (!task) {
-        this.log("\u4E91\u76D8\u65E0\u91CD\u590D\u6587\u4EF6");
-        return;
-      }
-      const d = await this.postJSON("https://s.pan.wo.cn/wohome/intelligentClean/getCleanData", { pageNum: 1, taskId: task.taskId, type: 3, pageSize: 50 }, h);
-      const files = [];
-      for (const g of (d.result || {}).fileGroupList || []) (g.fileList || []).slice(1).forEach((x) => x.fileId && files.push({ fileId: x.fileId, spaceType: x.spaceType || "0" }));
-      if (files.length && !CFG.queryOnly) {
-        const c = await this.postJSON("https://s.pan.wo.cn/wohome/intelligentClean/batchClean", { fileList: files, taskType: 3, taskId: task.taskId }, h);
-        this.log(`\u4E91\u76D8\u91CD\u590D\u6E05\u7406\uFF1A${String((c.meta || {}).code) === "200" ? "\u6210\u529F" : "\u5931\u8D25"}\uFF0C${files.length}\u4E2A`);
-      } else this.log(`\u4E91\u76D8\u91CD\u590D\u6587\u4EF6\uFF1A${files.length}\u4E2A`);
+    cloudUploadName() {
+      return String(CFG.cloudUploadName || "8648").trim() || "8648";
     }
-    async securityContext() {
-      const t = await this.get(`https://m.client.10010.com/edop_ng/getTicketByNative?token=${encodeURIComponent(this.ecsToken)}&appId=edop_unicom_3a6cc75a`);
-      if (!t.ticket) return false;
-      const a = await this.postJSON("https://uca.wo116114.com/api/v1/auth/ticket?product_line=uasp&entry_point=h5&entry_point_id=edop_unicom_3a6cc75a", { productId: "", type: 1, ticket: t.ticket }, { clientType: "uasp_unicom_applet" });
-      this.secToken = (a.data || {}).access_token || "";
-      if (!this.secToken) return false;
-      const j = await this.postJSON("https://uca.wo116114.com/api/v1/auth/getTicket?product_line=uasp&entry_point=h5&entry_point_id=edop_unicom_3a6cc75a", { productId: "91311616", phone: this.accountMobile }, { "auth-sa-token": this.secToken, clientType: "uasp_unicom_applet" });
-      this.secTicket = (j.data || {}).ticket || "";
-      if (!this.secTicket) return false;
-      const base = this.secHeaders(false);
-      await this.postJSON("https://m.jf.10010.com/jf-external-application/page/query", { activityId: "s747395186896173056", partnersId: "1702" }, base);
-      const s = await this.get("https://m.jf.10010.com/jf-external-application/jftask/getSecretKey", base);
-      this.secSecret = (s.data || {}).secretKey || "";
-      return !!this.secSecret;
+    cloudEncrypt(text, token) {
+      const key = String(token || "").padEnd(16, " ").slice(0, 16);
+      return aesCbcB64(String(text), key, "wNSOYIB1k1DjY5lA");
     }
-    secHeaders(sign = true) {
-      const h = { ticket: decodeURIComponent(this.secTicket || ""), "User-Agent": H5_UA, partnersid: "1702", clienttype: "uasp_unicom_applet", "Content-Type": "application/json", "Origin": "https://m.jf.10010.com" };
-      if (sign && this.secSecret) {
-        const ts = String(nowMs()), nonce = randomString(8, "0123456789abcdefghijklmnopqrstuvwxyz");
-        h["x-request-timestamp"] = ts;
-        h["x-request-nonce"] = nonce;
-        h["x-request-signature"] = sha256HmacHex(`${nonce}${ts}`, this.secSecret);
-      }
-      return h;
+    async cloudDispatcher(key, param, timeout = 15000, clientId = "1001000035") {
+      const token = this.cloudToken || "";
+      if (!token) return {};
+      const ts = String(nowMs()), seq = String(10000 + Math.floor(Math.random() * 90000));
+      const payload = {
+        header: { key, resTime: ts, reqSeq: seq, channel: "wohome", version: "", sign: md5(`${key}${ts}${seq}wohome`).toUpperCase() },
+        body: { param: this.cloudEncrypt(JSON.stringify(param), token) }
+      };
+      const headers = {
+        "X-YP-Device-Id": "kQ+77Ax9QjhBHAFAAVbCoTTly6IDtegY",
+        accesstoken: token,
+        appversion: "5.5.0",
+        bundleid: "com.chinaunicom.bol.cloudapp",
+        platfomr: "1",
+        width: "900",
+        height: "1600",
+        appchannel: "yyb",
+        "app-type": "liantongyunpanapp",
+        "User-Agent": "LianTongYunPan/5.5.0 (Android 9)",
+        "network-type": "mobile",
+        oaid: "00000000",
+        "Access-Token": token,
+        "App-Version": "yp-app/5.5.0",
+        platform: "1",
+        "sys-version": "Android/9",
+        "Sys-Version": "Android/9",
+        "Client-Id": String(clientId),
+        "Content-Type": "application/json; charset=utf-8"
+      };
+      const r = await this.postJSON("https://s.pan.wo.cn/wohome/dispatcher", payload, headers, { timeout, retries: 1 });
+      return r || {};
     }
-    async securityTask() {
-      this.log("==== \u5B89\u5168\u7BA1\u5BB6 ====");
-      if (!await this.securityContext()) {
-        this.log("\u5B89\u5168\u7BA1\u5BB6\u767B\u5F55\u5931\u8D25");
-        return;
+    async queryAllFiles(spaceType = "0", parentId = "0", pageNum = 0, pageSize = 500) {
+      const token = this.cloudToken || "";
+      if (!token) return {};
+      const res = await this.cloudDispatcher("QueryAllFiles", { clientId: "1001000035", spaceType: String(spaceType), sortRule: "0", parentDirectoryId: String(parentId), pageNum: String(pageNum), pageSize: Number(pageSize) });
+      const rsp = res.RSP || {};
+      if (String(rsp.RSP_CODE) !== "0000" || !rsp.DATA) return {};
+      try {
+        const plain = aesCbcDecryptB64(rsp.DATA, String(token).padEnd(16, " ").slice(0, 16), "wNSOYIB1k1DjY5lA");
+        return safeJSON(plain, {});
+      } catch (e) {
+        this.log(`\u4E91\u76D8\u4EFB\u52A1: \u67E5\u8BE2\u6839\u76EE\u5F55\u6587\u4EF6\u5931\u8D25: ${e && e.message || e}`);
+        return {};
       }
-      const info = await this.postJSON("https://m.jf.10010.com/jf-external-application/jftask/userInfo", {}, this.secHeaders(false));
-      if (info.code === "0000") this.log(`\u5B89\u5168\u7BA1\u5BB6\u79EF\u5206\uFF1A${(info.data || {}).availableScore || 0}\uFF0C\u4ECA\u65E5${(info.data || {}).todayEarnScore || 0}`, true);
-      if (CFG.queryOnly) return;
-      let list = await this.postJSON("https://m.jf.10010.com/jf-external-application/jftask/taskDetail", {}, this.secHeaders(false));
-      for (const t of ((list.data || {}).taskDetail || {}).taskList || []) {
-        const name = t.taskName || "", code = t.taskCode || "", done = safeInt(t.finishCount), need = safeInt(t.needCount);
-        if (!code || !need) continue;
-        if (done >= need) {
-          if (t.finishText === "\u5F85\u9886\u53D6") await this.securityClaim(code, name);
-          continue;
-        }
-        if (/新增亲情守护成员|新增宽带绑定|语音提醒|反诈险领取|设置日程提醒/.test(name)) {
-          this.log(`\u9700\u624B\u52A8\u5B8C\u6210\uFF1A${name}`);
-          continue;
-        }
-        for (let i = done; i < need; i++) {
-          if (name.includes("\u7B7E\u5230")) await this.postJSON("https://m.jf.10010.com/jf-external-application/jftask/sign", { taskCode: code }, this.secHeaders());
-          else {
-            await this.postJSON("https://m.jf.10010.com/jf-external-application/jftask/toFinish", { taskCode: code }, this.secHeaders());
-            await this.securityAction(name, code);
+    }
+    async listUploadNamedFiles(maxPages = 4) {
+      const name = this.cloudUploadName();
+      if (!name) return [];
+      const pattern = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\(\\d+\\))?(?:\\.[^.]+)?$`);
+      const matched = [], seen = new Set();
+      for (let page = 0; page < maxPages; page++) {
+        const data = await this.queryAllFiles("0", "0", page, 500);
+        const files = data.files || [];
+        if (!files.length) break;
+        for (const item of files) {
+          const id = item && item.id, fname = String((item || {}).name || "").trim();
+          if (id && !seen.has(id) && pattern.test(fname)) {
+            seen.add(id);
+            matched.push(item);
           }
-          await sleep(3e3);
-          await this.securityClaim(code, name);
         }
+        if (files.length < 500) break;
+      }
+      return matched;
+    }
+    async deleteRootFiles(items, spaceType = "0") {
+      const targets = (items || []).map((x) => ({ id: String((x || {}).id || "").trim(), dir: String((x || {}).type || "1") === "0" })).filter((x) => x.id);
+      let deleted = 0;
+      for (let offset = 0; offset < targets.length; offset += 100) {
+        const batch = targets.slice(offset, offset + 100);
+        const dirList = batch.filter((x) => x.dir).map((x) => x.id);
+        const fileList = batch.filter((x) => !x.dir).map((x) => x.id);
+        if (!dirList.length && !fileList.length) continue;
+        const res = await this.cloudDispatcher("DeleteFile", { spaceType: String(spaceType), vipLevel: "0", dirList, fileList, clientId: "1001000035" }, 20000);
+        const rsp = res.RSP || {};
+        if (String(rsp.RSP_CODE) === "0000") {
+          deleted += batch.length;
+          this.log(`\u4E91\u76D8\u4EFB\u52A1: \u7B2C${offset / 100 + 1}\u6279\u6839\u76EE\u5F55\u5220\u9664\u6210\u529F\uFF0C\u5171${batch.length}\u4E2A\u6587\u4EF6`);
+        } else {
+          this.log(`\u4E91\u76D8\u4EFB\u52A1: \u7B2C${offset / 100 + 1}\u6279\u6839\u76EE\u5F55\u5220\u9664\u5931\u8D25: ${rsp.RSP_DESC || "\u65E0\u54CD\u5E94"}`);
+        }
+        await sleep(1000);
+      }
+      return deleted;
+    }
+    islandHeaders(token, extra = {}) {
+      return {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) LianTongYunPan/6.0.0 (iPhone; iOS 16.6)",
+        Accept: "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "X-YP-GRAY-FLAG": "undefined",
+        requestTime: String(nowMs()),
+        clientId: "1001000165",
+        "X-YP-Client-Id": "1001000165",
+        "Access-Token": token,
+        "X-YP-Access-Token": token,
+        token,
+        "X-SH-Access-Token": "",
+        "source-type": "woapi",
+        Origin: "https://panservice.mail.wo.cn",
+        Referer: `https://panservice.mail.wo.cn/h5/activitymobile/cmf2026/home?activityId=NDA%3D&touchpoint=300300010005&token=${token}`,
+        ...extra
+      };
+    }
+    async islandRequest(token, path, payload = {}, key = "") {
+      const headers = this.islandHeaders(token);
+      const body = { ...payload };
+      if (key) {
+        const tsRes = await this.postJSON("https://panservice.mail.wo.cn/activity/getTimestamp", { key }, headers, { timeout: 20000 });
+        const stamp = tsRes.result || {};
+        if (!stamp.nonce || stamp.timestamp === undefined) {
+          this.log("\u6D77\u5C9B\u9010\u6D6A: \u83B7\u53D6\u7B7E\u540D\u65F6\u95F4\u6233\u5931\u8D25");
+          return {};
+        }
+        body.activityId = ISLAND_ACTIVITY_ID;
+        body.nonce = stamp.nonce;
+        body.timestamp = stamp.timestamp;
+        body.sign = this.hometownSign(body);
+      }
+      return await this.postJSON(`https://panservice.mail.wo.cn${path}`, body, headers, { timeout: 20000 });
+    }
+    async islandGet(token, path, params = {}, extra = {}) {
+      const query = Object.keys(params).map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join("&");
+      const url = `https://panservice.mail.wo.cn${path}${query ? "?" + query : ""}`;
+      try {
+        return await this.get(url, this.islandHeaders(token, extra)) || {};
+      } catch (e) {
+        return { meta: { code: "-1", message: "\u8BF7\u6C42\u5F02\u5E38" } };
       }
     }
-    async securityAction(name, code) {
-      const h = { "auth-sa-token": this.secToken, token: this.secToken, "Content-Type": "application/json", clientType: "uasp_unicom_applet" };
-      if (name.includes("\u667A\u80FD\u52A9\u624B")) return this.postJSON("https://ims.wo116114.com/api/AiAssistant/autoReply", { history: [], message: "1", promptId: 1e4 }, h);
-      if (name.includes("\u67E5\u770B\u5468\u62A5")) return this.postJSON("https://uca.wo116114.com/sjgj/unicomAssistant/uasp/report/v1/weeklySummary?product_line=uasp&entry_point=h5&entry_point_id=wxdefbc1986dc757a6", { productId: "91311616" }, h);
-      if (name.includes("\u6D3B\u52A8\u6D4F\u89C8")) return this.postJSON("https://m.jf.10010.com/jf-external-application/jftask/taskFinish", { taskCode: code }, this.secHeaders());
-      if (name.includes("\u89D2\u8272\u52A9\u624B\u5BF9\u8BDD")) return this.postJSON("https://ai.wo.cn/web-tongtong/lxzn/chat", { sessionId: `mmrp${randomString(10, "0123456789")}`, requestId: `rqid_mmrp${randomString(10, "0123456789")}`, roleId: 1, message: "\u6211\u6709\u62D6\u5EF6\u75C7\uFF0C\u597D\u591A\u4E8B\u60C5\u4E0D\u60F3\u505A\u3002" }, { Authorization: this.secToken, "Content-Type": "application/json" });
-      this.log(`\u5DF2\u89E6\u53D1\u5B89\u5168\u7BA1\u5BB6\u4EFB\u52A1\uFF1A${name}`);
+    async islandPost(token, path, payload = {}, extra = {}) {
+      try {
+        return await this.postJSON(`https://panservice.mail.wo.cn${path}`, payload, this.islandHeaders(token, extra)) || {};
+      } catch (e) {
+        return { meta: { code: "-1", message: "\u8BF7\u6C42\u5F02\u5E38" } };
+      }
+    }
+    async islandTask(token) {
+      this.log("==== \u4E91\u76D8\u6D77\u5C9B\u9010\u6D6A\u5E94\u63F4 ====");
+      try {
+        const status = await this.islandGet(token, "/activity/checkActivityStatus", { activityId: ISLAND_ACTIVITY_ID });
+        const result = status.result || {};
+        const state = safeInt(result.state, -1);
+        const end = result.activityEndTime;
+        if (end && safeInt(end) < nowMs()) {
+          this.log("\u6D77\u5C9B\u9010\u6D6A: \u6D3B\u52A8\u5DF2\u7ED3\u675F");
+          return;
+        }
+        if (state === -1) {
+          this.log(`\u6D77\u5C9B\u9010\u6D6A: \u6D3B\u52A8\u72B6\u6001\u67E5\u8BE2\u5931\u8D25 ${responseMessage(status)}`);
+          return;
+        }
+        const joined = state === 1;
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u6D3B\u52A8\u8FDB\u884C\u4E2D (\u672C\u8D26\u53F7${joined ? "\u5DF2\u53C2\u4E0E" : "\u5C1A\u672A\u53C2\u4E0E"})`);
+        if (!joined) {
+          const activated = await this.islandPost(token, "/activity/task/activate", { activityId: ISLAND_ACTIVITY_ID });
+          if (String((activated.meta || {}).code) === "200") this.log("\u6D77\u5C9B\u9010\u6D6A: \u5DF2\u6FC0\u6D3B\u53C2\u4E0E");
+          else this.log(`\u6D77\u5C9B\u9010\u6D6A: \u6FC0\u6D3B\u5931\u8D25 ${responseMessage(activated)}`);
+        }
+        await this.islandFirstLevel(token);
+        await this.islandHangInfo(token);
+        await this.islandRoleInfo(token);
+        await this.islandSaveRolePhoto(token);
+        let videoOk = false;
+        try {
+          videoOk = await this.islandAiVideo(token);
+        } catch (e) {
+          this.log(`\u6D77\u5C9B\u9010\u6D6A: AI\u5165\u620F\u5F02\u5E38 ${e && e.message || e}`);
+        }
+        await this.islandCleanupPhotos(token);
+        await this.islandCheckin(token, videoOk);
+        const runPrizes = await this.islandLottery(token);
+        await this.islandSyncPrizes(token, runPrizes);
+      } catch (e) {
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u8BF7\u6C42\u5F02\u5E38 ${e && e.message || e}`);
+      }
+    }
+    async islandLevel(token) {
+      const data = await this.islandPost(token, "/activity/user/levelProgress", { activityId: ISLAND_ACTIVITY_ID });
+      const result = data.result;
+      return result && typeof result === "object" ? safeInt(result.maxPassLevel) : 0;
+    }
+    islandWalk(node, out) {
+      if (!node) return;
+      if (Array.isArray(node)) {
+        for (const v of node) this.islandWalk(v, out);
+      } else if (typeof node === "object") {
+        if (node.targetId || node.targetName || (node.id && node.name)) out.push(node);
+        for (const k of Object.keys(node)) this.islandWalk(node[k], out);
+      }
+    }
+    async islandFirstLevel(token) {
+      if (await this.islandLevel(token) >= 1) return true;
+      this.log("\u6D77\u5C9B\u9010\u6D6A: \u672A\u8FC7\u7B2C\u4E00\u5173(\u672A\u9009\u89D2\u8272), \u81EA\u52A8\u4FDD\u5B58\u89D2\u8272\u6D77\u62A5...");
+      const hits = [];
+      const data = await this.islandGet(token, "/activity/poster/list", { activityId: ISLAND_ACTIVITY_ID });
+      this.islandWalk(data.result, hits);
+      const roles = [];
+      for (const it of hits) {
+        const tid = it.targetId || it.targetID || it.id;
+        const fid = String(it.fid || "");
+        if (tid && fid) roles.push({ targetId: safeInt(tid), targetName: String(it.targetName || it.name || ""), fid });
+      }
+      if (!roles.length) {
+        this.log("\u6D77\u5C9B\u9010\u6D6A: \u89D2\u8272\u5217\u8868\u83B7\u53D6\u5931\u8D25, \u8BF7\u624B\u52A8\u6253\u5F00\u6D3B\u52A8\u9875\u9009\u62E9\u89D2\u8272");
+        return false;
+      }
+      const role = roles[0];
+      await this.islandPost(token, "/wohome/open/v1/ai/moveFile2Person", { activityId: ISLAND_ACTIVITY_ID, fids: [role.fid], taskType: 10, fileType: 2, fileName: `\u62AB\u8346\u65A9\u68D82026-${role.targetName}.jpg`, directoryId: 0, additionalParams: { aiHeaderSubType: 0 } });
+      if (await this.islandLevel(token) >= 1) {
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u7B2C\u4E00\u5173\u5B8C\u6210 (\u5DF2\u9009\u89D2\u8272 ${role.targetName})`, true);
+        return true;
+      }
+      this.log("\u6D77\u5C9B\u9010\u6D6A: \u81EA\u52A8\u9009\u89D2\u672A\u901A\u8FC7");
+      return false;
+    }
+    async islandRoleInfo(token) {
+      const data = await this.islandGet(token, "/activity/user/bindInfo", { activityId: ISLAND_ACTIVITY_ID });
+      const result = data.result || {};
+      this.islandRole = result;
+      if (result.targetName) this.log(`\u6D77\u5C9B\u9010\u6D6A: \u5DF2\u9009\u89D2\u8272 ${result.targetName}`);
+      return result;
+    }
+    async islandSaveRolePhoto(token) {
+      const role = this.islandRole || {};
+      const fid = String(role.fid || ""), name = String(role.targetName || "");
+      if (!fid) return;
+      const data = await this.islandPost(token, "/wohome/open/v1/ai/moveFile2Person", { activityId: ISLAND_ACTIVITY_ID, fids: [fid], taskType: 10, fileType: 2, fileName: name ? `\u62AB\u8346\u65A9\u68D82026-${name}.jpg` : "\u62AB\u8346\u65A9\u68D82026.jpg", directoryId: 0, additionalParams: { aiHeaderSubType: 0 } });
+      if (String((data.meta || {}).code) === "200") this.log("\u6D77\u5C9B\u9010\u6D6A: \u89D2\u8272\u5F62\u8C61\u5DF2\u4FDD\u5B58\u5230\u4E91\u76D8");
+    }
+    async islandHangInfo(token) {
+      const data = await this.islandPost(token, "/activity/aiRole/hangValue/userInfo", { activityId: ISLAND_ACTIVITY_ID });
+      const result = data.result || {};
+      let hv = result.hangValue;
+      if (hv === undefined || hv === null) hv = result.totalHangValue !== undefined ? result.totalHangValue : result.hangValueAfter;
+      if (hv === undefined || hv === null) return;
+      const rank = result.rank || result.rankAfter || "\u672A\u77E5";
+      const region = `${result.provinceName || ""}${result.cityName || ""}`;
+      this.log(`\u6D77\u5C9B\u9010\u6D6A: \u6D6A\u82B1\u503C ${hv} | \u6392\u540D ${rank} | ${region}`, true);
+    }
+    async islandCheckin(token, videoOk = false) {
+      const month = today().slice(0, 7);
+      const panel = await this.islandRequest(token, "/activity/islandWaves/task2/checkin/panel", { month }, "activity:island:activate");
+      const result = panel.result || {};
+      if (!result.todayDate) {
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u6253\u5361\u65E5\u5386\u67E5\u8BE2\u5931\u8D25 ${responseMessage(panel)}`);
+        return false;
+      }
+      let days = safeInt(result.continuousCheckinDays);
+      if (result.checkedToday || !result.canCheckinToday) {
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u4ECA\u65E5\u5DF2\u6253\u5361 (\u8FDE\u7EED${days}\u5929)`);
+        return true;
+      }
+      let signed = await this.islandRequest(token, "/activity/islandWaves/task2/checkin/submit", {}, "activity:island:activate");
+      let ok = signed.result === true;
+      if (!ok && videoOk && String(responseMessage(signed.meta || signed)).includes("\u7B2C\u4E00\u5173")) {
+        this.log("\u6D77\u5C9B\u9010\u6D6A: \u89C6\u9891\u521A\u5B8C\u6210, \u7B49\u5F8510\u79D2\u540C\u6B65\u540E\u91CD\u8BD5\u6253\u5361...");
+        await sleep(10000);
+        signed = await this.islandRequest(token, "/activity/islandWaves/task2/checkin/submit", {}, "activity:island:activate");
+        ok = signed.result === true;
+      }
+      if (ok) {
+        const panel2 = await this.islandRequest(token, "/activity/islandWaves/task2/checkin/panel", { month }, "activity:island:activate");
+        days = safeInt((panel2.result || {}).continuousCheckinDays) || days + 1;
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u6253\u5361\u6210\u529F (\u8FDE\u7EED${days}\u5929)`, true);
+      } else {
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u6253\u5361\u5931\u8D25 ${responseMessage(signed.meta || signed)}`);
+      }
+      return ok;
+    }
+    async islandLottery(token) {
+      const data = await this.islandGet(token, "/activity/lottery/lottery-times", { activityId: ISLAND_ACTIVITY_ID });
+      if (String((data.meta || {}).code) !== "200") {
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u62BD\u5956\u6B21\u6570\u67E5\u8BE2\u5931\u8D25 ${responseMessage(data)}`);
+        return [];
+      }
+      let count = data.result;
+      if (count && typeof count === "object") count = count.lotteryTimes !== undefined ? count.lotteryTimes : count.times !== undefined ? count.times : count.count;
+      count = safeInt(count, 0);
+      this.log(`\u6D77\u5C9B\u9010\u6D6A: \u53EF\u7528\u62BD\u5956\u6B21\u6570 ${count}`, true);
+      const prizes = [];
+      for (let i = 0; i < count; i++) {
+        const result = await this.islandRequest(token, "/activity/lottery", {}, "activity:lottery");
+        const info = result.result || {};
+        if (info && typeof info === "object" && info.prizeName) {
+          const name = String(info.prizeName), code = String(info.redeemCode || "");
+          prizes.push({ \u5956\u54C1: name, \u5151\u6362\u7801: code, \u8BB0\u5F55ID: String(info.recordId || ""), \u65F6\u95F4: dateTime().slice(5, 16), _ts: nowMs() });
+          this.log(`\u6D77\u5C9B\u9010\u6D6A: \u7B2C${i + 1}\u6B21\u62BD\u5956 ${name}${code ? ` (\u5151\u6362\u7801: ${code})` : ""}`, true);
+        } else {
+          this.log(`\u6D77\u5C9B\u9010\u6D6A: \u7B2C${i + 1}\u6B21\u62BD\u5956 ${responseMessage(result)}`);
+        }
+        await sleep(2000);
+      }
+      return prizes;
+    }
+    islandParseTime(item) {
+      for (const k of ["lotteryTime", "createTime", "addTime", "updateTime", "receiveTime", "gmtCreated"]) {
+        const v = item[k];
+        if (!v) continue;
+        const ts = parseInt(String(v), 10);
+        if (Number.isFinite(ts)) {
+          const ms = ts > 1e12 ? ts : ts * 1000;
+          const d = new Date(ms);
+          return [ms, `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`];
+        }
+        return [0, String(v).slice(0, 16)];
+      }
+      return [0, ""];
+    }
+    async islandFetchPrizeHistory(token) {
+      const candidates = [
+        ["post", "/activity/aiRole/userDrawRecords", { activityId: ISLAND_ACTIVITY_ID }],
+        ["post", "/activity/aiRole/userDrawRecords", { activityId: ISLAND_ACTIVITY_ID, pageNum: 1, pageSize: 10 }],
+        ["get", "/activity/v1/recordList", { activityId: ISLAND_ACTIVITY_ID }]
+      ];
+      for (const [method, path, payload] of candidates) {
+        const data = method === "post" ? await this.islandPost(token, path, payload) : await this.islandGet(token, path, payload);
+        if (String((data.meta || {}).code || "") !== "200") continue;
+        const result = data.result;
+        let items = Array.isArray(result) ? result : [];
+        if (result && !Array.isArray(result) && typeof result === "object") {
+          for (const k of ["list", "records", "rows", "data", "prizeList"]) {
+            if (Array.isArray(result[k])) {
+              items = result[k];
+              break;
+            }
+          }
+        }
+        if (!items.length) continue;
+        const records = [];
+        for (const it of items) {
+          if (!it || typeof it !== "object" || !it.prizeName) continue;
+          const [ts, tstr] = this.islandParseTime(it);
+          records.push({ \u5956\u54C1: String(it.prizeName), \u5151\u6362\u7801: String(it.redeemCode || ""), \u8BB0\u5F55ID: String(it.recordId || ""), \u65F6\u95F4: tstr, _ts: ts });
+        }
+        return records;
+      }
+      return [];
+    }
+    async islandSyncPrizes(token, runPrizes) {
+      const merged = {};
+      const put = (rec) => {
+        const name = String(rec.\u5956\u54C1 || "");
+        if (!name || name === "\u8C22\u8C22\u53C2\u4E0E") return;
+        const key = String(rec.\u8BB0\u5F55ID || "") || `${name}|${rec.\u65F6\u95F4 || ""}`;
+        const old = merged[key];
+        if (!old) {
+          merged[key] = { ...rec };
+          return;
+        }
+        for (const f of ["\u5151\u6362\u7801", "\u65F6\u95F4", "_ts"]) if (!old[f] && rec[f]) old[f] = rec[f];
+      };
+      for (const rec of await this.islandFetchPrizeHistory(token)) put(rec);
+      for (const rec of this.islandLoadPrizeCache()) put(rec);
+      for (const rec of runPrizes || []) put(rec);
+      const records = Object.values(merged).sort((a, b) => (b._ts || 0) - (a._ts || 0)).slice(0, 3);
+      if (records.length) {
+        this.islandSavePrizeCache(records);
+        const detail = records.map((r) => `${r.\u65F6\u95F4 ? `[${r.\u65F6\u95F4}] ` : ""}${r.\u5956\u54C1}${r.\u5151\u6362\u7801 ? `(\u7801:${r.\u5151\u6362\u7801})` : ""}`).join("\u3001");
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u4E2D\u5956\u8BB0\u5F55 ${detail}`, true);
+      }
+      return records;
+    }
+    islandLoadPrizeCache() {
+      const key = this.islandCacheKey();
+      if (!key) return [];
+      const cache = readJSON(ISLAND_PRIZE_KEY, {});
+      const value = cache[key];
+      return Array.isArray(value) ? value.filter((x) => x && typeof x === "object") : [];
+    }
+    islandSavePrizeCache(records) {
+      const key = this.islandCacheKey();
+      if (!key) return;
+      const cache = readJSON(ISLAND_PRIZE_KEY, {});
+      cache[key] = records;
+      writeJSON(ISLAND_PRIZE_KEY, cache);
+    }
+    async islandCloudPhotoMap(token, maxPages = 20) {
+      const mapping = {};
+      const extra = { Referer: `https://panservice.mail.wo.cn/h5/mobile/mgtv?type=1&token=${token}`, "X-YP-Client-Id": "1001000003", clientId: "1001000003" };
+      for (let page = 1; page <= maxPages; page++) {
+        const data = await this.islandPost(token, "/wohome/knowledge/queryTypeFileList", { pageSize: 100, pageNo: page, suffixList: ["jpg", "jpeg", "png"], fileType: "1", spaceType: 0, sortRule: "0" }, extra);
+        const details = (data.result || {}).details || [];
+        for (const item of details) {
+          const name = String(item.fileName || "").trim(), fid = String(item.fid || "").trim();
+          if (name && fid && !mapping[name]) mapping[name] = fid;
+        }
+        if (details.length < 100) break;
+      }
+      return mapping;
+    }
+    async islandUploadPhoto(token, bytes, remoteName) {
+      const fsize = bytes.length;
+      const ext = String(remoteName).toLowerCase().slice(-4);
+      const mime = ext === ".png" ? "image/png" : "image/jpeg";
+      const plain = `{"spaceType":"0","directoryId":"0","batchNo":"${compactTime()}","fileName":"${remoteName}","fileSize":${fsize},"fileType":"1"}`;
+      let fileInfo = "";
+      try {
+        fileInfo = this.cloudEncrypt(plain, token);
+      } catch (e) {
+        return "";
+      }
+      const boundary = `----LoonBoundary${randomString(16, "0123456789abcdef")}`;
+      const parts = [];
+      const field = (name, value) => parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+      const uniqueId = `${nowMs()}_${randomString(6, "abcdefghijklmnopqrstuvwxyz0123456789")}`;
+      field("uniqueId", uniqueId);
+      field("accessToken", token);
+      field("fileName", remoteName);
+      field("psToken", "undefined");
+      field("fileSize", String(fsize));
+      field("totalPart", "1");
+      field("partSize", String(fsize));
+      field("partIndex", "1");
+      field("channel", "wocloud");
+      field("directoryId", "0");
+      field("fileInfo", fileInfo);
+      parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${remoteName}"\r\nContent-Type: ${mime}\r\n\r\n`));
+      parts.push(bytes);
+      parts.push(asciiBytes(`\r\n--${boundary}--\r\n`));
+      const r = await this.req("post", "https://du.smartont.net:8443/openapi/client/upload2C", {
+        headers: { "Content-Type": `multipart/form-data; boundary=${boundary}`, "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0", origin: "https://pan.wo.cn", referer: "https://pan.wo.cn/", "accept-language": "zh-CN,zh;q=0.9" },
+        body: concatBytes(parts),
+        timeout: 60000
+      });
+      if (r.status !== 200) return "";
+      const fid = this.islandFindFid(r.json);
+      if (fid) return fid;
+      const map = await this.islandCloudPhotoMap(token);
+      return map[remoteName] || "";
+    }
+    async islandImageCandidates(token) {
+      const candidates = [], seen = new Set();
+      const add = (value, name) => {
+        const v = String(value || "").trim();
+        if (v && !seen.has(v)) {
+          seen.add(v);
+          candidates.push([v, name]);
+        }
+      };
+      if (ISLAND_MGTV_IMG_FID) add(ISLAND_MGTV_IMG_FID, "\u6307\u5B9A\u56FE\u7247");
+      const works = await this.islandPost(token, "/wohome/open/v1/ai/getNewYearWorksList", { pageSize: 20, pageNo: 1, type: 0 }, { Referer: `https://panservice.mail.wo.cn/h5/mobile/aiProduct?token=${token}`, "X-YP-Client-Id": "1001000003", clientId: "1001000003" });
+      for (const item of ((works.result || {}).result || [])) {
+        if (safeInt(item.status) === 1 && safeInt(item.type) === 5) {
+          const fid = qs(String(item.uploadPictureUrl || "")).fid || "";
+          add(fid, `\u5386\u53F2\u4F5C\u54C1${item.id || ""}\u4EBA\u8138\u56FE`);
+        }
+      }
+      for (let page = 1; page <= 2; page++) {
+        const data = await this.islandPost(token, "/wohome/knowledge/queryTypeFileList", { pageSize: 100, pageNo: page, suffixList: ["jpg", "jpeg", "png"], fileType: "1", spaceType: 0, sortRule: "0" }, { Referer: `https://panservice.mail.wo.cn/h5/mobile/mgtv?type=1&token=${token}`, "X-YP-Client-Id": "1001000003", clientId: "1001000003" });
+        const details = (data.result || {}).details || [];
+        for (const item of details) add(item.fid, item.fileName || String(item.fid).slice(0, 12));
+        if (details.length < 100) break;
+      }
+      if (!candidates.length) {
+        this.log("\u6D77\u5C9B\u9010\u6D6A: \u672A\u627E\u5230\u53EF\u7528\u4EBA\u8138\u56FE\u7247, \u8BF7\u5728\u8054\u901A\u4E91\u76D8\u653E\u4E00\u5F20\u6E05\u6670\u5355\u4EBA\u6B63\u8138\u56FE");
+        return candidates;
+      }
+      for (let i = candidates.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = candidates[i];
+        candidates[i] = candidates[j];
+        candidates[j] = tmp;
+      }
+      return candidates;
+    }
+    async islandCleanupPhotos(token) {
+      try {
+        const map = await this.islandCloudPhotoMap(token);
+        const targets = [];
+        for (const name of Object.keys(map)) {
+          if (name.indexOf(ISLAND_TEMP_PHOTO_PREFIX) === 0) targets.push({ id: map[name], type: "1" });
+        }
+        if (!targets.length) {
+          this.log("\u6D77\u5C9B\u9010\u6D6A: \u7F51\u76D8\u65E0\u4E34\u65F6\u7167\u7247\u9700\u6E05\u7406");
+          return;
+        }
+        const deleted = await this.deleteRootFiles(targets, "0");
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u5DF2\u6E05\u7406\u7F51\u76D8\u4E34\u65F6\u7167\u7247 ${deleted} \u4E2A`);
+      } catch (e) {
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u6E05\u7406\u4E34\u65F6\u7167\u7247\u5F02\u5E38 ${e && e.message || e}`);
+      }
+    }
+    islandMgtvHeaders() {
+      return {
+        "User-Agent": ISLAND_ACT_UA,
+        Accept: "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        Origin: "https://pop.mgtv.com",
+        Referer: "https://pop.mgtv.com/",
+        "sec-fetch-site": "same-site",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "accept-language": "zh-CN,zh-Hans;q=0.9"
+      };
+    }
+    async islandMgtvGet(path, ticket, params = {}) {
+      const all = { ticket, t: nowMs(), ...params };
+      const query = Object.keys(all).map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(all[k])}`).join("&");
+      try {
+        return await this.get(`${ISLAND_MGTV_BASE}${path}?${query}`, this.islandMgtvHeaders()) || {};
+      } catch (e) {
+        return {};
+      }
+    }
+    islandBool(value) {
+      return value === true || ["true", "1", "yes"].indexOf(String(value).trim().toLowerCase()) >= 0;
+    }
+    async islandMgtvAvailable(ticket) {
+      const data = await this.islandMgtvGet("/api/cu/queryAvailableTimes", ticket);
+      const info = data.data;
+      if (String(data.errno) !== "0" || !info || typeof info !== "object" || info.faceCount === undefined) return -1;
+      return safeInt(info.faceCount);
+    }
+    async islandMgtvWaitQuota(ticket, cycles = 6, gap = 10) {
+      for (let i = 0; i < cycles; i++) {
+        const n = await this.islandMgtvAvailable(ticket);
+        if (n > 0) {
+          this.log(`\u6D77\u5C9B\u9010\u6D6A: AI\u6B21\u6570\u5DF2\u5230\u8D26 ${n}`);
+          return n;
+        }
+        if (i < cycles - 1) {
+          this.log(`\u6D77\u5C9B\u9010\u6D6A: \u6743\u76CA\u53D1\u653E\u4E2D, \u7B49\u5F85\u5230\u8D26... (${i + 1}/${cycles})`);
+          await sleep(gap * 1000);
+        }
+      }
+      return 0;
+    }
+    async islandMgtvEnsureQuota(ticket) {
+      const face = await this.islandMgtvAvailable(ticket);
+      if (face < 0) {
+        this.log("\u6D77\u5C9B\u9010\u6D6A: AI\u6B21\u6570\u67E5\u8BE2\u5931\u8D25, \u76F4\u63A5\u5C1D\u8BD5\u63D0\u4EA4");
+        return "ok";
+      }
+      this.log(`\u6D77\u5C9B\u9010\u6D6A: AI\u53EF\u7528\u6B21\u6570 ${face}`);
+      if (face > 0) return "ok";
+      const mem = (await this.islandMgtvGet("/api/cu/queryMemberInfo", ticket)).data || {};
+      const offSub = safeInt(mem.offlineSubscribeSuccess);
+      const raw = (await this.islandMgtvGet("/api/cu/queryClaimEligibilityDetail", ticket)).data;
+      const el = raw && typeof raw === "object" && raw.data && typeof raw.data === "object" ? raw.data : raw || {};
+      if (!el || !Object.keys(el).length) {
+        this.log("\u6D77\u5C9B\u9010\u6D6A: \u9886\u53D6\u8D44\u683C\u67E5\u8BE2\u5931\u8D25, \u65E0AI\u6B21\u6570\u53EF\u7528");
+        return "no";
+      }
+      const hasCampus = this.islandBool(el.hasCampusRights);
+      const claimed = this.islandBool(el.isClaimThisMonth);
+      const thisChannel = this.islandBool(el.isThisChannelRights);
+      const remain = this.islandBool(el.hasRemainingNum);
+      this.log(`\u6D77\u5C9B\u9010\u6D6A: \u9886\u53D6\u8D44\u683C hasCampusRights=${hasCampus} isClaimThisMonth=${claimed} isThisChannelRights=${thisChannel} hasRemainingNum=${remain}`);
+      if (!hasCampus) return "probe";
+      if (claimed) {
+        if (thisChannel && offSub === 1) {
+          this.log("\u6D77\u5C9B\u9010\u6D6A: \u5DF2\u9886\u53D6\u8BE5\u9891\u9053\u6743\u76CA, \u53D1\u653E\u4E2D, \u7B49\u5F85\u5230\u8D26...");
+          if (await this.islandMgtvWaitQuota(ticket) > 0) return "ok";
+        }
+        return "no";
+      }
+      if (!remain) {
+        this.log("\u6D77\u5C9B\u9010\u6D6A: \u65E0\u5269\u4F59\u53EF\u9886\u6B21\u6570, \u9700\u5F00\u901A\u8292\u679CAI\u670D\u52A1\u5305");
+        return "no";
+      }
+      const grant = await this.islandMgtvGet("/api/cu/offlineSubscribe", ticket);
+      const ok = safeInt((grant.data || {}).success) === 1;
+      this.log(`\u6D77\u5C9B\u9010\u6D6A: \u9886\u53D6\u6743\u76CA ${ok ? "\u6210\u529F" : "\u5931\u8D25"}`);
+      if (ok && await this.islandMgtvWaitQuota(ticket) > 0) return "ok";
+      return "no";
+    }
+    async islandMgtvSubmit(ticket, imgFid) {
+      try {
+        return await this.postJSON(`${ISLAND_MGTV_BASE}/api/cu/video/template/submit`, { ticket, t: nowMs(), templateId: ISLAND_MGTV_TEMPLATE_ID, index: 0, imgUrl: imgFid }, this.islandMgtvHeaders(), { timeout: 20000 }) || {};
+      } catch (e) {
+        return {};
+      }
+    }
+    async islandAiVideo(token) {
+      const result = await this.islandRequest(token, "/api-user/api/user/ticket");
+      const ticket = (result.result || {}).ticket;
+      if (!ticket) {
+        this.log("\u6D77\u5C9B\u9010\u6D6A: AI\u5165\u620F\u672A\u83B7\u53D6\u5230\u767B\u5F55\u51ED\u636E");
+        return false;
+      }
+      const login = await this.islandMgtvGet("/api/cu/login", ticket);
+      const mgtvTicket = (login.data || {}).ticket;
+      if (!mgtvTicket) {
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: AI\u5165\u620F\u767B\u5F55\u5931\u8D25 ${responseMessage(login)}`);
+        return false;
+      }
+      this.log("\u6D77\u5C9B\u9010\u6D6A: \u8292\u679CTV\u767B\u5F55\u6210\u529F");
+      await this.islandMgtvGet("/api/cu/popup/check", mgtvTicket);
+      const candidates = await this.islandImageCandidates(token);
+      if (!candidates.length) return false;
+      const quotaState = await this.islandMgtvEnsureQuota(mgtvTicket);
+      if (quotaState === "no") return false;
+      for (const [imgFid, imgName] of candidates) {
+        this.log(`\u6D77\u5C9B\u9010\u6D6A: \u9009\u7528\u56FE\u7247 ${imgName}`);
+        let data = await this.islandMgtvSubmit(mgtvTicket, imgFid);
+        for (let i = 0; i < 2; i++) {
+          if (String(data.msg) !== "\u6743\u76CA\u6263\u51CF\u5931\u8D25") break;
+          if (quotaState === "probe") {
+            this.log("\u6D77\u5C9B\u9010\u6D6A: \u514D\u8D39\u4F53\u9A8C\u989D\u5EA6\u4E0D\u53EF\u7528, \u9700\u624B\u52A8\u9886\u53D6\u6743\u76CA");
+            return false;
+          }
+          this.log("\u6D77\u5C9B\u9010\u6D6A: \u6743\u76CA\u6263\u51CF\u5931\u8D25, \u91CD\u65B0\u6821\u9A8C\u6743\u76CA");
+          if (await this.islandMgtvEnsureQuota(mgtvTicket) !== "ok") return false;
+          data = await this.islandMgtvSubmit(mgtvTicket, imgFid);
+        }
+        const taskId = ((data.data || {}).taskId) || data.taskId;
+        if (!taskId) {
+          const msg = String(data.msg || responseMessage(data));
+          this.log(`\u6D77\u5C9B\u9010\u6D6A: \u6A21\u677F\u63D0\u4EA4\u5931\u8D25 ${msg}`);
+          if (["\u7167\u7247", "\u4EBA\u8138", "\u8BC6\u522B", "\u753B\u8D28", "\u6E05\u6670", "\u56FE\u7247"].some((k) => msg.indexOf(k) >= 0)) {
+            this.log(`\u6D77\u5C9B\u9010\u6D6A: \u8BE5\u7167\u7247\u4E0D\u7B26\u5408\u6807\u51C6, \u6362\u4E0B\u4E00\u5F20 (${imgName})`);
+            continue;
+          }
+          return false;
+        }
+        for (let i = 0; i < 20; i++) {
+          const info = (await this.islandMgtvGet("/api/cu/video/template/result", mgtvTicket, { taskId })).data || {};
+          const audit = safeInt(info.auditState), algorithm = safeInt(info.algorithmState);
+          if (audit === 2 || (audit > 1 && algorithm > 1)) {
+            this.log("\u6D77\u5C9B\u9010\u6D6A: AI\u5165\u620F\u5236\u4F5C\u6210\u529F", true);
+            return true;
+          }
+          await sleep(3000);
+        }
+        this.log("\u6D77\u5C9B\u9010\u6D6A: \u6A21\u677F\u4ECD\u5728\u751F\u6210, \u8BF7\u7A0D\u540E\u91CD\u8DD1");
+        return false;
+      }
+      this.log("\u6D77\u5C9B\u9010\u6D6A: \u6CA1\u6709\u53EF\u901A\u8FC7\u8BC6\u522B\u7684\u56FE\u7247");
+      return false;
+    }
+    islandCacheKey() {
+      return String(this.accountMobile || this.mobile || "").trim();
+    }
+    islandLoadCachedToken() {
+      const key = this.islandCacheKey();
+      if (!key) return "";
+      const cache = readJSON(CLOUD_TOKEN_KEY, {});
+      const entry = cache[key];
+      if (!entry || !entry.userToken) return "";
+      const ts = safeInt(entry.ts);
+      if (nowMs() - ts >= ISLAND_CLOUD_TTL_HOURS * 3600 * 1000) return "";
+      return String(entry.userToken);
+    }
+    islandSaveCachedToken(token) {
+      const key = this.islandCacheKey();
+      if (!key || !token) return;
+      const cache = readJSON(CLOUD_TOKEN_KEY, {});
+      cache[key] = { userToken: token, ts: nowMs(), time: dateTime() };
+      writeJSON(CLOUD_TOKEN_KEY, cache);
+    }
+    async islandTokenValid(token) {
+      const data = await this.islandGet(token, "/activity/checkActivityStatus", { activityId: ISLAND_ACTIVITY_ID });
+      const meta = data.meta || {};
+      const code = String(meta.code || "");
+      if (code === "200" || code === "-1") return true;
+      const msg = String(meta.message || "");
+      if (["401", "403", "40101", "40001", "40401"].indexOf(code) >= 0) return false;
+      if (["\u767B\u5F55", "token", "Token", "\u6388\u6743", "\u8EAB\u4EFD", "\u5931\u6548"].some((k) => msg.indexOf(k) >= 0)) return false;
       return true;
     }
-    async securityClaim(code, name) {
-      const r = await this.postJSON("https://m.jf.10010.com/jf-external-application/jftask/receive", { taskCode: code }, this.secHeaders());
-      this.log(`\u5B89\u5168\u7BA1\u5BB6[${name}]\uFF1A${(r.data || {}).score ? `\u9886\u53D6 ${(r.data || {}).score}` : responseMessage(r)}`, !!(r.data || {}).score);
+    async cloudClean() {
+      if (!this.cloudToken) return;
+      this.log("\u4E91\u76D8\u4EFB\u52A1: \u5F00\u59CB\u6E05\u7406\u4E91\u76D8\u91CD\u590D\u6587\u4EF6");
+      const uploadedCount = safeInt((this.cloudDisk || {}).uploadedFileCount);
+      const retryCount = uploadedCount > 0 ? 6 : 1;
+      let taskId = "", fileIds = [];
+      for (let attempt = 1; attempt <= retryCount; attempt++) {
+        const res = await this.postJSON("https://s.pan.wo.cn/wohome/intelligentClean/getScanStateAndResult", { pathLevelList: [{ levelType: "space", levelName: "\u4E2A\u4EBA\u4E91", busId: "0" }] }, this.cloudHeaders(), { timeout: 10000 });
+        if (String((res.meta || {}).code) !== "200") {
+          this.log("\u4E91\u76D8\u4EFB\u52A1: \u83B7\u53D6\u626B\u63CF\u72B6\u6001\u5931\u8D25");
+          return;
+        }
+        taskId = "";
+        for (const item of (res.result || {}).subTaskList || []) {
+          if (item && item.taskId) {
+            taskId = item.taskId;
+            break;
+          }
+        }
+        if (taskId) {
+          fileIds = [];
+          let page = 1, maxPage = 1;
+          while (page <= maxPage) {
+            const pageRes = await this.postJSON("https://s.pan.wo.cn/wohome/intelligentClean/getCleanData", { pageNum: page, taskId, type: 3, pageSize: 50 }, this.cloudHeaders(), { timeout: 10000 });
+            if (String((pageRes.meta || {}).code) !== "200") break;
+            maxPage = safeInt((pageRes.result || {}).maxPageNum, 1);
+            for (const group of (pageRes.result || {}).fileGroupList || []) {
+              (group.fileList || []).forEach((fi, idx) => {
+                if (idx > 0 && fi && fi.fileId) fileIds.push({ fileId: fi.fileId, spaceType: fi.spaceType || "0" });
+              });
+            }
+            page++;
+          }
+        }
+        if (fileIds.length) {
+          this.log(`\u4E91\u76D8\u4EFB\u52A1: \u7B2C${attempt}\u6B21\u91CD\u590D\u626B\u63CF\u5B8C\u6210\uFF0C\u5171${fileIds.length}\u4E2A\u91CD\u590D\u6587\u4EF6`);
+          break;
+        }
+        if (attempt < retryCount) {
+          const wait = Math.min(5 + (attempt - 1) * 2, 12);
+          this.log(`\u4E91\u76D8\u4EFB\u52A1: \u7B2C${attempt}\u6B21\u91CD\u590D\u626B\u63CF\u672A\u53D1\u73B0\u53EF\u6E05\u7406\u6587\u4EF6\uFF0C${wait}\u79D2\u540E\u91CD\u8BD5`);
+          await sleep(wait * 1000);
+        }
+      }
+      const preview = (list) => `${list.slice(0, 6).map((x) => x.name).join("\u3001")}${list.length > 6 ? "..." : ""}`;
+      if (!fileIds.length) {
+        const named = uploadedCount > 0 ? await this.listUploadNamedFiles() : [];
+        if (named.length) {
+          this.log(`\u4E91\u76D8\u4EFB\u52A1: \u667A\u80FD\u6E05\u7406\u672A\u8BC6\u522B\u5230\u91CD\u590D\u9879\uFF0C\u4F46\u6839\u76EE\u5F55\u68C0\u6D4B\u5230${named.length}\u4E2A[${this.cloudUploadName()}]\u7CFB\u5217\u6587\u4EF6: ${preview(named)}`);
+          const deleted = await this.deleteRootFiles(named);
+          if (this.cloudDisk) this.cloudDisk.uploadedFileCount = 0;
+          this.log(deleted ? `\u4E91\u76D8\u4EFB\u52A1: \u5DF2\u901A\u8FC7\u5B98\u65B9\u5220\u9664\u63A5\u53E3\u6E05\u7406${deleted}\u4E2A[${this.cloudUploadName()}]\u7CFB\u5217\u6587\u4EF6` : `\u4E91\u76D8\u4EFB\u52A1: [${this.cloudUploadName()}]\u7CFB\u5217\u6587\u4EF6\u5220\u9664\u5931\u8D25`);
+        } else {
+          if (this.cloudDisk) this.cloudDisk.uploadedFileCount = 0;
+          this.log("\u4E91\u76D8\u4EFB\u52A1: \u65E0\u91CD\u590D\u6587\u4EF6");
+        }
+        return;
+      }
+      for (let offset = 0; offset < fileIds.length; offset += 100) {
+        const batch = fileIds.slice(offset, offset + 100);
+        const batchRes = await this.postJSON("https://s.pan.wo.cn/wohome/intelligentClean/batchClean", { fileList: batch, taskType: 3, taskId }, this.cloudHeaders(), { timeout: 30000 });
+        this.log(`\u4E91\u76D8\u4EFB\u52A1: \u7B2C${offset / 100 + 1}\u6279\u6E05\u7406: ${String((batchRes.meta || {}).code) === "200" ? "\u6210\u529F" : "\u5931\u8D25"}`);
+        await sleep(2000);
+      }
+      const named2 = uploadedCount > 0 ? await this.listUploadNamedFiles() : [];
+      if (named2.length) {
+        this.log(`\u4E91\u76D8\u4EFB\u52A1: \u667A\u80FD\u6E05\u7406\u540E\u6839\u76EE\u5F55\u4ECD\u68C0\u6D4B\u5230${named2.length}\u4E2A[${this.cloudUploadName()}]\u7CFB\u5217\u6587\u4EF6: ${preview(named2)}`);
+        const deleted = await this.deleteRootFiles(named2);
+        if (deleted) this.log(`\u4E91\u76D8\u4EFB\u52A1: \u5DF2\u901A\u8FC7\u5B98\u65B9\u5220\u9664\u63A5\u53E3\u8865\u5145\u6E05\u7406${deleted}\u4E2A[${this.cloudUploadName()}]\u7CFB\u5217\u6587\u4EF6`);
+      }
+      if (this.cloudDisk) this.cloudDisk.uploadedFileCount = 0;
+      this.log("\u4E91\u76D8\u4EFB\u52A1: \u4E91\u76D8\u91CD\u590D\u6587\u4EF6\u6E05\u7406\u5B8C\u6210");
+    }
+    hometownHeaders(token, extra = {}) {
+      return {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) LianTongYunPan/5.1.0 (iPhone; iOS 16.6)",
+        "source-type": "woapi",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        clientId: "1001000165",
+        "X-YP-Client-Id": "1001000165",
+        "X-YP-Access-Token": token,
+        token,
+        "X-SH-Access-Token": "",
+        "X-YP-GRAY-FLAG": "undefined",
+        requestTime: String(nowMs()),
+        "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+        ...extra
+      };
+    }
+    hometownAes(text, key) {
+      return aesCbcB64(String(text), String(key), HOMETOWN_AES_IV);
+    }
+    hometownSign(payload) {
+      const parts = Object.keys(payload).sort().filter((k) => k !== "sign" && payload[k] !== null && payload[k] !== undefined && String(payload[k]).trim() !== "").map((k) => `${k}=${String(payload[k]).trim()}`);
+      return sha256HmacHex(parts.join("&") + `&secret=${HOMETOWN_LOTTERY_SECRET}`, HOMETOWN_LOTTERY_SECRET);
+    }
+    async hometownTimestamp(token, key = "activity:lottery") {
+      const res = await this.postJSON("https://panservice.mail.wo.cn/activity/getTimestamp", { key }, this.hometownHeaders(token), { timeout: 15000 });
+      if (String((res.meta || {}).code) === "200") return res.result || {};
+      this.log(`\u5BB6\u4E61\u6253\u5361: \u83B7\u53D6\u65F6\u95F4\u6233\u5931\u8D25 ${responseMessage(res)}`);
+      return null;
+    }
+    async hometownLocation(token) {
+      const mobile = this.accountMobile;
+      if (!token || !mobile) {
+        this.log("\u5BB6\u4E61\u6253\u5361: \u67E5\u8BE2\u5F52\u5C5E\u5730\u5931\u8D25\uFF0CToken\u6216\u624B\u673A\u53F7\u4E3A\u7A7A");
+        return null;
+      }
+      const res = await this.postJSON("https://panservice.mail.wo.cn/api-user/user/info/query", { mobile: this.hometownAes(mobile, HOMETOWN_MOBILE_KEY) }, this.hometownHeaders(token), { timeout: 15000 });
+      if (String((res.meta || {}).code) === "200") {
+        const r = res.result || {};
+        if (r.provinceCode) {
+          this.log(`\u5BB6\u4E61\u6253\u5361: \u5F52\u5C5E\u5730 ${r.provinceName}(${r.provinceCode})`);
+          return r;
+        }
+        this.log("\u5BB6\u4E61\u6253\u5361: \u5F52\u5C5E\u5730\u67E5\u8BE2\u5931\u8D25\uFF0C\u65E0\u7701\u4EFD\u4FE1\u606F");
+      } else {
+        this.log(`\u5BB6\u4E61\u6253\u5361: \u5F52\u5C5E\u5730\u67E5\u8BE2\u5931\u8D25 ${responseMessage(res)}`);
+      }
+      return null;
+    }
+    async hometownTicket(token) {
+      const res = await this.postJSON("https://panservice.mail.wo.cn/api-user/api/user/ticket", {}, this.hometownHeaders(token, { accesstoken: token, "access-token": token, "app-type": "unicom", "X-CM-SERVICE": "PHONE", "X-YP-Open-Version": "v1.0", Accept: "*" }), { timeout: 15000 });
+      const ticket = (res.result || {}).ticket;
+      if (!ticket) this.log(`\u5BB6\u4E61\u6253\u5361: \u83B7\u53D6\u4E91\u76D8\u57FA\u7840Ticket\u5931\u8D25 ${responseMessage(res)}`);
+      return ticket || "";
+    }
+    async hometownOpen(token, ticket, provinceCode, provinceName) {
+      if (!token || !provinceCode || !provinceName) {
+        this.log("\u5BB6\u4E61\u6253\u5361: \u5F00\u542F\u6D3B\u52A8\u5931\u8D25\uFF0CToken\u6216\u5F52\u5C5E\u5730\u4FE1\u606F\u4E0D\u5B8C\u6574");
+        return false;
+      }
+      const mobile = this.accountMobile;
+      const referer = `https://panservice.mail.wo.cn/h5/activitymobile/fileUploadActive?touchpoint=300200030001&type=06&ticket=${ticket}&version=iphone_c%4012.0801&timestamp=${nowMs()}&desmobile=${mobile}&num=0&postage=01addda9786dc7eb5ca0eacd9acd664a&activityId=${HOMETOWN_OPEN_ACTIVITY_ID}&clientid=1001000003&userNumber=${mobile}`;
+      const res = await this.postJSON("https://panservice.mail.wo.cn/activity/openActivity", { activityId: HOMETOWN_LOTTERY_ACTIVITY_ID, provinceCode, provinceName }, this.hometownHeaders(token, { Referer: referer }), { timeout: 15000 });
+      this.log(`\u5BB6\u4E61\u6253\u5361: \u5F00\u542F\u7ED3\u679C ${res.msg || responseMessage(res)}`);
+      return true;
+    }
+    async hometownUpload(token) {
+      this.hometownUploadedFiles = [];
+      if (!token) {
+        this.log("\u5BB6\u4E61\u6253\u5361: \u4E0A\u4F20\u5931\u8D25\uFF0CToken\u4E3A\u7A7A");
+        return false;
+      }
+      const bytes = b64ToBytes(HOMETOWN_MATERIAL_B64);
+      const batchNo = compactTime();
+      const fileInfoPlain = `{"spaceType":"0","directoryId":"0","batchNo":"${batchNo}","fileName":"8648","fileSize":${bytes.length},"fileType":"1"}`;
+      const fileInfo = this.hometownAes(fileInfoPlain, String(token).slice(0, 16));
+      const uniqueId = `${nowMs()}_${randomString(6, "abcdefghijklmnopqrstuvwxyz0123456789")}`;
+      const boundary = `----LoonBoundary${randomString(16, "0123456789abcdef")}`;
+      const parts = [];
+      const field = (name, value) => parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+      field("uniqueId", uniqueId);
+      field("accessToken", token);
+      field("fileName", "8648");
+      field("psToken", "undefined");
+      field("fileSize", String(bytes.length));
+      field("totalPart", "1");
+      field("partSize", String(bytes.length));
+      field("partIndex", "1");
+      field("channel", "wocloud");
+      field("directoryId", "0");
+      field("fileInfo", fileInfo);
+      parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="8648"\r\nContent-Type: image/jpeg\r\n\r\n`));
+      parts.push(bytes);
+      parts.push(asciiBytes(`\r\n--${boundary}--\r\n`));
+      const body = concatBytes(parts);
+      const r = await this.req("post", "https://du.smartont.net:8443/openapi/client/upload2C", {
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0",
+          origin: "https://pan.wo.cn",
+          referer: "https://pan.wo.cn/",
+          "accept-language": "zh-CN,zh;q=0.9",
+          "sec-fetch-site": "same-site",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-dest": "empty"
+        },
+        body,
+        timeout: 60000
+      });
+      const res = r.json || {};
+      const code = String(res.code !== undefined ? res.code : (res.meta || {}).code || "");
+      const success = r.status === 200 && (code === "0000" || code === "0" || code === "200");
+      const fid = ((res.data || {}).fid) || this.islandFindFid(res);
+      if (success && fid) this.hometownUploadedFiles.push({ id: fid, type: "1" });
+      this.log(`\u5BB6\u4E61\u6253\u5361: \u6587\u4EF6\u4E0A\u4F20 ${success ? "\u6210\u529F" : "\u5931\u8D25"} ${responseMessage(res)}`);
+      return success;
+    }
+    islandFindFid(node, depth = 0) {
+      if (!node || depth > 6) return "";
+      if (typeof node === "object") {
+        for (const k of ["fid", "fileId", "fileID", "id"]) {
+          const v = String(node[k] || "").trim();
+          if (v && v.length > 6) return v;
+        }
+        for (const k of Object.keys(node)) {
+          const found = this.islandFindFid(node[k], depth + 1);
+          if (found) return found;
+        }
+      } else if (Array.isArray(node)) {
+        for (const item of node) {
+          const found = this.islandFindFid(item, depth + 1);
+          if (found) return found;
+        }
+      }
+      return "";
+    }
+    async hometownOpen(token, ticket, provinceCode, provinceName) {
+      if (!token || !provinceCode || !provinceName) {
+        this.log("\u5BB6\u4E61\u6253\u5361: \u5F00\u542F\u6D3B\u52A8\u5931\u8D25\uFF0CToken\u6216\u5F52\u5C5E\u5730\u4FE1\u606F\u4E0D\u5B8C\u6574");
+        return false;
+      }
+      const mobile = this.accountMobile;
+      const referer = `https://panservice.mail.wo.cn/h5/activitymobile/fileUploadActive?touchpoint=300200030001&type=06&ticket=${ticket}&version=iphone_c%4012.0801&timestamp=${nowMs()}&desmobile=${mobile}&num=0&postage=01addda9786dc7eb5ca0eacd9acd664a&activityId=${HOMETOWN_OPEN_ACTIVITY_ID}&clientid=1001000003&userNumber=${mobile}`;
+      const res = await this.postJSON("https://panservice.mail.wo.cn/activity/openActivity", { activityId: HOMETOWN_LOTTERY_ACTIVITY_ID, provinceCode, provinceName }, this.hometownHeaders(token, { Referer: referer }), { timeout: 15000 });
+      this.log(`\u5BB6\u4E61\u6253\u5361: \u5F00\u542F\u7ED3\u679C ${res.msg || (res.meta || {}).message || "\u54CD\u5E94\u672A\u5305\u542B\u4E1A\u52A1\u72B6\u6001"}`);
+      return String((res.meta || {}).code) === "200";
+    }
+    async hometownLottery(token) {
+      if (!token) return;
+      const ts = await this.hometownTimestamp(token);
+      if (!ts) {
+        this.log("\u5BB6\u4E61\u6253\u5361: \u62BD\u5956\u5931\u8D25\uFF0C\u65E0\u6CD5\u83B7\u53D6\u65F6\u95F4\u6233");
+        return;
+      }
+      const payload = { activityId: HOMETOWN_LOTTERY_ACTIVITY_ID, nonce: ts.nonce || "", timestamp: ts.timestamp || 0 };
+      payload.sign = this.hometownSign(payload);
+      const res = await this.postJSON("https://panservice.mail.wo.cn/activity/lottery", payload, this.hometownHeaders(token), { timeout: 15000 });
+      if (String((res.meta || {}).code) === "200") {
+        const r = res.result || {};
+        this.log(`\u5BB6\u4E61\u6253\u5361: \u62BD\u5956\u7ED3\u679C ${r.prizeName || "\u672A\u83B7\u53D6\u5230\u5956\u54C1\u4FE1\u606F"}`, true);
+        if (safeInt(r.lotteryTimes) > 0) this.log(`\u5BB6\u4E61\u6253\u5361: \u5269\u4F59\u62BD\u5956\u6B21\u6570 ${r.lotteryTimes}`);
+      } else {
+        this.log(`\u5BB6\u4E61\u6253\u5361: \u62BD\u5956\u5931\u8D25 ${responseMessage(res)}`);
+      }
+    }
+    async hometownCleanup() {
+      const matched = this.hometownUploadedFiles || [];
+      if (!matched.length) return;
+      try {
+        const deleted = await this.deleteRootFiles(matched, "0");
+        this.log(`\u5BB6\u4E61\u6253\u5361: \u5DF2\u6E05\u7406\u672C\u6B21\u4E0A\u4F20\u6587\u4EF6 ${deleted} \u4E2A`);
+        this.hometownUploadedFiles = [];
+      } catch (e) {
+        this.log(`\u5BB6\u4E61\u6253\u5361: \u6E05\u7406\u672C\u6B21\u4E0A\u4F20\u6587\u4EF6\u5F02\u5E38 ${e && e.message || e}`);
+      }
+    }
+    async hometownTask(token) {
+      this.log("==== \u4E91\u76D8\u5BB6\u4E61\u6253\u5361 ====");
+      const loc = await this.hometownLocation(token);
+      if (!loc) return;
+      const ticket = await this.hometownTicket(token);
+      if (!await this.hometownOpen(token, ticket, loc.provinceCode, loc.provinceName)) return;
+      this.log("\u5BB6\u4E61\u6253\u5361: \u5F00\u59CB\u6587\u4EF6\u4E0A\u4F20...");
+      const uploaded = await this.hometownUpload(token);
+      this.hometownUploaded = uploaded;
+      await sleep(5000);
+      await this.hometownLottery(token);
+      if (uploaded) await this.hometownCleanup();
+    }
+    async securityTask() {
+      this.log("==== \u8054\u901A\u5B89\u5168\u7BA1\u5BB6 ====");
+      if (!this.ecsToken) {
+        this.log("\u5B89\u5168\u7BA1\u5BB6: \u7F3A\u5C11 ecs_token\uFF0C\u8DF3\u8FC7");
+        return;
+      }
+      this.secPendingClaims = this.secPendingClaims || {};
+      try {
+        await this.secGetTicket();
+        if (!this.secTicket1) return;
+        await this.secGetAuthToken();
+        if (!this.secToken) return;
+        await this.secGetJfTicket();
+        if (!this.secTicket) return;
+        this.secOldJFPoints = null;
+        await this.secGetUserInfo();
+        if (CFG.queryOnly) {
+          this.log("\u8054\u901A\u52A9\u7406\u79EF\u5206\uFF1A[\u67E5\u8BE2\u6A21\u5F0F] \u8DF3\u8FC7\u4EFB\u52A1\u6267\u884C");
+          return;
+        }
+        await this.secGetSecretKey();
+        await this.secExecuteAllTasks();
+        this.log("\u7B49\u5F85\u79EF\u5206\u5230\u8D26\uFF0C\u7B49\u5F85\u4E00\u4F1A...");
+        await this.secRecoverPendingClaims(2, 12000, true);
+        await sleep(3000);
+        await this.secGetUserInfo();
+      } catch (e) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u5F02\u5E38: ${e && e.message || e}`);
+      }
+    }
+    async secGetTicket() {
+      const headers = {
+        Cookie: `PvSessionId=${compactTime()}${this.unicomTokenId};c_mobile=${this.accountMobile}; c_version=iphone_c@11.0800; city=036||90063345|-99;devicedId=${this.unicomTokenId}; ecs_token=${this.ecsToken};t3_token=`,
+        Accept: "*/*",
+        Connection: "keep-alive",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "ChinaUnicom4.x/12.3.1 (com.chinaunicom.mobilebusiness; build:77; iOS 16.6.0) Alamofire/4.7.3 unicom{version:iphone_c@12.0301}",
+        "Accept-Language": "zh-Hans-CN;q=1.0"
+      };
+      const r = await this.get(`https://m.client.10010.com/edop_ng/getTicketByNative?token=${encodeURIComponent(this.ecsToken)}&appId=edop_unicom_3a6cc75a`, headers);
+      this.secTicket1 = r.ticket || "";
+      if (!this.secTicket1) this.log(`\u5B89\u5168\u7BA1\u5BB6: getTicketByNative_sec \u5931\u8D25 - ${responseMessage(r)}`);
+    }
+    async secGetAuthToken() {
+      if (!this.secTicket1) return;
+      const a = await this.postJSON("https://uca.wo116114.com/api/v1/auth/ticket?product_line=uasp&entry_point=h5&entry_point_id=edop_unicom_3a6cc75a", { productId: "", type: 1, ticket: this.secTicket1 }, { "User-Agent": SEC_APP_UA, "Content-Type": "application/json", clientType: "uasp_unicom_applet" });
+      this.secToken = ((a.data || {}).access_token) || "";
+      if (!this.secToken) this.log(`\u5B89\u5168\u7BA1\u5BB6: getAuthToken_sec \u5931\u8D25 - ${responseMessage(a)}`);
+    }
+    async secGetJfTicket() {
+      if (!this.secToken) return;
+      const j = await this.postJSON("https://uca.wo116114.com/api/v1/auth/getTicket?product_line=uasp&entry_point=h5&entry_point_id=edop_unicom_3a6cc75a", { productId: "91311616", phone: this.accountMobile }, { "User-Agent": SEC_APP_UA, "Content-Type": "application/json", "auth-sa-token": this.secToken, clientType: "uasp_unicom_applet" });
+      this.secTicket = ((j.data || {}).ticket) || "";
+      if (!this.secTicket) {
+        this.log("\u5B89\u5168\u7BA1\u5BB6\u83B7\u53D6\u79EF\u5206\u7968\u636E\u5931\u8D25");
+        return;
+      }
+      for (let i = 0; i < 2; i++) {
+        const r = await this.req("post", "https://m.jf.10010.com/jf-external-application/page/query", { headers: this.secJfHeaders(false), body: JSON.stringify({ activityId: "s747395186896173056", partnersId: "1702" }) });
+        this.updateSecJea(r.headers);
+      }
+    }
+    updateSecJea(headers) {
+      const raw = getHeader(headers || {}, "Set-Cookie");
+      const m = String(raw).match(/_jea_id=([^;,\s]+)/);
+      if (m) this.secJea = m[1];
+      return this.secJea || "";
+    }
+    secJfHeaders(withSignature = false) {
+      const h = {
+        ticket: decodeURIComponent(this.secTicket || ""),
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 unicom{version:iphone_c@12.0301};ltst;OSVersion/16.6",
+        partnersid: "1702",
+        clienttype: "uasp_unicom_applet",
+        "Content-Type": "application/json",
+        Accept: "application/json, text/plain, */*",
+        Origin: "https://m.jf.10010.com",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin"
+      };
+      if (this.secJea) h.Cookie = `_jea_id=${this.secJea};`;
+      if (withSignature) Object.assign(h, this.secSignatureHeaders());
+      return h;
+    }
+    secSignatureHeaders() {
+      if (!this.secSecretKey) return {};
+      const ts = String(nowMs()), nonce = randomString(8, "0123456789abcdefghijklmnopqrstuvwxyz");
+      return { "x-request-timestamp": ts, "x-request-nonce": nonce, "x-request-signature": sha256HmacHex(nonce + ts, this.secSecretKey) };
+    }
+    async secGetSecretKey(silent = false) {
+      if (this.secSecretKey) return this.secSecretKey;
+      if (!this.secTicket) return "";
+      const headers = {
+        Accept: "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 unicom{version:iphone_c@12.0301};ltst;OSVersion/16.6",
+        Connection: "keep-alive",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+        Origin: "https://m.jf.10010.com",
+        clienttype: "uasp_unicom_applet",
+        partnersid: "1702",
+        ticket: decodeURIComponent(this.secTicket)
+      };
+      if (this.secJea) headers.Cookie = `_jea_id=${this.secJea};`;
+      const r = await this.get("https://m.jf.10010.com/jf-external-application/jftask/getSecretKey", headers);
+      const secret = ((r.data || {}).secretKey) || "";
+      if (r.code === "0000" && secret) {
+        this.secSecretKey = secret;
+        if (!silent) this.log("secretKey \u83B7\u53D6\u6210\u529F");
+        return secret;
+      }
+      this.log(`\u5B89\u5168\u7BA1\u5BB6: getSecretKey \u5931\u8D25: ${responseMessage(r)}`);
+      return "";
+    }
+    async secUcaPost(url, body) {
+      try {
+        return await this.postJSON(url, body, { clientType: "uasp_unicom_applet", "auth-sa-token": this.secToken, "Content-Type": "application/json", Accept: "*", "User-Agent": SEC_APP_UA }) || {};
+      } catch (e) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: uca_post \u5F02\u5E38: ${e && e.message || e}`);
+        return null;
+      }
+    }
+    async secAddToBlacklist() {
+      const url = "https://uca.wo116114.com/sjgj/woAssistant/umm/configs/v1/config?product_line=uasp&entry_point=h5&entry_point_id=wxdefbc1986dc757a6";
+      await this.secUcaPost(url, { productId: "91242950", operationType: 1, type: 1, contents: [{ checked: true, configTime: null, nickname: null, contentTag: "\u7591\u4F3C\u8BC8\u9A97", content: "13088330789" }] });
+      await sleep(2000);
+      await this.secUcaPost(url, { productId: "91242950", blacklistSource: 0, type: 1, operationType: 0, contents: [{ contentTag: "\u7591\u4F3C\u8BC8\u9A97", content: "13088330789" }] });
+    }
+    async secMarkPhone() {
+      await this.secUcaPost("https://uca.wo116114.com/sjgj/unicomAssistant/uasp/configs/v1/addressBook/saveTagPhone?product_line=uasp&entry_point=h5&entry_point_id=wxdefbc1986dc757a6", { productId: "91311616", status: 0, tagIds: [26], tagPhoneNo: "13088330789" });
+    }
+    async secSyncAddressBook() {
+      await this.secUcaPost("https://uca.wo116114.com/sjgj/unicomAssistant/uasp/configs/v1/addressBookBatchConfig?product_line=uasp&entry_point=h5&entry_point_id=edop_unicom_3a6cc75a", { opType: "1", productId: "91311616", addressBookDTOList: [{ addressBookName: "\u53EF\u4E50", addressBookPhoneNo: "13105750575" }] });
+    }
+    async secSetInterceptionRules() {
+      const url = "https://uca.wo116114.com/sjgj/woAssistant/umm/configs/v1/config?product_line=uasp&entry_point=h5&entry_point_id=wxdefbc1986dc757a6";
+      await this.secUcaPost(url, { productId: "91311616", type: 3, operationType: 0, contents: [{ icon: "alerting", content: "1", contentName: "\u54CD\u4E00\u58F0", contentTag: "8", name: "rings-once" }] });
+      await sleep(2000);
+      await this.secUcaPost(url, { productId: "91311616", type: 3, operationType: 0, contents: [{ icon: "alerting", content: "0", contentName: "\u54CD\u4E00\u58F0", contentTag: "8", name: "rings-once" }] });
+    }
+    async secViewWeeklyReport() {
+      const base = "https://uca.wo116114.com/sjgj/unicomAssistant/uasp";
+      const body = { productId: "91311616" };
+      await this.secUcaPost(`${base}/configs/v1/weeklySwitchStatus?product_line=uasp&entry_point=h5&entry_point_id=wxdefbc1986dc757a6`, body);
+      await this.secUcaPost(`${base}/report/v1/queryKeyData?product_line=uasp&entry_point=h5&entry_point_id=wxdefbc1986dc757a6`, body);
+      await this.secUcaPost(`${base}/report/v1/weeklySummary?product_line=uasp&entry_point=h5&entry_point_id=wxdefbc1986dc757a6`, body);
+    }
+    async secZhushou() {
+      try {
+        await this.postJSON("https://ims.wo116114.com/api/AiAssistant/autoReply", { history: [], message: "1", promptId: 10000 }, { "auth-sa-token": this.secToken, token: this.secToken, "Content-Type": "application/json", Accept: "*", "User-Agent": SEC_APP_UA });
+      } catch (e) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u667A\u80FD\u52A9\u624B\u5F02\u5E38: ${e && e.message || e}`);
+      }
+    }
+    async secDaijie() {
+      try {
+        await this.postJSON("https://ims.wo116114.com/api/Assistant/assis_save", { page_type: 1, old_ainumber: "XF0", level: 3, dialog: "0", opertype: 1, videoimage: "", speechtype: "06", ainumber: "BD1" }, { "auth-sa-token": this.secToken, token: this.secToken, Authorization: this.secToken, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B)" });
+      } catch (e) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u4EE3\u63A5\u52A9\u7406\u5F02\u5E38: ${e && e.message || e}`);
+      }
+    }
+    async secAnquanfen() {
+      const url = "https://uca.wo116114.com/sjgj/woAssistant/umm/configs/v1/config?product_line=uasp&entry_point=h5&entry_point_id=wxdefbc1986dc757a6";
+      const scoreUrl = "https://uca.wo116114.com/sjgj/unicomAssistant/uasp/report/v1/queryScore?product_line=uasp&entry_point=h5&entry_point_id=wxdefbc1986dc757a6";
+      const off = { productId: "91351080", type: 3, operationType: 0, contents: [{ icon: "phone-fraud", content: "1", contentName: "\u7591\u4F3C\u8BC8\u9A97", contentTag: "0", name: "fraud" }] };
+      const on = { productId: "91351080", type: 3, operationType: 0, contents: [{ contentTag: "0", content: "0" }] };
+      await this.secUcaPost(url, off);
+      await sleep(2000);
+      await this.secUcaPost(scoreUrl, { productId: "91311616" });
+      await sleep(2000);
+      await this.secUcaPost(url, on);
+      await sleep(2000);
+      await this.secUcaPost(scoreUrl, { productId: "91311616" });
+      await sleep(2000);
+      await this.secUcaPost(url, off);
+    }
+    async secHaoduan() {
+      const url = "https://uca.wo116114.com/sjgj/woAssistant/umm/configs/v1/config?product_line=uasp&entry_point=h5&entry_point_id=wxdefbc1986dc757a6";
+      const off = { checked: true, content: "1", contentName: "\u62E6\u622A400\u5F00\u5934\u768410\u4F4D\u7279\u670D\u53F7\u7801", contentTag: "1" };
+      const on = { checked: false, content: "0", contentName: "\u62E6\u622A400\u5F00\u5934\u768410\u4F4D\u7279\u670D\u53F7\u7801", contentTag: "1" };
+      const base = { productId: "91351080", type: 7, operationType: 0 };
+      await this.secUcaPost(url, { ...base, contents: [off] });
+      await sleep(2000);
+      await this.secUcaPost(url, { ...base, contents: [on] });
+      await sleep(2000);
+      await this.secUcaPost(url, { ...base, contents: [off] });
+    }
+    async secOjbk(taskCode) {
+      try {
+        const r = await this.req("post", "https://m.jf.10010.com/jf-external-application/jftask/taskFinish", { headers: this.secJfHeaders(false), body: JSON.stringify({ taskCode }) });
+        this.updateSecJea(r.headers);
+      } catch (e) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u6D3B\u52A8\u6D4F\u89C8\u5F02\u5E38: ${e && e.message || e}`);
+      }
+    }
+    secWoAiHeaders(useMobile = false, overrideToken = "") {
+      const uaPc = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf2541818) XWEB/19201 miniProgram/wx1e83eef922822ee0";
+      const uaMobile = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.69(0x1800452f) NetType/WIFI Language/zh_CN miniProgram/wx1e83eef922822ee0";
+      return {
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        Origin: "https://ai.wo.cn",
+        Authorization: overrideToken || this.secToken,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/plain, */*",
+        "User-Agent": useMobile ? uaMobile : uaPc
+      };
+    }
+    async secGetKnowledgeId() {
+      try {
+        const res = await this.postJSON("https://ai.wo.cn/web-tongtong/knowledge/getKnowledgeList", { appType: 1 }, this.secWoAiHeaders());
+        if (res.code === 0 && res.data) return (res.data[0] || {}).id || "";
+        this.log(`\u83B7\u53D6\u77E5\u8BC6\u5E93ID\u5931\u8D25\uFF1A${res.msg || responseMessage(res)}`);
+      } catch (e) {
+        this.log(`\u83B7\u53D6\u77E5\u8BC6\u5E93ID\u5F02\u5E38\uFF1A${e && e.message || e}`);
+      }
+      return "";
+    }
+    async secUploadKnowledgeFile() {
+      try {
+        const kid = await this.secGetKnowledgeId();
+        if (!kid) return false;
+        const headers = this.secWoAiHeaders();
+        delete headers["Content-Type"];
+        const boundary = `----LoonBoundary${randomString(16, "0123456789abcdef")}`;
+        const data = { knowledgeId: kid, fileName: "task_upload.txt", fileType: "text/plain", fileSize: "1", currentPartSize: "1", currentIndex: "1", totalPart: "1", spaceType: "0" };
+        const parts = [];
+        for (const k of Object.keys(data)) parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${data[k]}\r\n`));
+        parts.push(asciiBytes(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="task_upload.txt"\r\nContent-Type: text/plain\r\n\r\n`));
+        parts.push(asciiBytes(" "));
+        parts.push(asciiBytes(`\r\n--${boundary}--\r\n`));
+        const r = await this.req("post", "https://ai.wo.cn/web-tongtong/knowledge/uploadLocalFileToKnowledge", { headers: { ...headers, "Content-Type": `multipart/form-data; boundary=${boundary}` }, body: concatBytes(parts), timeout: 15000 });
+        const res = r.json || {};
+        if (res.code === 0) {
+          this.log("\u4E0A\u4F20\u77E5\u8BC6\u5E93\u6587\u4EF6\u6210\u529F");
+          return true;
+        }
+        this.log(`\u4E0A\u4F20\u77E5\u8BC6\u5E93\u6587\u4EF6\u5931\u8D25\uFF1A${res.msg || responseMessage(res)}`);
+        return false;
+      } catch (e) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u4E0A\u4F20\u77E5\u8BC6\u5E93\u6587\u4EF6\u5F02\u5E38: ${e && e.message || e}`);
+        return false;
+      }
+    }
+    async secGetChatList() {
+      try {
+        const headers = this.secWoAiHeaders();
+        headers.Referer = "https://ai.wo.cn/wxMini";
+        const res = await this.get("https://ai.wo.cn/web-tongtong/historyChat/list", headers);
+        if (res.code === 0) return ((res.data || {}).content) || [];
+        if (res.msg) this.log(`\u83B7\u53D6AI\u5BF9\u8BDD\u5386\u53F2\u5931\u8D25\uFF1A${res.msg}`);
+      } catch (e) {
+        this.log(`\u83B7\u53D6AI\u5BF9\u8BDD\u5386\u53F2\u5F02\u5E38\uFF1A${e && e.message || e}`);
+      }
+      return [];
+    }
+    async secSendAiChat() {
+      try {
+        const sessionId = `mmru${randomString(10, "0123456789")}`, requestId = `rqid_mmru${randomString(10, "0123456789")}`;
+        const headers = this.secWoAiHeaders(true);
+        headers.Accept = "text/event-stream";
+        headers.Referer = "https://ai.wo.cn/wxMini/psychologicalApp/chat?id=1&type=ruole";
+        const body = { modelKey: "87e622d9e488", message: "\u5E2E\u6211\u63A8\u83501\u4E2A\u5FC5\u5403\u996D\u5E97", deepThink: false, webSearch: false, attachments: [], imgSize: 0, sessionId, requestId, promptKey: "", knowledgeId: "", ragSearch: false, moduleType: 12 };
+        const r = await this.req("post", "https://ai.wo.cn/web-tongtong/chat/chatReplyV2", { headers, body: JSON.stringify(body), timeout: 60000 });
+        if (!r.error && r.status >= 200 && r.status < 400) {
+          this.log("\u5DF2\u53D1\u9001AI\u5BF9\u8BDD");
+          return true;
+        }
+        this.log(`\u53D1\u9001AI\u5BF9\u8BDD\u5931\u8D25\uFF1AHTTP ${r.status}`);
+      } catch (e) {
+        this.log(`\u53D1\u9001AI\u5BF9\u8BDD\u5F02\u5E38\uFF1A${e && e.message || e}`);
+      }
+      return false;
+    }
+    async secGetShareKey(sessionId) {
+      try {
+        const headers = this.secWoAiHeaders();
+        headers.Referer = "https://ai.wo.cn/wxMini";
+        const res = await this.postJSON("https://ai.wo.cn/web-tongtong/historyChat/shareDetail", { sessionId }, headers);
+        if (res.code === 0 && res.data) return String(res.data);
+        this.log(`\u83B7\u53D6\u5206\u4EABkey\u5931\u8D25\uFF1A${res.msg || responseMessage(res)}`);
+      } catch (e) {
+        this.log(`\u83B7\u53D6\u5206\u4EABkey\u5F02\u5E38\uFF1A${e && e.message || e}`);
+      }
+      return "";
+    }
+    async secViewShareDetail(key, viewToken) {
+      try {
+        const res = await this.postJSON("https://ai.wo.cn/web-tongtong/historyChat/getShareDetail", { key, pageSize: 10, pageNum: 1 }, this.secWoAiHeaders(true, viewToken));
+        if (res.code === 0) {
+          this.log("\u67E5\u770B\u5206\u4EAB\u5BF9\u8BDD\u6210\u529F");
+          return true;
+        }
+        this.log(`\u67E5\u770B\u5206\u4EAB\u5BF9\u8BDD\u5931\u8D25\uFF1A${res.msg || responseMessage(res)}`);
+      } catch (e) {
+        this.log(`\u67E5\u770B\u5206\u4EAB\u5BF9\u8BDD\u5F02\u5E38\uFF1A${e && e.message || e}`);
+      }
+      return false;
+    }
+    async secShareAiChat(taskCode = "") {
+      try {
+        let content = await this.secGetChatList();
+        if (!content.length) {
+          this.log("\u6682\u65E0AI\u5BF9\u8BDD\u5386\u53F2\uFF0C\u5148\u53D1\u9001\u4E00\u6761\u5BF9\u8BDD...");
+          if (!await this.secSendAiChat()) return false;
+          await sleep(2000);
+          content = await this.secGetChatList();
+        }
+        if (!content.length) {
+          this.log("\u4ECD\u65E0AI\u5BF9\u8BDD\u5386\u53F2\uFF0C\u8DF3\u8FC7\u5206\u4EAB\u4EFB\u52A1");
+          return false;
+        }
+        const sessionId = content[0].chatSessionId || "";
+        if (!sessionId) {
+          this.log("\u83B7\u53D6\u5206\u4EABkey\u5931\u8D25\uFF1A\u7F3A\u5C11sessionId");
+          return false;
+        }
+        const shareKey = await this.secGetShareKey(sessionId);
+        if (!shareKey) return false;
+        this.secAiShareKey = shareKey;
+        if (taskCode) this.secShareTaskCode = taskCode;
+        this.log(`AI\u5BF9\u8BDD\u5206\u4EABkey\u83B7\u53D6\u6210\u529F: ${shareKey.slice(0, 8)}...`);
+        return true;
+      } catch (e) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u5206\u4EABAI\u5BF9\u8BDD\u5F02\u5E38: ${e && e.message || e}`);
+        return false;
+      }
+    }
+    async secRoleChat() {
+      try {
+        const headers = this.secWoAiHeaders();
+        headers.Accept = "text/event-stream";
+        headers.Referer = "https://ai.wo.cn/wxMini/psychologicalApp/chat?id=1&type=ruole";
+        const body = { sessionId: `mmrp${randomString(10, "0123456789")}`, requestId: `rqid_mmrp${randomString(10, "0123456789")}`, roleId: 1, message: "\u6211\u6709\u62D6\u5EF6\u75C7\uFF0C\u597D\u591A\u4E8B\u60C5\u4E0D\u60F3\u505A\u3002" };
+        const r = await this.req("post", "https://ai.wo.cn/web-tongtong/lxzn/chat", { headers, body: JSON.stringify(body), timeout: 60000 });
+        if (r.error || r.status >= 400) {
+          this.log(`\u89D2\u8272\u52A9\u624B\u5BF9\u8BDD\u5931\u8D25\uFF1AHTTP ${r.status}`);
+          return false;
+        }
+        this.log("\u89D2\u8272\u52A9\u624B\u5BF9\u8BDD\u5B8C\u6210");
+        return true;
+      } catch (e) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u89D2\u8272\u52A9\u624B\u5BF9\u8BDD\u5F02\u5E38: ${e && e.message || e}`);
+        return false;
+      }
+    }
+    secParseTask(task) {
+      return { finishCount: safeInt(task.finishCount), needCount: safeInt(task.needCount), finishText: task.finishText || task.taskStatusName || task.taskStatusDesc || "\u672A\u77E5\u72B6\u6001" };
+    }
+    secSupportsDelayedClaim(name) {
+      return ["\u4E0A\u4F20\u77E5\u8BC6\u5E93\u6587\u4EF6", "\u5206\u4EABAI\u52A9\u624B\u5BF9\u8BDD", "\u89D2\u8272\u52A9\u624B\u5BF9\u8BDD"].some((k) => name.includes(k));
+    }
+    secTrackPendingClaim(code, name) {
+      if (code && name && this.secSupportsDelayedClaim(name)) this.secPendingClaims[code] = name;
+    }
+    secUntrackPendingClaim(code) {
+      if (code) delete this.secPendingClaims[code];
+    }
+    async secQueryTaskList() {
+      const r = await this.req("post", "https://m.jf.10010.com/jf-external-application/jftask/taskDetail", { headers: this.secJfHeaders(false), body: "{}", timeout: 15000 });
+      this.updateSecJea(r.headers);
+      if (r.error || !r.body) {
+        this.log(`\u8054\u901A\u52A9\u7406\u4EFB\u52A1\u5217\u8868\u67E5\u8BE2\u5F02\u5E38: ${r.error || "\u65E0\u54CD\u5E94"}`);
+        return [];
+      }
+      const res = r.json;
+      if (!res || typeof res !== "object") {
+        this.log(`\u8054\u901A\u52A9\u7406\u4EFB\u52A1\u5217\u8868\u67E5\u8BE2\u5F02\u5E38: \u975EJSON\u54CD\u5E94 ${String(r.body).slice(0, 60)}`);
+        return [];
+      }
+      return (((res.data || {}).taskDetail || {}).taskList) || [];
+    }
+    async secRefreshSecurityContext(refreshSecret = false) {
+      try {
+        this.secTicket1 = "";
+        this.secToken = "";
+        this.secTicket = "";
+        await this.secGetTicket();
+        if (!this.secTicket1) return false;
+        await this.secGetAuthToken();
+        if (!this.secToken) return false;
+        await this.secGetJfTicket();
+        if (!this.secTicket) return false;
+        if (refreshSecret) {
+          this.secSecretKey = "";
+          if (!await this.secGetSecretKey(true)) return false;
+        }
+        return true;
+      } catch (e) {
+        this.log(`\u8054\u901A\u52A9\u7406\u4E0A\u4E0B\u6587\u5237\u65B0\u5F02\u5E38: ${e && e.message || e}`);
+        return false;
+      }
+    }
+    async secGetTaskSnapshot(code = "", name = "") {
+      for (const task of await this.secQueryTaskList()) {
+        if (code && task.taskCode === code) return task;
+        if (name && task.taskName === name) return task;
+      }
+      return null;
+    }
+    async secRefreshTaskSnapshot(code, name, retries = 3, delay = 2000) {
+      let latest = null;
+      for (let i = 0; i < retries; i++) {
+        if (i) await sleep(delay);
+        latest = await this.secGetTaskSnapshot(code, name);
+        if (!latest) continue;
+        const p = this.secParseTask(latest);
+        if (p.finishText === "\u5F85\u9886\u53D6" || (p.needCount > 0 && p.finishCount >= p.needCount)) return latest;
+      }
+      return latest;
+    }
+    secShouldManualFinish(name) {
+      return ["\u65B0\u589E\u4EB2\u60C5\u5B88\u62A4\u6210\u5458", "\u65B0\u589E\u5BBD\u5E26\u7ED1\u5B9A", "\u8BED\u97F3\u63D0\u9192", "\u53CD\u8BC8\u9669\u9886\u53D6", "\u8BBE\u7F6E\u65E5\u7A0B\u63D0\u9192"].some((k) => name.includes(k));
+    }
+    secWaitSeconds(name) {
+      if (["\u4E0A\u4F20\u77E5\u8BC6\u5E93\u6587\u4EF6", "\u5206\u4EABAI\u52A9\u624B\u5BF9\u8BDD", "\u89D2\u8272\u52A9\u624B\u5BF9\u8BDD"].some((k) => name.includes(k))) return 5;
+      if (["\u6DFB\u52A0\u9ED1\u540D\u5355", "\u9A9A\u6270\u62E6\u622A\u8BBE\u7F6E", "\u5B89\u5168\u5206\u63D0\u5347", "\u53F7\u6BB5\u62E6\u622A"].some((k) => name.includes(k))) return 8;
+      return 4;
+    }
+    async secReceivePoints(taskCode) {
+      const r = await this.req("post", "https://m.jf.10010.com/jf-external-application/jftask/receive", { headers: this.secJfHeaders(true), body: JSON.stringify({ taskCode }), timeout: 10000 });
+      this.updateSecJea(r.headers);
+      const res = r.json || {};
+      const score = String((res.data || {}).score || "").trim();
+      const msg = String(res.msg || "").trim();
+      if (score) {
+        this.secUntrackPendingClaim(taskCode);
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u9886\u53D6${score}\u6210\u529F`, true);
+        return "received";
+      }
+      if (msg.includes("\u4EFB\u52A1\u672A\u5B8C\u6210") || msg.includes("\u4E0D\u53EF\u9886\u53D6")) {
+        this.log("\u9886\u53D6\u4EFB\u52A1\u672A\u5B8C\u6210");
+        return "pending";
+      }
+      if (msg.includes("\u81EA\u52A8\u53D1\u653E") || msg.includes("\u5DF2\u9886\u53D6")) {
+        this.secUntrackPendingClaim(taskCode);
+        this.log("\u4EFB\u52A1\u5DF2\u5B8C\u6210\u4E14\u5956\u52B1\u5DF2\u9886\u53D6");
+        return "auto";
+      }
+      this.log(`\u9886\u53D6\u5931\u8D25\uFF1A${msg || responseMessage(res)}`);
+      return "failed";
+    }
+    async secFinishTask(taskCode, taskName) {
+      try {
+        const r = await this.req("post", "https://m.jf.10010.com/jf-external-application/jftask/toFinish", { headers: this.secJfHeaders(true), body: JSON.stringify({ taskCode }), timeout: 10000 });
+        this.updateSecJea(r.headers);
+        const actions = [
+          ["\u6DFB\u52A0\u9ED1\u540D\u5355", () => this.secAddToBlacklist()],
+          ["\u53F7\u7801\u6807\u8BB0", () => this.secMarkPhone()],
+          ["\u540C\u6B65\u901A\u8BAF\u5F55", () => this.secSyncAddressBook()],
+          ["\u9A9A\u6270\u62E6\u622A\u8BBE\u7F6E", () => this.secSetInterceptionRules()],
+          ["\u667A\u80FD\u52A9\u624B", () => this.secZhushou()],
+          ["\u4EE3\u63A5\u52A9\u7406", () => this.secDaijie()],
+          ["\u5B89\u5168\u5206", () => this.secAnquanfen()],
+          ["\u53F7\u6BB5\u62E6\u622A", () => this.secHaoduan()],
+          ["\u67E5\u770B\u5468\u62A5", () => this.secViewWeeklyReport()],
+          ["\u6D3B\u52A8\u6D4F\u89C8", () => this.secOjbk(taskCode)],
+          ["\u4E0A\u4F20\u77E5\u8BC6\u5E93\u6587\u4EF6", () => this.secUploadKnowledgeFile()],
+          ["\u5206\u4EABAI\u52A9\u624B\u5BF9\u8BDD", () => this.secShareAiChat(taskCode)],
+          ["\u89D2\u8272\u52A9\u624B\u5BF9\u8BDD", () => this.secRoleChat()]
+        ];
+        for (const [key, action] of actions) {
+          if (taskName.includes(key)) {
+            const result = await action();
+            return result === false ? false : true;
+          }
+        }
+        this.log(`\u4EFB\u52A1 ${taskName} \u9700\u8981\u624B\u52A8\u5B8C\u6210`);
+        return false;
+      } catch (e) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: finishTask\u5F02\u5E38: ${e && e.message || e}`);
+        return false;
+      }
+    }
+    async secSignIn(taskCode) {
+      try {
+        const r = await this.req("post", "https://m.jf.10010.com/jf-external-application/jftask/sign", { headers: this.secJfHeaders(true), body: JSON.stringify({ taskCode }), timeout: 10000 });
+        this.updateSecJea(r.headers);
+        const res = r.json || {};
+        if (res.code === "0000") return true;
+        this.log(`\u7B7E\u5230\u5931\u8D25\uFF1A${res.msg || "\u72B6\u6001\u672A\u77E5"}`);
+        return false;
+      } catch (e) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u7B7E\u5230\u5F02\u5E38: ${e && e.message || e}`);
+        return false;
+      }
+    }
+    async secExecuteAllTasks() {
+      try {
+        const list = await this.secQueryTaskList();
+        if (!list.length) {
+          this.log("\u8054\u901A\u52A9\u7406\u4EFB\u52A1\u5217\u8868\u67E5\u8BE2\u5931\u8D25");
+          return;
+        }
+        for (const task of list) {
+          const name = task.taskName || "", code = task.taskCode || "";
+          let p = this.secParseTask(task);
+          this.log(`${name}\uFF1A${p.finishCount}/${p.needCount} - ${p.finishText}`);
+          if (!code || p.needCount <= 0) {
+            this.log("---------------------");
+            continue;
+          }
+          if (p.finishCount >= p.needCount) {
+            if (p.finishText === "\u5F85\u9886\u53D6") {
+              await sleep(2000);
+              const state = await this.secReceivePoints(code);
+              if (state === "pending") this.secTrackPendingClaim(code, name);
+            } else {
+              this.log("\u4EFB\u52A1\u5DF2\u5B8C\u6210\u4E14\u5956\u52B1\u5DF2\u9886\u53D6");
+            }
+            this.log("---------------------");
+            continue;
+          }
+          const remaining = Math.max(p.needCount - p.finishCount, 1);
+          this.log(`\u4EFB\u52A1\u672A\u5B8C\u6210\uFF0C\u9700\u8981\u518D\u6267\u884C ${remaining} \u6B21`);
+          if (this.secShouldManualFinish(name)) {
+            this.log(`\u4EFB\u52A1 ${name} \u9700\u8981\u624B\u52A8\u5B8C\u6210`);
+            this.log("---------------------");
+            continue;
+          }
+          for (let i = 0; i < remaining; i++) {
+            try {
+              if (i) await sleep(2000);
+              const handled = name.includes("\u7B7E\u5230") ? await this.secSignIn(code) : await this.secFinishTask(code, name);
+              if (!handled) break;
+              const wait = this.secWaitSeconds(name);
+              if (wait > 0) await sleep(wait * 1000);
+              const latest = await this.secRefreshTaskSnapshot(code, name, 3, 2000);
+              if (latest) p = this.secParseTask(latest);
+              if (!latest || (p.finishText !== "\u5F85\u9886\u53D6" && p.finishCount < p.needCount)) {
+                this.log(`${name}\uFF1A\u5DF2\u63D0\u4EA4\u64CD\u4F5C\uFF0C\u670D\u52A1\u7AEF\u8FDB\u5EA6\u4ECD\u4E3A ${p.finishCount}/${p.needCount}`);
+                this.secTrackPendingClaim(code, name);
+                break;
+              }
+              this.log(`\u7B2C ${i + 1} \u6B21\u6267\u884C${name}\u5DF2\u786E\u8BA4\u5B8C\u6210`);
+              const state = await this.secReceivePoints(code);
+              if (state === "pending") this.secTrackPendingClaim(code, name);
+              if (state === "received" || state === "auto") break;
+              if (p.needCount > 0 && p.finishCount >= p.needCount) {
+                this.log("\u4EFB\u52A1\u5DF2\u5B8C\u6210\u4E14\u5956\u52B1\u5DF2\u9886\u53D6");
+                break;
+              }
+            } catch (e) {
+              this.log(`\u6267\u884C ${name} \u5931\u8D25\uFF1A${e && e.message || e}`);
+              break;
+            }
+          }
+          this.log("---------------------");
+        }
+      } catch (e) {
+        this.log(`\u8054\u901A\u52A9\u7406\u4EFB\u52A1\u6267\u884C\u5F02\u5E38: ${e && e.message || e}`);
+      }
+    }
+    async secGetUserInfo() {
+      const r = await this.req("post", "https://m.jf.10010.com/jf-external-application/jftask/userInfo", { headers: this.secJfHeaders(false), body: "{}", timeout: 10000 });
+      this.updateSecJea(r.headers);
+      const res = r.json || {};
+      if (!res || res.code !== "0000" || !res.data) {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u67E5\u8BE2\u79EF\u5206\u5931\u8D25: ${res.msg || "\u65E0\u54CD\u5E94"}`);
+        return;
+      }
+      const current = safeInt(res.data.availableScore), today = res.data.todayEarnScore || 0;
+      if (this.secOldJFPoints === null || this.secOldJFPoints === undefined) {
+        this.secOldJFPoints = current;
+        this.log(`\u5F53\u524D\u79EF\u5206\uFF1A${current}\uFF0C\u4ECA\u65E5\u5DF2\u8D5A ${today}`);
+      } else {
+        this.log(`\u5B89\u5168\u7BA1\u5BB6: \u7528\u6237${this.mobile ? mask(this.mobile) : `\u8D26\u53F7[${this.index}]`}\u79EF\u5206\u53D8\u52A8\uFF1A${this.secOldJFPoints} \u2192 ${current} | \u65B0\u589E: ${current - this.secOldJFPoints}`, true);
+      }
+    }
+    async secRecoverPendingClaims(rounds = 2, delay = 12000, refreshContext = false) {
+      const keys = () => Object.keys(this.secPendingClaims || {});
+      if (!keys().length) return false;
+      let recovered = false;
+      const lastStatus = {};
+      this.log(`\u8054\u901A\u52A9\u7406\uFF1A\u5F85\u8865\u9886\u4EFB\u52A1 ${keys().length} \u4E2A\uFF0C\u5F00\u59CB\u8865\u67E5`);
+      for (let attempt = 0; attempt < rounds; attempt++) {
+        if (attempt) await sleep(delay);
+        if (!keys().length) break;
+        if (refreshContext && !await this.secRefreshSecurityContext(true)) continue;
+        for (const code of keys()) {
+          const name = this.secPendingClaims[code];
+          const latest = await this.secRefreshTaskSnapshot(code, name, 3, 2000);
+          if (!latest) {
+            if (lastStatus[code] !== "missing") {
+              this.log(`${name}\uFF1A\u8865\u67E5\u672A\u53D6\u5230\u4EFB\u52A1\u72B6\u6001`);
+              lastStatus[code] = "missing";
+            }
+            continue;
+          }
+          const p = this.secParseTask(latest);
+          if (p.finishText === "\u5F85\u9886\u53D6" || (p.needCount > 0 && p.finishCount >= p.needCount)) {
+            this.log(`${name}\uFF1A\u8865\u67E5\u540E\u5C1D\u8BD5\u9886\u53D6`);
+            const state = await this.secReceivePoints(code);
+            if (state === "received" || state === "auto") {
+              recovered = true;
+              delete lastStatus[code];
+              continue;
+            }
+          } else {
+            const key = `${p.finishCount}/${p.needCount}-${p.finishText}`;
+            if (lastStatus[code] !== key) {
+              this.log(`${name}\uFF1A\u8865\u67E5\u72B6\u6001 ${p.finishCount}/${p.needCount} - ${p.finishText}`);
+              lastStatus[code] = key;
+            }
+          }
+        }
+      }
+      if (recovered) await this.secGetUserInfo();
+      const left = keys();
+      if (left.length) this.log(`\u8054\u901A\u52A9\u7406\uFF1A\u4ECD\u5F85\u8865\u9886 ${left.map((k) => this.secPendingClaims[k]).join("\u3001")}`);
+      return recovered;
     }
     woreadEncrypt(data) {
       const s = typeof data === "string" ? data : JSON.stringify(data);
@@ -6258,6 +7779,7 @@
       const r = await this.postJSON("https://10010.woread.com.cn/ng_woread_service/rest/account/login", { sign }, { accesstoken: this.woreadAccess });
       if (r.code !== "0000") return false;
       Object.assign(this, { woreadToken: r.data.token, woreadUserid: r.data.userid, woreadUserindex: r.data.userindex, woreadVerify: r.data.verifycode });
+      this.aitingReadUserinfo = r.data;
       if (r.data.phone) this.mobile = r.data.phone;
       return true;
     }
@@ -6271,28 +7793,38 @@
       const bal = await this.postJSON("https://10010.woread.com.cn/ng_woread_service/rest/phone/vouchers/queryTicketAccount", { sign: this.woreadEncrypt(common) }, { accesstoken: this.woreadAccess });
       if (bal.code === "0000") this.log(`\u9605\u8BFB\u7EA2\u5305\uFF1A${(safeInt((bal.data || {}).usableNum) / 100).toFixed(2)}\u5143`, true);
       if (CFG.queryOnly) return;
-      const shelf = await this.get("https://10010.woread.com.cn/ng_woread_service/rest/basics/recommposdetail/14856", { "accesstoken": this.woreadAccess });
+      const shelf = await this.get("https://10010.woread.com.cn/ng_woread_service/rest/basics/recommposdetail/14856", { accesstoken: this.woreadAccess });
       const books = ((shelf.data || {}).booklist || {}).message || [];
-      if (books.length) {
-        const b = books[0], card = (((shelf.data || {}).bindinfo || [])[0] || {}).recommposiindex;
-        const ch = await this.postJSON("https://10010.woread.com.cn/ng_woread_service/rest/cnt/chalist", { sign: this.woreadEncrypt({ curPage: 1, limit: 30, index: b.cntindex, sort: 0, finishFlag: 1, ...common }) }, { accesstoken: this.woreadAccess });
-        const list = ch.list || (ch.data || {}).list || [];
-        const c = ((list[0] || {}).charptercontent || [])[0];
-        if (c) {
-          const p = { readTime: "2", cntIndex: b.cntindex, cntType: "1", catid: "0", pageIndex: "", cardid: card, cntindex: b.cntindex, cnttype: "1", chapterallindex: c.chapterallindex, chapterseno: "1", channelid: "", chapterid: c.chapterid, readtype: 1, isend: "0", ...common };
-          await this.postJSON("https://10010.woread.com.cn/ng_woread_service/rest/history/addReadTime", { sign: this.woreadEncrypt(p) }, { accesstoken: this.woreadAccess });
-          this.log("\u9605\u8BFB\u65F6\u957F\u5DF2\u63D0\u4EA4");
-        }
+      if (!books.length) {
+        this.log("\u9605\u8BFB\u4E13\u533A: \u83B7\u53D6\u4E66\u67B6\u5931\u8D25");
+        return;
       }
+      const b = books[0];
+      const catid = b.catindex || "";
+      const card = (((shelf.data || {}).bindinfo || [])[0] || {}).recommposiindex;
+      const ch = await this.postJSON("https://10010.woread.com.cn/ng_woread_service/rest/cnt/chalist", { sign: this.woreadEncrypt({ curPage: 1, limit: 30, index: b.cntindex, sort: 0, finishFlag: 1, ...common }) }, { accesstoken: this.woreadAccess });
+      const list = ch.list || (ch.data || {}).list || [];
+      const c = ((list[0] || {}).charptercontent || [])[0];
+      if (!c) {
+        this.log("\u9605\u8BFB\u4E13\u533A: \u672A\u53D6\u5230\u7AE0\u8282\u5185\u5BB9\uFF0C\u8DF3\u8FC7\u6A21\u62DF\u9605\u8BFB");
+      } else {
+        const words = { chapterAllIndex: c.chapterallindex, cntIndex: b.cntindex, cntTypeFlag: "1", ...common };
+        const wordsUrl = `https://10010.woread.com.cn/ng_woread_service/rest/cnt/wordsDetail?catid=${catid}&cardid=${card}&cntindex=${b.cntindex}&chapterallindex=${c.chapterallindex}&chapterseno=1`;
+        await this.postJSON(wordsUrl, { sign: this.woreadEncrypt(words) }, { accesstoken: this.woreadAccess });
+        const p = { readTime: "2", cntIndex: b.cntindex, cntType: "1", catid: "0", pageIndex: "", cardid: card, cntindex: b.cntindex, cnttype: "1", chapterallindex: c.chapterallindex, chapterseno: "1", channelid: "", chapterid: c.chapterid, readtype: 1, isend: "0", ...common };
+        const add = await this.postJSON("https://10010.woread.com.cn/ng_woread_service/rest/history/addReadTime", { sign: this.woreadEncrypt(p) }, { accesstoken: this.woreadAccess });
+        const msg = String(add.message || "");
+        if (add.code === "0000" || add.code === "9999" || msg.includes("9999") || msg.includes("\u4E0D\u5B58\u5728\u9605\u8BFB\u8BB0\u5F55")) this.log("\u9605\u8BFB\u4E13\u533A: \u6A21\u62DF\u9605\u8BFB\u6210\u529F");
+        else this.log(`\u9605\u8BFB\u4E13\u533A: \u6A21\u62DF\u9605\u8BFB\u5931\u8D25 - ${msg || responseMessage(add)}`);
+      }
+      await sleep(3000);
       const draw = await this.postJSON("https://10010.woread.com.cn/ng_woread_service/rest/basics/doDraw", { sign: this.woreadEncrypt({ activeindex: "8051", timestamp: compactTime(), phone: this.mobile || "", token: this.woreadToken }) }, { accesstoken: this.woreadAccess });
       this.log(`\u9605\u8BFB\u62BD\u5956\uFF1A${(draw.data || {}).prizedesc || draw.message || "\u672A\u4E2D\u5956"}`, !!(draw.data || {}).prizedesc);
-    }
-    aitingAes(data, key = "j2K81755sxV12wFx") {
-      return aesCbcB64(typeof data === "string" ? data : JSON.stringify(data), key, "16-Bytes--String", true, false);
     }
     async aitingLogin() {
       const login = await this.postJSON("https://10010.woread.com.cn/ng_woread_service/rest/account/login", { sign: this.aitingAes({ tokenOnline: this.aitingAes(this.tokenOnline, "woreadst^&*12345"), phone: this.aitingAes(this.mobile, "woreadst^&*12345"), timestamp: compactTime() }, "woreadst^&*12345") }, { accesstoken: "ODZERTZCMjA1NTg1MTFFNDNFMThDRDYw" });
       this.aitingWoread = (login.data || {}).token;
+      this.aitingReadUserinfo = login.data || {};
       if (!this.aitingWoread) {
         this.log(`\u7231\u542C\u767B\u5F55-\u6C83\u9605\u8BFB\u5931\u8D25\uFF1A${responseMessage(login)}`);
         return false;
@@ -6329,100 +7861,510 @@
       this.aitingPage = qs(url).pageid || "s789081246969976832";
       return !!this.aitingTicket;
     }
-    aitingHeaders() {
-      return { ticket: decodeURIComponent(this.aitingTicket || ""), pageid: this.aitingPage, clienttype: "aiting_ios", partnersid: "1706", "content-type": "application/json;charset=UTF-8", "User-Agent": H5_UA, Origin: "https://m.jf.10010.com" };
+    aitingHeaders(extra = {}) {
+      const h = {
+        ticket: decodeURIComponent(this.aitingTicket || ""),
+        pageid: this.aitingPage || "s789081246969976832",
+        clienttype: "aiting_ios",
+        partnersid: "1706",
+        "content-type": "application/json;charset=UTF-8",
+        "User-Agent": AITING_JF_UA,
+        Origin: "https://m.jf.10010.com"
+      };
+      if (this.aitingJea) h.Cookie = `_jea_id=${this.aitingJea};`;
+      return { ...h, ...extra };
+    }
+    aitingAes(data, key = "j2K81755sxV12wFx") {
+      return aesCbcB64(typeof data === "string" ? data : JSON.stringify(data), key, "16-Bytes--String", true, false);
+    }
+    updateAitingJea(headers) {
+      const raw = getHeader(headers || {}, "Set-Cookie");
+      const m = String(raw).match(/_jea_id=([^;,\s]+)/);
+      if (m) this.aitingJea = m[1];
+      return this.aitingJea || "";
+    }
+    async aitingSignatureHeaders() {
+      if (!this.aitingSecretKey) {
+        const r = await this.req("get", "https://m.jf.10010.com/jf-external-application/jftask/getSecretKey", { headers: this.aitingHeaders() });
+        this.updateAitingJea(r.headers);
+        this.aitingSecretKey = ((r.json || {}).data || {}).secretKey || "";
+        if (!this.aitingSecretKey) this.log(`\u7231\u542C\u4EFB\u52A1: getSecretKey \u5931\u8D25 - ${responseMessage(r.json)}`);
+      }
+      if (!this.aitingSecretKey) return {};
+      const ts = String(nowMs()), nonce = randomString(8, "0123456789abcdefghijklmnopqrstuvwxyz");
+      return { "x-request-timestamp": ts, "x-request-nonce": nonce, "x-request-signature": sha256HmacHex(nonce + ts, this.aitingSecretKey) };
+    }
+    async jfRequest(path, body, opt = {}) {
+      const extra = { Origin: "https://m.jf.10010.com" };
+      if (opt.referer) extra.Referer = opt.referer;
+      const headers = this.aitingHeaders(extra);
+      if (opt.sign) Object.assign(headers, await this.aitingSignatureHeaders());
+      const r = await this.req("post", `https://m.jf.10010.com/jf-external-application/${path}`, { headers, body: JSON.stringify(body || {}) });
+      this.updateAitingJea(r.headers);
+      return r.json || {};
+    }
+    async aitingQueryIntegral() {
+      const res = await this.jfRequest("jftask/userInfo", {});
+      if (res.code === "0000") {
+        const d = res.data || {};
+        this.log(`\u7231\u542C\u4EFB\u52A1: \u79EF\u5206\u6982\u89C8 - \u4ECA\u65E5\u5DF2\u8D5A ${safeInt(d.todayEarnScore)} | \u5F53\u524D\u4F59\u989D ${safeInt(d.availableScore)}`, true);
+      }
+      return res;
+    }
+    async jfTaskDetail() {
+      const referer = `https://m.jf.10010.com/jf-external-application/index.html?ticket=${encodeURIComponent(this.aitingTicket || "")}&pageID=s789081246969976832`;
+      const res = await this.jfRequest("jftask/taskDetail", {}, { referer });
+      return (((res.data || {}).taskDetail || {}).taskList) || [];
+    }
+    async jfToFinish(taskCode) {
+      const res = await this.jfRequest("jftask/toFinish", { taskCode }, { sign: true });
+      this.log(`\u7231\u542C\u4EFB\u52A1: \u79EF\u5206\u4EFB\u52A1\u63D0\u4EA4 - ${responseMessage(res)}`);
+      return res;
+    }
+    async jfSign(taskCode) {
+      const referer = `https://m.jf.10010.com/ts-mobile/well/s789081246969976832?distributeId=&partnersId=1706&clientType=aiting_ios&ticket=${encodeURIComponent(this.aitingTicket || "")}`;
+      const res = await this.jfRequest("uasptask/sign", { taskCode, remindEnabled: "1" }, { sign: true, referer });
+      this.log(`\u7231\u542C\u4EFB\u52A1: \u79EF\u5206\u7B7E\u5230 - ${res.code === "0000" ? res.msg || "\u6210\u529F" : res.desc || res.msg || responseMessage(res)}`);
+      return res;
+    }
+    async jfPopUp() {
+      const res = await this.jfRequest("jftask/popUp", {});
+      const score = (res.data || {}).score;
+      if (score) this.log(`\u7231\u542C\u4EFB\u52A1: \u79EF\u5206\u5F39\u7A97 +${score}`, true);
+      return res;
+    }
+    aitingReadHeaders(ua) {
+      const ts = String(nowMs()), nonce = randomString(6, "0123456789");
+      const sign = md5(`jwt=${this.aitingJwt}&nonestr=${nonce}&osversion=Android12&terminalName=Redmi&timestamp=${ts}&key=46iCw24ewAZbNkK6`);
+      return { AuthorizationClient: `Bearer ${this.aitingJwt}`, requerttime: ts, nonestr: nonce, requertid: sign, statisticsinfo: this.aitingStats, "User-Agent": ua };
+    }
+    aitingReadSubmit(path, payload) {
+      const user = this.aitingReadUserinfo || {};
+      const body = { ...payload };
+      body.timestamp = compactTime();
+      body.token = user.token;
+      body.userId = user.userid;
+      body.userIndex = safeInt(user.userindex);
+      body.userAccount = user.phone || this.mobile;
+      body.verifyCode = user.verifycode;
+      return body;
+    }
+    async aitingReadPoints() {
+      const user = this.aitingReadUserinfo || {};
+      if (!user.userid || !user.token || !user.userindex || !user.verifycode) {
+        this.log("\u7231\u542C\u4EFB\u52A1: \u7F3A\u5C11\u9605\u8BFB\u767B\u5F55\u4E0A\u4E0B\u6587\uFF0C\u8DF3\u8FC7\u9605\u8BFB\u4E0A\u62A5");
+        return false;
+      }
+      const headers = { "Content-Type": "application/json;charset=UTF-8", accesstoken: "ODZERTZCMjA1NTg1MTFFNDNFMThDRDYw", "User-Agent": UA };
+      const base = "https://10010.woread.com.cn/ng_woread_service/rest";
+      const submit = async (path, payload) => {
+        const body = this.aitingReadSubmit(path, payload);
+        return await this.postJSON(`${base}${path}`, { sign: this.woreadEncrypt(body) }, headers, { timeout: 20000 });
+      };
+      try {
+        const opened = await submit("/basics/newreadadd?cntindex=495589&catid=120697&chapterseno=7", {
+          userid: user.userid,
+          cntindex: 495589,
+          chapterallindex: 42332652,
+          cnttype: 1,
+          cntname: "\u7EAF\u9633\u6218\u795E",
+          chaptertitle: "\u7B2C7\u7AE0 \u6076\u5FC3\u7684\u82CD\u8747\u5C0F\u4EBA",
+          readtype: 1
+        });
+        this.log(`\u7231\u542C\u4EFB\u52A1: \u9605\u8BFB\u8BB0\u5F55 ${responseMessage(opened)}`);
+        for (let index = 0; index < 2; index++) {
+          if (index) {
+            this.log("\u7231\u542C\u4EFB\u52A1: \u7B49\u5F85121\u79D2\u540E\u63D0\u4EA4\u7B2C\u4E8C\u6B21\u9605\u8BFB");
+            await sleep(121000);
+          }
+          const result = await submit("/history/addReadTime", {
+            readTime: 2,
+            cntIndex: "495589",
+            cntType: 1,
+            catid: "119010",
+            pageIndex: "10843",
+            cardid: "12540",
+            cntindex: "495589",
+            cnttype: "1",
+            chapterallindex: 42332652,
+            chapterseno: 7,
+            channelid: "18002061",
+            chapterid: "10495589007",
+            readtype: 1,
+            isend: "0"
+          });
+          this.log(`\u7231\u542C\u4EFB\u52A1: \u7B2C${index + 1}\u6B21\u9605\u8BFB\u4E0A\u62A5 ${responseMessage(result)}`);
+        }
+        return true;
+      } catch (e) {
+        this.log(`\u7231\u542C\u4EFB\u52A1: \u9605\u8BFB\u4E0A\u62A5\u5F02\u5E38 ${e && e.message || e}`);
+        return false;
+      }
+    }
+    async aitingCompleteTask(typeVal) {
+      const ts = String(nowMs());
+      const body = { source: "3", timestamp: ts, token: this.aitingWoread, type: String(typeVal), userid: this.aitingUser || this.mobile };
+      body.sign = md5(Object.keys(body).sort().map((k) => `${k}=${body[k]}`).join("&") + "&key=woread!@#qwe1234");
+      const r = await this.req("post", "https://pcc.woread.com.cn/activity/rest/unicom/points/completiontask", { headers: { ...this.aitingReadHeaders(AITING_JF_UA), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      return r.json || {};
     }
     async aitingTask() {
       this.log("==== \u8054\u901A\u7231\u542C ====");
       if (!await this.aitingLogin()) {
-        this.log("\u7231\u542C\u767B\u5F55\u5931\u8D25");
+        this.log("\u7231\u542C\u4EFB\u52A1: \u767B\u5F55\u5931\u8D25\uFF0C\u8DF3\u8FC7");
         return;
       }
-      const h = this.aitingHeaders();
-      const info = await this.postJSON("https://m.jf.10010.com/jf-external-application/jftask/userInfo", {}, h);
-      if (info.code === "0000") this.log(`\u7231\u542C\u79EF\u5206\uFF1A${(info.data || {}).availableScore || 0}\uFF0C\u4ECA\u65E5${(info.data || {}).todayEarnScore || 0}`, true);
-      const d = await this.postJSON("https://m.jf.10010.com/jf-external-application/jftask/taskDetail", {}, h);
-      const tasks = (((d.data || {}).taskDetail || {}).taskList || []).filter((x) => !String(x.taskName).includes("\u9080\u8BF7"));
-      if (CFG.queryOnly) return;
-      for (const t of tasks) {
-        if (safeInt(t.finish) === 1) continue;
-        const path = String(t.taskType) === "4" || String(t.taskName).includes("\u7B7E\u5230") ? "uasptask/sign" : "jftask/toFinish";
-        const body = { taskCode: t.taskCode };
-        if (path.includes("sign")) body.remindEnabled = "1";
-        const r = await this.postJSON(`https://m.jf.10010.com/jf-external-application/${path}`, body, h);
-        this.log(`\u7231\u542C[${t.taskName}]\uFF1A${responseMessage(r)}`);
-        await sleep(800);
+      this.log("\u7231\u542C\u4EFB\u52A1: \u767B\u5F55\u6210\u529F\uFF0C\u6B63\u5728\u83B7\u53D6\u4EFB\u52A1\u5217\u8868...");
+      await this.aitingQueryIntegral();
+      const tasks = (await this.jfTaskDetail()).filter((t) => !String(t.taskName || "").includes("\u9080\u8BF7"));
+      const done = tasks.filter((t) => safeInt(t.finish) === 1);
+      const seen = new Set();
+      for (const t of done) {
+        const name = t.taskName || "";
+        if (seen.has(name)) continue;
+        seen.add(name);
+        this.log(`\u7231\u542C\u4EFB\u52A1: \u5DF2\u5B8C\u6210[${name}] ${safeInt(t.finishCount)}/${safeInt(t.needCount)}`);
       }
-      const pop = await this.postJSON("https://m.jf.10010.com/jf-external-application/jftask/popUp", {}, h);
-      if ((pop.data || {}).score) this.log(`\u7231\u542C\u83B7\u5F97 ${(pop.data || {}).score}`, true);
+      this.log(`\u7231\u542C\u4EFB\u52A1: \u63D0\u53D6\u5230 ${tasks.length} \u4E2A\u4EFB\u52A1\uFF0C\u6267\u884C\u524D\u5B8C\u6210 ${done.length} \u4E2A`);
+      if (!tasks.length) {
+        this.log("\u7231\u542C\u4EFB\u52A1: \u2705 \u6240\u6709\u4EFB\u52A1\u5DF2\u5B8C\u6210");
+        return;
+      }
+      if (CFG.queryOnly) {
+        this.log("\u7231\u542C\u4EFB\u52A1: [\u67E5\u8BE2\u6A21\u5F0F] \u8DF3\u8FC7\u4EFB\u52A1\u6267\u884C...");
+        return;
+      }
+      for (const t of tasks) {
+        if (!t.taskCode) continue;
+        const type = String(t.taskType || "");
+        this.log(`\u7231\u542C\u4EFB\u52A1: \u6267\u884C[${t.taskName || "\u672A\u77E5"}] \u7C7B\u578B ${type || "\u672A\u77E5"}`);
+        if (type === "4" || String(t.taskName || "").includes("\u7B7E\u5230")) await this.jfSign(t.taskCode);
+        else await this.jfToFinish(t.taskCode);
+        await sleep(1500);
+      }
+      this.log("\u7231\u542C\u4EFB\u52A1: \u5F00\u59CB\u63D0\u4EA4\u5B8C\u6210\u4EFB\u52A1\u8BF7\u6C42");
+      for (let i = 0; i < 5; i++) {
+        await this.aitingCompleteTask(4);
+        await sleep(1500);
+      }
+      await this.aitingCompleteTask(2);
+      await this.aitingReadPoints();
+      await this.jfPopUp();
+      const after = (await this.jfTaskDetail()).filter((t) => !String(t.taskName || "").includes("\u9080\u8BF7"));
+      this.log(`\u7231\u542C\u4EFB\u52A1: \u6267\u884C\u540E\u5B8C\u6210 ${after.filter((t) => safeInt(t.finish) === 1).length}/${after.length} \u4E2A\u4EFB\u52A1`);
+      for (const t of after) this.log(`\u7231\u542C\u4EFB\u52A1: ${t.taskName} - ${safeInt(t.finishCount)}/${safeInt(t.needCount)} finish=${t.finish}`);
+      await this.aitingQueryIntegral();
     }
     async wostoreTask() {
       this.log("==== \u6C83\u4E91\u624B\u673A ====");
       if (CFG.queryOnly) {
-        this.log("\u67E5\u8BE2\u6A21\u5F0F\u65E0\u72EC\u7ACB\u8D44\u4EA7\u63A5\u53E3");
+        this.log("\u6C83\u4E91\u624B\u673A: [\u67E5\u8BE2\u6A21\u5F0F] \u6B64\u5E73\u53F0\u6682\u65E0\u8D44\u4EA7\u6216\u4F59\u989D\u53EF\u4F9B\u67E5\u8BE2", true);
         return;
       }
-      const cityCode = String((((this.cityInfo || [])[0] || {}).cityCode) || "");
-      const appUA = "ChinaUnicom4.x/12.11 (com.chinaunicom.mobilebusiness; build:36; iOS 16.6.0) Alamofire/4.7.3 unicom{version:iphone_c@12.1100}";
-      const appCookie = `ecs_token=${this.ecsToken};t3_token=${this.t3Token};PvSessionId=${compactTime()}${this.uuid};devicedId=${this.uuid};c_mobile=${this.accountMobile};c_version=iphone_c@12.1100;city=036|${cityCode}|90063345|-99;`;
-      const t = await this.get(`https://m.client.10010.com/edop_ng/getTicketByNative?token=${encodeURIComponent(this.ecsToken)}&appId=edop_unicom_68e8fa69`, { "User-Agent": appUA, "Accept": "*/*", "Accept-Language": "zh-Hans-CN;q=1.0, en-CN;q=0.9", "Cookie": appCookie });
-      const ticket = t.ticket || ((t.result || {}).ticket);
+      const ticket = await this.wostoreTicket();
       if (!ticket) {
-        this.log(`\u83B7\u53D6\u5165\u53E3 Ticket \u5931\u8D25\uFF1A${responseMessage(t)}`);
+        this.log("\u6C83\u4E91\u624B\u673A: \u83B7\u53D6\u5165\u53E3 Ticket \u5931\u8D25 (\u4E3A\u7A7A)");
         return;
       }
-      const l = await this.postJSON("https://uphone.wostore.cn/h5api/token-service/getTokenByTicket", { ticket, channel: "ST-Kuaidai001" }, { "User-Agent": appUA, "Accept": "*/*", "Accept-Language": "zh-Hans-CN;q=1.0, en-CN;q=0.9", channel: "ST-Kuaidai001", channelCode: "ST-Kuaidai001", source: "4", os: "H5", "X-Tingyun": "c=A|uBuVhVARE0A" });
-      const cloud = l.data;
+      const cloud = await this.wostoreLogin(ticket);
       if (!cloud) {
-        this.log(`\u83B7\u53D6\u4E91\u624B\u673A Token \u5931\u8D25\uFF1A${responseMessage(l)}`);
+        this.log("\u6C83\u4E91\u624B\u673A: \u767B\u5F55\u5931\u8D25\uFF0C\u8DF3\u8FC7\u540E\u7EED\u4EFB\u52A1");
         return;
       }
-      const h = { "Authorization": cloud, "Content-Type": "application/json" };
-      const sign = await this.postJSON("https://h5forphone.wostore.cn/h5forphone/activity/signIn", { accesstoken: cloud }, h);
-      this.log(`\u6C83\u4E91\u624B\u673A\u7B7E\u5230\uFF1A${sign.msg || "\u672A\u77E5"}`, true);
-      const rewards = await this.postJSON("https://h5forphone.wostore.cn/h5forphone/activity/signInRightList", { accesstoken: cloud }, h);
-      for (const x of (rewards.data || {}).goodsList || []) {
-        if (x.state === "") {
-          const r = await this.postJSON("https://h5forphone.wostore.cn/h5forphone/activity/raffleSignIn", { accesstoken: cloud, activityOrderid: x.activityOrderId, account: "", accountType: "" }, h);
-          this.log(`\u9886\u53D6${x.name}\uFF1A${r.msg || "\u672A\u77E5"}`, true);
+      await this.wostoreUserInfo(cloud);
+      await this.wostoreSign(cloud);
+      await sleep(3000);
+      await this.wostoreSignRewards(cloud);
+      let pointsToken = "";
+      for (const code of WOSTORE_ACTIVITY_CODES) {
+        const ut = await this.wostoreActivityLogin(cloud, code);
+        if (!ut) continue;
+        if (!pointsToken) pointsToken = ut;
+        await this.wostorePointsSign(ut, WOSTORE_SIGN_CODE);
+        await this.wostoreTaskList(ut, code);
+      }
+      for (const code of WOSTORE_LOTTERY_CODES) {
+        const lt = await this.wostoreActivityLogin(cloud, code, code);
+        if (!lt) continue;
+        await this.wostoreTaskList(lt, code);
+        const n = await this.wostoreLotteryCount(lt, code);
+        for (let i = 0; i < n; i++) {
+          await this.wostoreDraw(lt, code);
+          await sleep(3000);
         }
       }
-      // 任务活动码与抽奖活动码分离，避免使用旧活动接口
-      for (const code of ["Points_Obtain_2507", "Points_Obtain_2506", "Points_Obtain_2505", "Points_Obtain_2504"]) {
-        const a = await this.postJSON("https://uphone.wostore.cn/h5api/activity-service/user/login", { identityType: "cloudPhoneLogin", code: cloud, activityId: "HD2026033000125", device: "device" }, { "X-USR-TOKEN": "" });
-        const token = (a.data || {}).user_token;
-        if (!token) continue;
-        const ah = { "X-USR-TOKEN": token, "Content-Type": "application/json" };
-        await this.postJSON("https://uphone.wostore.cn/h5api/activity-service/points/v1/sign", { activityCode: "Points_Sign_2507" }, ah);
-        const list = await this.postJSON("https://uphone.wostore.cn/h5api/activity-service/user/task/list", { activityCode: code }, ah);
-        for (const task of (list.data || {}).taskList || []) {
-          const status = String(task.status || task.taskStatus || task.state || "").toUpperCase();
-          if (/UNCLAIMED|CLAIMABLE|COMPLETED|FINISH/.test(status)) await this.postJSON("https://uphone.wostore.cn/h5api/activity-service/user/task/raffle/get", { activityCode: code, taskCode: task.taskCode }, ah);
-          else if (!/OBTAINED|RECEIVED|FINISHED|DONE/.test(status)) {
-            await this.postJSON("https://uphone.wostore.cn/h5api/activity-service/user/task/logs", { logType: "01", logCode: task.taskCode === "0127-006" ? "012-4" : task.taskCode, logSource: "01", logDetail: task.taskName || "" }, ah);
-            await this.postJSON("https://uphone.wostore.cn/h5api/activity-service/user/task/raffle/get", { activityCode: code, taskCode: task.taskCode }, ah);
+      if (pointsToken) {
+        if (await this.wostorePointsHistoryHasPrize(pointsToken, WOSTORE_GOODS_1)) {
+          this.log("\u6C83\u4E91\u624B\u673A: \u4ECA\u65E5\u5DF2\u4E2D\u5956\uFF0C\u8DF3\u8FC7\u79EF\u5206\u5355\u62BD");
+        } else {
+          const remain = Math.min(await this.wostorePointsExchangeRemain(pointsToken, WOSTORE_GOODS_1), safeInt(CFG.wostoreMaxDraw, 1));
+          for (let i = 0; i < remain; i++) {
+            if (await this.wostorePointsLottery(pointsToken, WOSTORE_GOODS_1)) break;
+            await sleep(3000);
           }
         }
-        let n = safeInt((list.data || {}).rafflesLeftCount || (list.data || {}).raffleLeftCount);
-        while (n-- > 0) {
-          const p = await this.postJSON("https://uphone.wostore.cn/h5api/activity-service/lottery", { activityCode: code }, ah);
-          this.log(`\u6C83\u4E91\u62BD\u5956\uFF1A${(p.data || {}).prizeName || p.msg || "\u672A\u77E5"}`, true);
+        const remain10 = Math.min(await this.wostorePointsExchangeRemain(pointsToken, WOSTORE_GOODS_10), safeInt(CFG.wostoreMaxDraw, 1));
+        for (let i = 0; i < remain10; i++) {
+          await this.wostorePointsLottery(pointsToken, WOSTORE_GOODS_10);
+          await sleep(3000);
         }
       }
-      const pi = await this.get("https://uphone.wo-adv.cn/bucp/servers/order/user-point/point-info", h);
-      if (pi.data) this.log(`\u6C83\u4E91\u624B\u673A\u79EF\u5206\uFF1A${pi.data.balanceScoreNum || pi.data.totalPoint || pi.data.point || 0}`, true);
+      await this.wostorePointInfo(cloud);
+      await this.wostoreDeviceStatus(cloud);
+    }
+    async wostoreTicket() {
+      const cityCode = String(((this.cityInfo || [])[0] || {}).cityCode || "");
+      const appUA = "ChinaUnicom4.x/12.11 (com.chinaunicom.mobilebusiness; build:36; iOS 16.6.0) Alamofire/4.7.3 unicom{version:iphone_c@12.1100}";
+      const appCookie = `ecs_token=${this.ecsToken};t3_token=${this.t3Token};PvSessionId=${compactTime()}${this.uuid};devicedId=${this.uuid};c_mobile=${this.accountMobile};c_version=iphone_c@12.1100;city=036|${cityCode}|90063345|-99;`;
+      const t = await this.get(`https://m.client.10010.com/edop_ng/getTicketByNative?token=${encodeURIComponent(this.ecsToken)}&appId=edop_unicom_68e8fa69`, {
+        "User-Agent": appUA,
+        Accept: "*/*",
+        "Accept-Language": "zh-Hans-CN;q=1.0, en-CN;q=0.9",
+        Cookie: appCookie
+      });
+      const ticket = t.ticket || (t.result || {}).ticket;
+      if (!ticket) this.log(`\u6C83\u4E91\u624B\u673A: \u83B7\u53D6\u5165\u53E3 Ticket \u5931\u8D25 - ${responseMessage(t)}`);
+      return ticket || "";
+    }
+    async wostoreLogin(ticket) {
+      const appUA = "ChinaUnicom4.x/12.11 (com.chinaunicom.mobilebusiness; build:36; iOS 16.6.0) Alamofire/4.7.3 unicom{version:iphone_c@12.1100}";
+      const l = await this.postJSON("https://uphone.wostore.cn/h5api/token-service/getTokenByTicket", { ticket, channel: "ST-Kuaidai001" }, {
+        "User-Agent": appUA,
+        Accept: "*/*",
+        "Accept-Language": "zh-Hans-CN;q=1.0, en-CN;q=0.9",
+        channel: "ST-Kuaidai001",
+        channelCode: "ST-Kuaidai001",
+        source: "4",
+        os: "H5",
+        "X-Tingyun": "c=A|uBuVhVARE0A"
+      });
+      const cloud = l.data;
+      if (!cloud) this.log(`\u6C83\u4E91\u624B\u673A: \u83B7\u53D6Token\u5931\u8D25 - ${responseMessage(l)}`);
+      else this.log("\u6C83\u4E91\u624B\u673A: \u4E91\u624B\u673AToken\u83B7\u53D6\u6210\u529F");
+      return cloud || "";
+    }
+    wostoreH5Headers(cloud) {
+      return {
+        Accept: "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+        Connection: "keep-alive",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.57(0x18003930) NetType/WIFI Language/zh_CN",
+        "X-Requested-With": "XMLHttpRequest",
+        Authorization: cloud
+      };
+    }
+    wostoreActivityHeaders(userToken) {
+      return {
+        Accept: "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+        Connection: "keep-alive",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.57(0x18003930) NetType/WIFI Language/zh_CN",
+        Origin: "https://uphone.wostore.cn",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "X-USR-TOKEN": userToken || ""
+      };
+    }
+    wostoreBucpHeaders(token) {
+      return {
+        Accept: "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+        Connection: "keep-alive",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 unicom{version:iphone_c@12.0601};ltst;OSVersion/16.6",
+        Authorization: token
+      };
+    }
+    async wostoreActivityPost(path, payload, userToken = "", label = "\u4E91\u624B\u673A\u8BF7\u6C42") {
+      const r = await this.postJSON(`https://uphone.wostore.cn${path}`, payload || {}, this.wostoreActivityHeaders(userToken), { timeout: 15000 });
+      if (!r || (!r.code && !r.msg && !r.data)) this.log(`\u6C83\u4E91\u624B\u673A: ${label}\u65E0\u54CD\u5E94\u6216\u5F02\u5E38`);
+      return r || {};
+    }
+    async wostoreBucpGet(path, token) {
+      return await this.get(`https://uphone.wo-adv.cn/bucp${path}`, this.wostoreBucpHeaders(token)) || {};
+    }
+    async wostoreBucpPost(path, token, payload = {}) {
+      return await this.postJSON(`https://uphone.wo-adv.cn/bucp${path}`, payload, this.wostoreBucpHeaders(token)) || {};
+    }
+    async wostoreUserInfo(cloud) {
+      const res = await this.wostoreBucpGet("/servers/system/user/getAppUserInfo", cloud);
+      if (String(res.code) === "200") {
+        const d = res.data || {};
+        const name = d.nickName || d.userName || d.phoneNumber || d.mobile;
+        if (name) this.log(`\u6C83\u4E91\u624B\u673A: \u5F53\u524D\u7528\u6237 ${mask(name)}`);
+      } else this.log(`\u6C83\u4E91\u624B\u673A: \u7528\u6237\u4FE1\u606F\u67E5\u8BE2\u5931\u8D25 - ${responseMessage(res)}`);
+      return res;
+    }
+    async wostorePointInfo(cloud) {
+      const res = await this.wostoreBucpGet("/servers/order/user-point/point-info", cloud);
+      if (String(res.code) === "200") {
+        const d = res.data || {};
+        const point = d.balanceScoreNum !== undefined ? d.balanceScoreNum : d.totalPoint !== undefined ? d.totalPoint : d.point !== undefined ? d.point : d.availablePoint;
+        if (point !== undefined && point !== null) this.log(`\u6C83\u4E91\u624B\u673A: \u5F53\u524D\u79EF\u5206 ${point}`, true);
+      } else this.log(`\u6C83\u4E91\u624B\u673A: \u79EF\u5206\u67E5\u8BE2\u5931\u8D25 - ${responseMessage(res)}`);
+      return res;
+    }
+    async wostoreSign(cloud) {
+      const res = await this.postJSON("https://h5forphone.wostore.cn/h5forphone/activity/signIn", { accesstoken: cloud }, this.wostoreH5Headers(cloud));
+      this.log(`\u6C83\u4E91\u624B\u673A: \u7B7E\u5230\uFF1A${res.msg || "\u672A\u77E5"}`, true);
+      return res;
+    }
+    async wostoreSignRewards(cloud) {
+      const res = await this.postJSON("https://h5forphone.wostore.cn/h5forphone/activity/signInRightList", { accesstoken: cloud }, this.wostoreH5Headers(cloud));
+      for (const x of (res.data || {}).goodsList || []) {
+        if (x.state === "") {
+          const r = await this.postJSON("https://h5forphone.wostore.cn/h5forphone/activity/raffleSignIn", { accesstoken: cloud, activityOrderid: x.activityOrderId, account: "", accountType: "" }, this.wostoreH5Headers(cloud));
+          this.log(`\u6C83\u4E91\u624B\u673A: \u9886\u53D6${x.name}\uFF1A${r.msg || "\u672A\u77E5"}`, true);
+        }
+      }
+      return res;
+    }
+    async wostoreActivityLogin(cloud, code, loginActivityId) {
+      const res = await this.wostoreActivityPost("/h5api/activity-service/user/login", { identityType: "cloudPhoneLogin", code: cloud, activityId: loginActivityId || WOSTORE_LOGIN_ACTIVITY_ID, device: "device" }, "", "\u83B7\u53D6\u4E91\u4EFB\u52A1token");
+      const token = (res.data || {}).user_token || "";
+      if (token) this.log(`\u6C83\u4E91\u624B\u673A: \u6D3B\u52A8[${code}]\u4E91\u4EFB\u52A1Token\u83B7\u53D6\u6210\u529F`);
+      else this.log(`\u6C83\u4E91\u624B\u673A: \u6D3B\u52A8[${code}]\u4E91\u4EFB\u52A1Token\u83B7\u53D6\u5931\u8D25 - ${responseMessage(res)}`);
+      return token;
+    }
+    async wostorePointsSign(userToken, signCode) {
+      if (!signCode) return {};
+      const res = await this.wostoreActivityPost("/h5api/activity-service/points/v1/sign", { activityCode: signCode }, userToken, "\u79EF\u5206\u7B7E\u5230");
+      this.log(`\u6C83\u4E91\u624B\u673A: \u79EF\u5206\u7B7E\u5230\uFF1A${res.msg || "\u672A\u77E5"}`, true);
+      return res;
+    }
+    async wostoreTaskList(userToken, code) {
+      const res = await this.wostoreActivityPost("/h5api/activity-service/user/task/list", { activityCode: code }, userToken, "\u67E5\u8BE2\u4EFB\u52A1\u5217\u8868");
+      const data = res.data || {};
+      const list = data.taskList || data.list || data.tasks || res.taskList || [];
+      this.log(`\u6C83\u4E91\u624B\u673A: \u6D3B\u52A8[${code}]\u67E5\u8BE2\u5230 ${list.length} \u4E2A\u4EFB\u52A1`);
+      if (!list.length) {
+        this.log(`\u6C83\u4E91\u624B\u673A: \u6D3B\u52A8[${code}]\u65E0\u53EF\u6267\u884C\u4EFB\u52A1 - ${responseMessage(res)}`);
+        return res;
+      }
+      let done = 0;
+      for (const task of list) {
+        const name = task.taskName || "\u672A\u77E5\u4EFB\u52A1";
+        const tcode = task.taskCode || "";
+        const status = String(task.status || task.taskStatus || task.state || "").toUpperCase();
+        if (/^(OBTAINED|RECEIVED|FINISHED|DONE)$/.test(status)) {
+          done++;
+          this.log(`\u6C83\u4E91\u624B\u673A: \u5DF2\u5B8C\u6210[${name}]`);
+        } else if (/^(UNCLAIMED|CLAIMABLE|COMPLETED|FINISH)$/.test(status)) {
+          this.log(`\u6C83\u4E91\u624B\u673A: \u9886\u53D6[${name}]\u5956\u52B1`);
+          const result = await this.wostoreRaffleGet(userToken, code, tcode);
+          if (String(result.msg || "").includes("\u6BCF\u65E5\u9650\u5B8C\u6210\u4E00\u4E2A\u6B64\u7C7B\u4EFB\u52A1")) {
+            this.log("\u6C83\u4E91\u624B\u673A: \u5DF2\u8FBE\u5F53\u65E5\u4EFB\u52A1\u4E0A\u9650\uFF0C\u505C\u6B62\u672C\u6D3B\u52A8");
+            break;
+          }
+        } else if (status === "INCOMPLETE") {
+          this.log(`\u6C83\u4E91\u624B\u673A: \u6267\u884C[${name}] \u72B6\u6001 ${status || "\u672A\u77E5"}`);
+          const result = await this.wostoreFinishTask(userToken, code, task);
+          if (String(result.msg || "").includes("\u6BCF\u65E5\u9650\u5B8C\u6210\u4E00\u4E2A\u6B64\u7C7B\u4EFB\u52A1")) {
+            this.log("\u6C83\u4E91\u624B\u673A: \u5DF2\u8FBE\u5F53\u65E5\u4EFB\u52A1\u4E0A\u9650\uFF0C\u505C\u6B62\u672C\u6D3B\u52A8");
+            break;
+          }
+        } else {
+          this.log(`\u6C83\u4E91\u624B\u673A: \u8DF3\u8FC7[${name}] \u672A\u77E5\u72B6\u6001 ${status || "\u7A7A"}`);
+        }
+      }
+      this.log(`\u6C83\u4E91\u624B\u673A: \u6D3B\u52A8[${code}]\u6267\u884C\u524D\u5DF2\u5B8C\u6210 ${done}/${list.length} \u4E2A\u4EFB\u52A1`);
+      return res;
+    }
+    async wostoreFinishTask(userToken, code, task) {
+      const tcode = task.taskCode || "";
+      const name = task.taskName || task.taskDesc || tcode;
+      const res = await this.wostoreActivityPost("/h5api/activity-service/user/task/logs", { logType: "01", logCode: tcode, logSource: "01", logDetail: name }, userToken, "\u5B8C\u6210\u4EFB\u52A1");
+      this.log(`\u6C83\u4E91\u624B\u673A: \u4EFB\u52A1\u72B6\u6001\uFF1A${res.msg || "\u672A\u77E5"}`);
+      if (String(res.code) !== "200") {
+        this.log(`\u6C83\u4E91\u624B\u673A: \u4EFB\u52A1[${name}]\u5B8C\u6210\u5931\u8D25\uFF0C\u8DF3\u8FC7\u9886\u53D6`);
+        return res;
+      }
+      await sleep(15000);
+      return await this.wostoreRaffleGet(userToken, code, tcode);
+    }
+    async wostoreRaffleGet(userToken, code, taskCode) {
+      const res = await this.wostoreActivityPost("/h5api/activity-service/user/task/raffle/get", { activityCode: code, taskCode }, userToken, "\u9886\u53D6\u4EFB\u52A1\u5956\u52B1");
+      this.log(`\u6C83\u4E91\u624B\u673A: \u5956\u52B1\u9886\u53D6\u7ED3\u679C\uFF1A${res.msg || "\u672A\u77E5"}`, true);
+      return res;
+    }
+    async wostoreLotteryCount(userToken, code) {
+      const res = await this.wostoreActivityPost("/h5api/activity-service/user/task/list", { activityCode: code }, userToken, "\u67E5\u8BE2\u62BD\u5956\u6B21\u6570");
+      const data = res.data || {};
+      const count = safeInt(data.rafflesLeftCount || data.raffleLeftCount || data.lotteryLeftCount || res.rafflesLeftCount || res.raffleLeftCount);
+      this.log(`\u6C83\u4E91\u624B\u673A: \u6D3B\u52A8[${code}]\u5269\u4F59\u62BD\u5956\u6B21\u6570\uFF1A${count}`);
+      return count;
+    }
+    async wostoreDraw(userToken, code) {
+      const res = await this.wostoreActivityPost("/h5api/activity-service/lottery", { activityCode: code }, userToken, "\u62BD\u5956");
+      this.log(`\u6C83\u4E91\u624B\u673A: \u62BD\u5956\u83B7\u5F97\uFF1A${(res.data || {}).prizeName || res.msg || "\u672A\u77E5\u5956\u52B1"}`, true);
+      return res;
+    }
+    async wostorePointsHistoryHasPrize(userToken, goodsId) {
+      try {
+        const res = await this.get(`https://uphone.wostore.cn/h5api/activity-service/points/v1/lottery/history?page=1&pageSize=10&goodsId=${goodsId}`, this.wostoreActivityHeaders(userToken));
+        const today = today();
+        const data = res.data || {};
+        const records = Array.isArray(data) ? data : data.records || data.list || [];
+        return records.some((x) => String(x.createTime || x.drawTime || "").startsWith(today) && x.prizeName);
+      } catch (e) {
+        this.log(`\u6C83\u4E91\u624B\u673A: \u79EF\u5206\u62BD\u5956\u8BB0\u5F55\u67E5\u8BE2\u5F02\u5E38 ${e && e.message || e}`);
+        return false;
+      }
+    }
+    async wostorePointsExchangeRemain(userToken, goodsId) {
+      try {
+        const res = await this.get(`https://uphone.wostore.cn/h5api/activity-service/points/v1/exchange/list?activityCode=${WOSTORE_POINTS_ACT_CODE}`, this.wostoreActivityHeaders(userToken));
+        const data = res.data || {};
+        const list = Array.isArray(data) ? data : data.goodsList || data.list || [];
+        for (const item of list) {
+          if (String(item.goodsId) === String(goodsId)) {
+            const remain = safeInt(item.remainUser || item.remainCount || item.surplusCount);
+            this.log(`\u6C83\u4E91\u624B\u673A: \u79EF\u5206\u5546\u54C1[${goodsId}]\u5269\u4F59\u6B21\u6570\uFF1A${remain}`);
+            return remain;
+          }
+        }
+      } catch (e) {
+        this.log(`\u6C83\u4E91\u624B\u673A: \u79EF\u5206\u5151\u6362\u5217\u8868\u67E5\u8BE2\u5F02\u5E38 ${e && e.message || e}`);
+      }
+      return 0;
+    }
+    async wostorePointsLottery(userToken, goodsId) {
+      const res = await this.wostoreActivityPost("/h5api/activity-service/points/v1/lottery", { activityCode: WOSTORE_POINTS_ACT_CODE, goodsId }, userToken, "\u79EF\u5206\u62BD\u5956");
+      let results = (res.data || {}).results || [];
+      if (!results.length && res.data) results = [res.data];
+      const prizes = results.map((x) => String(x.prizeName || "\u672A\u77E5"));
+      const label = String(goodsId) === String(WOSTORE_GOODS_1) ? "\u79EF\u5206\u5355\u62BD" : "\u79EF\u520610\u8FDE\u62BD";
+      this.log(`\u6C83\u4E91\u624B\u673A: ${label}\uFF1A${res.msg || prizes.join("\u3001") || "\u672A\u77E5"}`, true);
+      return prizes.some((x) => x.includes(WOSTORE_STOP_PRIZE));
+    }
+    async wostoreDeviceStatus(cloud) {
+      const res = await this.wostoreBucpGet("/servers/resource/instance/list?pageNum=1&pageSize=200", cloud);
+      const rows = res.rows || (res.data || {}).rows || [];
+      for (const device of rows) {
+        const id = device.id || device.deviceId || "";
+        const status = device.status || "?";
+        if (status === "running") this.log("\u6C83\u4E91\u624B\u673A: \u8BBE\u5907\u8FD0\u884C\u6B63\u5E38");
+        else if (status === "pre_create") await this.wostoreDeviceAction(cloud, "/servers/resource/instance/cpInstanceAction", { action: "allot", cpInstanceId: id }, "\u6FC0\u6D3B\u8BBE\u5907");
+        else await this.wostoreDeviceAction(cloud, "/servers/resource/backup/recover", { cpInstanceId: id }, "\u6062\u590D\u8BBE\u5907");
+      }
+      return res;
+    }
+    async wostoreDeviceAction(cloud, path, payload, label) {
+      const res = await this.wostoreBucpPost(path, cloud, payload);
+      this.log(`\u6C83\u4E91\u624B\u673A: ${label}\u7ED3\u679C\uFF1A${res.msg || "\u672A\u77E5"}`);
+      return res;
     }
     regions() {
-      const names = [];
-      const codes = [];
-      for (const x of this.cityInfo || []) {
-        names.push(x.proName, x.provinceName, x.province, x.provinceDesc, x.cityName, x.city);
-        codes.push(x.proCode, x.provinceCode, x.provinceId, x.province_id);
+      const out = { xinjiang: false, henan: false, yunnan: false, liaoning: false, anhui: false };
+      const map = { "\u65b0\u7586": "xinjiang", "\u6cb3\u5357": "henan", "\u4e91\u5357": "yunnan", "\u8fbd\u5b81": "liaoning", "\u5b89\u5fbd": "anhui" };
+      for (const city of this.cityInfo || []) {
+        const name = String((city || {}).proName || (city || {}).provinceName || "");
+        for (const key of Object.keys(map)) if (name.includes(key)) out[map[key]] = true;
       }
-      if (CFG.provinceOverride) names.push(CFG.provinceOverride);
-      const s = names.filter(Boolean).join(",");
-      const c = codes.filter((x) => x !== void 0 && x !== null).map(String).join(",");
-      return { xinjiang: s.includes("\u65B0\u7586"), henan: s.includes("\u6CB3\u5357"), yunnan: s.includes("\u4E91\u5357"), liaoning: s.includes("\u8FBD\u5B81"), anhui: s.includes("\u5B89\u5FBD") || /(^|,)17(,|$)/.test(c) };
+      return out;
     }
     async regionalTask() {
       this.log(`==== \u533A\u57DF\u4E13\u533A${CFG.queryOnly ? "\uFF08\u67E5\u8BE2\u6A21\u5F0F\uFF09" : ""} ====`);
