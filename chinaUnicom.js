@@ -5202,7 +5202,7 @@
 
   // chinaUnicom.source.js
   var CryptoJS = require_crypto_js();
-  var VERSION = "v1.2.1-loon.1";
+  var VERSION = "v1.2.1-loon.5";
   var STORE_KEY = "cu_accounts_v2";
   var DEVICE_KEY = "cu_device_ids_v2";
   var UA = "Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}";
@@ -5229,6 +5229,7 @@
   var ISLAND_ACT_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) LianTongYunPan/6.0.0 (iPhone; iOS 16.6)";
 
   var CLOUD_TOKEN_KEY = "cu_cloud_token_v1";
+  var CAPTURE_KEY = "cu_capture_notified_v1";
   var HOMETOWN_MOBILE_KEY = "CBWGjFHjZdhTf7h8";
   var HOMETOWN_AES_IV = "wNSOYIB1k1DjY5lA";
   var HOMETOWN_LOTTERY_SECRET = "s8Hf3LqP9xN2vM5bR7tY1wZ4cA6eG0K";
@@ -5263,6 +5264,7 @@
     requestNode: "",
     provinceOverride: "",
     clearAllAccounts: false,
+    deleteLastAccount: false,
     cloudImageFid: "",
     cloudUploadName: "8648",
     hometownEnable: false,
@@ -5304,6 +5306,7 @@
     requestNode: String(arg.requestNode || DEFAULTS.requestNode).trim(),
     provinceOverride: String(arg.provinceOverride || DEFAULTS.provinceOverride).trim(),
     clearAllAccounts: bool(arg["清空全部账号"] !== void 0 ? arg["清空全部账号"] : arg.clearAllAccounts, DEFAULTS.clearAllAccounts),
+    deleteLastAccount: bool(arg["\u5220\u9664\u672B\u4F4D\u8D26\u53F7"] !== void 0 ? arg["\u5220\u9664\u672B\u4F4D\u8D26\u53F7"] : arg.deleteLastAccount, DEFAULTS.deleteLastAccount),
     cloudImageFid: String(arg.cloudImageFid || DEFAULTS.cloudImageFid).trim(),
     cloudUploadName: String(arg.cloudUploadName || DEFAULTS.cloudUploadName).trim(),
     hometownEnable: bool(arg.hometownEnable, DEFAULTS.hometownEnable),
@@ -5506,7 +5509,38 @@
     });
     return run(0);
   }
+  function notifyCapture(isNew, total, token, appId) {
+    if (!CFG.enableNotify) return;
+    const cache = readJSON(CAPTURE_KEY, {});
+    const seen = Array.isArray(cache.tokens) ? cache.tokens : [];
+    if (seen.indexOf(token) >= 0) return;
+    seen.push(token);
+    writeJSON(CAPTURE_KEY, { tokens: seen.slice(-10) });
+    console.log(`[\u4E2D\u56FD\u8054\u901A] \u6293\u53D6\u6210\u529F\u901A\u77E5\uFF1A${isNew ? "\u65B0\u589E" : "\u66F4\u65B0"}\u8D26\u53F7\uFF0C\u5171 ${total} \u4E2A`);
+    $notification.post("\u4E2D\u56FD\u8054\u901A \u8D26\u53F7\u6293\u53D6\u6210\u529F", `${isNew ? "\u65B0\u589E" : "\u66F4\u65B0"}\u8D26\u53F7 \u00B7 \u5F53\u524D\u5171 ${total} \u4E2A`, `Token ${mask(token)}\nAppId ${mask(appId)}\n\n\u5982\u9700\u6DFB\u52A0\u5176\u4ED6\u53F7\u7801\uFF1A\u8054\u901A App \u9000\u51FA\u767B\u5F55 \u2192 \u7528\u65B0\u53F7\u7801\u91CD\u65B0\u767B\u5F55\u4E00\u6B21`);
+  }
+  function removeLastAccount() {
+    const accounts = readJSON(STORE_KEY, []);
+    if (!accounts.length) {
+      console.log("[\u4E2D\u56FD\u8054\u901A] \u8D26\u53F7\u5E93\u4E3A\u7A7A\uFF0C\u65E0\u53EF\u5220\u9664\u8D26\u53F7");
+      $notification.post("\u4E2D\u56FD\u8054\u901A", "\u6CA1\u6709\u53EF\u5220\u9664\u7684\u8D26\u53F7", "\u8D26\u53F7\u5E93\u4E3A\u7A7A\uFF0C\u65E0\u9700\u5220\u9664\u3002");
+      return false;
+    }
+    const removed = accounts.pop();
+    writeJSON(STORE_KEY, accounts);
+    const left = accounts.length;
+    const removedLabel = mask(removed.mobile || "\u672A\u83B7\u53D6\u53F7\u7801");
+    const listText = accounts.map((x, i) => `${i + 1}. ${mask(x.mobile || "\u672A\u83B7\u53D6\u53F7\u7801")}`).join("\n");
+    console.log(`[\u4E2D\u56FD\u8054\u901A] \u5DF2\u5220\u9664\u672B\u4F4D\u8D26\u53F7 ${removedLabel}\uFF0C\u5269\u4F59 ${left} \u4E2A`);
+    $notification.post("\u4E2D\u56FD\u8054\u901A", `\u5DF2\u5220\u9664\u672B\u4F4D\u8D26\u53F7\uFF0C\u5269\u4F59 ${left} \u4E2A`, `${removedLabel}\n${left ? "\u5269\u4F59\u8D26\u53F7\uFF1A\n" + listText : "\u8D26\u53F7\u5E93\u5DF2\u7A7A"}\n\n\u8BF7\u5173\u95ED\u201C\u5220\u9664\u672B\u4F4D\u8D26\u53F7\u201D\u5F00\u5173\u540E\u518D\u8FD0\u884C\u3002`);
+    return true;
+  }
   async function captureAccount() {
+    if (CFG.deleteLastAccount) {
+      removeLastAccount();
+      $done({});
+      return;
+    }
     if (CFG.clearAllAccounts) {
       const accounts = readJSON(STORE_KEY, []);
       writeJSON(STORE_KEY, []);
@@ -5535,6 +5569,14 @@
     const list = readJSON(STORE_KEY, []);
     // 抓包阶段只追加不弹通知：token 每次登录都不同，直接追加或更新
     // 真正的去重交由登录成功后（onLine 返回 mobile）按手机号合并
+    // \u672A\u9A8C\u8BC1\uFF08mobile \u4E3A\u7A7A\uFF09\u7684\u8BB0\u5F55\u53EA\u4FDD\u7559\u6700\u65B0\u4E00\u6761\uFF1A\u540C\u4E00\u6B21\u767B\u5F55\u4F1A\u89E6\u53D1\u591A\u4E2A\u88AB\u6293\u5305\u89C4\u5219\u5339\u914D\u7684
+    // \u8BF7\u6C42\uFF0Ctoken \u5404\u4E0D\u76F8\u540C\u4F46\u5176\u5B9E\u662F\u540C\u4E00\u4E2A\u53F7\uFF0C\u7559\u7740\u4F1A\u53D8\u6210"\u5E7D\u7075\u8D26\u53F7"\u3002
+    const kept = list.filter((x) => x.mobile || x.tokenOnline === token);
+    if (kept.length !== list.length) {
+      console.log(`[\u4E2D\u56FD\u8054\u901A] \u6E05\u7406 ${list.length - kept.length} \u6761\u672A\u9A8C\u8BC1\u7684\u91CD\u590D\u8BB0\u5F55`);
+      list.length = 0;
+      for (const x of kept) list.push(x);
+    }
     const index = list.findIndex((x) => x.tokenOnline === token);
     const item = { tokenOnline: token, appId, updatedAt: dateTime(), mobile: index >= 0 ? list[index].mobile || "" : "" };
     if (index < 0) {
@@ -5544,6 +5586,7 @@
     }
     writeJSON(STORE_KEY, list);
     console.log(`[\u4E2D\u56FD\u8054\u901A] \u5DF2\u4FDD\u5B58\u8D26\u53F7 (${list.length}\u4E2A)\uFF0CToken=${mask(token)}\uFF0CAppId=${mask(appId)}`);
+    notifyCapture(index < 0, list.length, token, appId);
     $done({});
   }
   var UserService = class {
@@ -8305,10 +8348,10 @@
     async wostorePointsHistoryHasPrize(userToken, goodsId) {
       try {
         const res = await this.get(`https://uphone.wostore.cn/h5api/activity-service/points/v1/lottery/history?page=1&pageSize=10&goodsId=${goodsId}`, this.wostoreActivityHeaders(userToken));
-        const today = today();
+        const todayStr = today();
         const data = res.data || {};
         const records = Array.isArray(data) ? data : data.records || data.list || [];
-        return records.some((x) => String(x.createTime || x.drawTime || "").startsWith(today) && x.prizeName);
+        return records.some((x) => String(x.createTime || x.drawTime || "").startsWith(todayStr) && x.prizeName);
       } catch (e) {
         this.log(`\u6C83\u4E91\u624B\u673A: \u79EF\u5206\u62BD\u5956\u8BB0\u5F55\u67E5\u8BE2\u5F02\u5E38 ${e && e.message || e}`);
         return false;
@@ -8682,6 +8725,11 @@
   };
   async function main() {
     const accounts = readJSON(STORE_KEY, []);
+    if (CFG.deleteLastAccount) {
+      removeLastAccount();
+      $done();
+      return;
+    }
     if (!accounts.length) {
       $notification.post("\u4E2D\u56FD\u8054\u901A", "\u672A\u83B7\u53D6\u8D26\u53F7", "\u8BF7\u5148\u5F00\u542F\u6293\u53D6\u5F00\u5173\uFF0C\u5728\u4E2D\u56FD\u8054\u901A App \u9000\u51FA\u540E\u91CD\u65B0\u767B\u5F55\u4E00\u6B21\u3002");
       $done();
