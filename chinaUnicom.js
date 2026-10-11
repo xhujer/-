@@ -1,4 +1,4 @@
- strict";
+"use strict";
 (() => {
   var __getOwnPropNames = Object.getOwnPropertyNames;
   var __commonJS = (cb, mod) => function __require() {
@@ -5202,7 +5202,7 @@
 
   // chinaUnicom.source.js
   var CryptoJS = require_crypto_js();
-  var VERSION = "v1.2.1-loon.8";
+  var VERSION = "v1.2.1-loon.9";
   var STORE_KEY = "cu_accounts_v2";
   var DEVICE_KEY = "cu_device_ids_v2";
   var UA = "Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}";
@@ -5813,7 +5813,10 @@
       for (let round = 0; round < 30; round++) {
         const r = await this.get("https://activity.10010.com/sixPalaceGridTurntableLottery/task/taskList?type=2", { "Referer": "https://img.client.10010.com/" });
         if (r.code !== "0000") break;
-        const all = [...(r.data || {}).taskList || [], ...((r.data || {}).tagList || []).flatMap((x) => x.taskDTOList || [])];
+        const d0 = r.data || {};
+        const flat = Array.isArray(d0.taskList) ? d0.taskList : [];
+        const tags = Array.isArray(d0.tagList) ? d0.tagList : [];
+        const all = [...flat, ...tags.flatMap((x) => (Array.isArray(x.taskDTOList) ? x.taskDTOList : []))];
         const todo = all.find((t) => t.taskState === "1" && t.taskType === "5");
         const claim = all.find((t) => t.taskState === "0");
         if (todo) {
@@ -6008,7 +6011,8 @@
     }
     async ttxcTasks() {
       const r = await this.ttxcPost("/client/v1/task/list", {});
-      return (r.data || []).flatMap((g) => (g.taskList || []).map((t) => ({ ...t, taskGroupName: g.taskGroupName || "" })));
+      const groups = Array.isArray(r.data) ? r.data : Array.isArray((r.data || {}).taskList) ? [r.data] : [];
+      return groups.flatMap((g) => (Array.isArray(g.taskList) ? g.taskList : []).map((t) => ({ ...t, taskGroupName: g.taskGroupName || "" })));
     }
     async ttxcClaim(tasks) {
       for (const t of tasks) {
@@ -6102,6 +6106,10 @@
     }
     async ltzfTask() {
       this.log("==== \u8054\u901A\u795D\u798F ====");
+      if (CFG.queryOnly) {
+        this.log("\u8054\u901A\u795D\u798F: [\u67E5\u8BE2\u6A21\u5F0F] \u65E0\u8D44\u4EA7\u53EF\u67E5\uFF0C\u8DF3\u8FC7\u62BD\u5956");
+        return;
+      }
       const entry = await this.openPlat("https://wocare.unisk.cn/mbh/getToken?channelType=wocareMBHServiceLife1&homePage=home&duanlianjieabc=qAz2m");
       if (!entry) {
         this.log("\u83B7\u53D6 Ticket \u5931\u8D25");
@@ -7018,17 +7026,6 @@
       const ticket = (res.result || {}).ticket;
       if (!ticket) this.log(`\u5BB6\u4E61\u6253\u5361: \u83B7\u53D6\u4E91\u76D8\u57FA\u7840Ticket\u5931\u8D25 ${responseMessage(res)}`);
       return ticket || "";
-    }
-    async hometownOpen(token, ticket, provinceCode, provinceName) {
-      if (!token || !provinceCode || !provinceName) {
-        this.log("\u5BB6\u4E61\u6253\u5361: \u5F00\u542F\u6D3B\u52A8\u5931\u8D25\uFF0CToken\u6216\u5F52\u5C5E\u5730\u4FE1\u606F\u4E0D\u5B8C\u6574");
-        return false;
-      }
-      const mobile = this.accountMobile;
-      const referer = `https://panservice.mail.wo.cn/h5/activitymobile/fileUploadActive?touchpoint=300200030001&type=06&ticket=${ticket}&version=iphone_c%4012.0801&timestamp=${nowMs()}&desmobile=${mobile}&num=0&postage=01addda9786dc7eb5ca0eacd9acd664a&activityId=${HOMETOWN_OPEN_ACTIVITY_ID}&clientid=1001000003&userNumber=${mobile}`;
-      const res = await this.postJSON("https://panservice.mail.wo.cn/activity/openActivity", { activityId: HOMETOWN_LOTTERY_ACTIVITY_ID, provinceCode, provinceName }, this.hometownHeaders(token, { Referer: referer }), { timeout: 15000 });
-      this.log(`\u5BB6\u4E61\u6253\u5361: \u5F00\u542F\u7ED3\u679C ${res.msg || responseMessage(res)}`);
-      return true;
     }
     async hometownUpload(token) {
       this.hometownUploadedFiles = [];
