@@ -1,8 +1,8 @@
 #!name = 中国联通自动任务
-#!desc = 签到、联通祝福、天天领现金、通通乡村、权益超市、安全管家、云盘、阅读、爱听、沃云手机及区域专区
+#!desc = 签到、联通祝福、天天领现金、通通乡村、权益超市、安全管家、云盘(含家乡打卡/海岛逐浪应援/AI入戏)、阅读、爱听、沃云手机及区域专区
 #!author = Ming
-#!version = 1.0
-#!date = 2026-08-13
+#!version = 1.2.1
+#!date = 2026-10-12
 #!system = iOS,iPadOS
 #!loon_version = 3.5.0(969)
 #!tag = 中国联通,签到,任务
@@ -22,7 +22,7 @@ enableTtlxj = switch,true,tag=天天领现金,desc=每日打卡和立减金
 enableTtxc = switch,true,tag=通通乡村,desc=签到、游戏任务、农场充能
 enableMarket = switch,true,tag=权益超市,desc=任务、会员中心、抽奖和记录
 enableSecurity = switch,true,tag=安全管家,desc=签到、日常任务和积分领取
-enableCloud = switch,true,tag=联通云盘,desc=乘风活动、会员体验和重复文件清理
+enableCloud = switch,true,tag=联通云盘,desc=海岛逐浪应援(AI入戏/打卡/抽奖)、会员体验和重复文件清理
 enableWoread = switch,false,tag=联通阅读,desc=阅读、心跳和抽奖；耗时较长，默认关闭
 enableAiting = switch,true,tag=联通爱听,desc=签到、积分任务和积分查询
 enableWostore = switch,true,tag=沃云手机,desc=签到、任务、抽奖和积分
@@ -35,7 +35,7 @@ marketTask = switch,true,tag=权益超市任务,desc=执行浏览和分享任务
 marketMember = switch,true,tag=权益会员中心,desc=执行会员中心浏览积分任务
 marketDraw = switch,true,tag=权益超市抽奖,desc=自动使用已有抽奖次数
 marketClaim = switch,true,tag=权益自动领奖,desc=查询可领取记录
-hometownEnable = switch,false,tag=云盘家乡打卡,desc=涉及 multipart 图片上传；当前 Loon 版暂不执行，保留配置位
+hometownEnable = switch,false,tag=云盘家乡打卡,desc=归属地识别+上传+抽奖+自动清理；会占用云盘空间，默认关闭
 grabCoupon = switch,false,tag=日常任务同时抢券,desc=高频操作，默认关闭；建议使用下方独立抢兑定时
 grabAmount = input,"5",tag=话费券面额,desc=匹配包含指定面额的奖品
 ahFriday = switch,false,tag=安徽超级星期五,desc=仅安徽号码、周五执行
