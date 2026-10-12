@@ -5202,7 +5202,7 @@
 
   // chinaUnicom.source.js
   var CryptoJS = require_crypto_js();
-  var VERSION = "v1.2.1-loon.15";
+  var VERSION = "v1.2.1-loon.19";
   var STORE_KEY = "cu_accounts_v2";
   var DEVICE_KEY = "cu_device_ids_v2";
   var UA = "Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}";
@@ -5859,6 +5859,9 @@
         await sleep(200);
       }
     }
+    epayMask(u) {
+      return String(u).replace(/rptid=[^&]*/g, "rptid=***").replace(/ticket=[^&]*/g, "ticket=***").slice(0, 110);
+    }
     epayBiz() {
       return JSON.stringify({ bizChannelCode: "225", disriBiz: "party", unionSessionId: "", stType: "", stDesmobile: "", source: "", rptId: this.rptId || "", ticket: "", tongdunTokenId: this.tokenIdCookie, xindunTokenId: this.unicomTokenId });
     }
@@ -5877,25 +5880,59 @@
         return;
       }
       const payload = { response_type: "rptid", client_id: "73b138fd-250c-4126-94e2-48cbcc8b9cbe", redirect_uri: "https://epay.10010.com/ci-mps-st-web/", login_hint: { credential_type: "st_ticket", credential: entry.ticket, st_type: entry.type, force_logout: true, source: "app_sjyyt" }, device_info: { token_id: `chinaunicom-pro-${nowMs()}-${randomString(13)}`, trace_id: uuid32() } };
-      await this.postJSON("https://epay.10010.com/woauth2/v2/authorize", payload, { "Origin": "https://epay.10010.com", "Referer": entry.loc });
+      const az = await this.req("post", "https://epay.10010.com/woauth2/v2/authorize", { headers: { "Content-Type": "application/json", Origin: "https://epay.10010.com", Referer: entry.loc }, body: JSON.stringify(payload) });
+      const azBody = az.json || {};
+      const azStatus = azBody.status !== void 0 ? String(azBody.status) : azBody.code !== void 0 ? String(azBody.code) : "";
+      if (az.status !== 200) this.log(`\u5929\u5929\u9886\u73B0\u91D1: \u2460 \u6388\u6743\u8BF7\u6C42 HTTP ${az.status}${az.body ? `\uFF1A${String(az.body).slice(0, 140)}` : ""}`);
+      else if (azBody.rptid) {
+        this.log("\u5929\u5929\u9886\u73B0\u91D1: \u2460 \u6388\u6743\u6210\u529F\uFF08\u7968\u5DF2\u88AB\u53D7\u7406\uFF09");
+      } else if (azStatus && azStatus !== "200" && azStatus !== "0") {
+        this.log(`\u5929\u5929\u9886\u73B0\u91D1: \u2460 \u6388\u6743\u88AB\u62D2\uFF1A${azBody.message || azBody.hum_msg || "\u65E0\u8BF4\u660E"}${azBody.ext_code ? ` (${azBody.ext_code})` : ""}`);
+      } else this.log("\u5929\u5929\u9886\u73B0\u91D1: \u2460 \u6388\u6743\u901A\u8FC7\uFF08\u672A\u76F4\u63A5\u7ED9 rptid\uFF0C\u7EE7\u7EED\u8D70\u767B\u5F55\u8DF3\u8F6C\uFF09");
       let auth = await this.postJSON("https://epay.10010.com/ps-pafs-auth-front/v1/auth/check", {}, { "bizchannelinfo": this.epayBiz() });
-      if (auth.code === "2101000100" && auth.data && auth.data.woauth_login_url) {
-        const rr = await this.req("get", `${auth.data.woauth_login_url}https://epay.10010.com/ci-mcss-party-web/clockIn/?bizFrom=225&bizChannelCode=225`, { redirect: false });
-        this.rptId = qs(getHeader(rr.headers, "Location")).rptid || "";
-        auth = await this.postJSON("https://epay.10010.com/ps-pafs-auth-front/v1/auth/check", {}, { "bizchannelinfo": this.epayBiz() });
+      if (auth.code === "2101000100") {
+        const loginUrl = (auth.data || {}).woauth_login_url || "";
+        if (!loginUrl) {
+          this.log("\u5929\u5929\u9886\u73B0\u91D1: \u2461 \u672A\u767B\u5F55\u4E14\u670D\u52A1\u7AEF\u672A\u7ED9\u767B\u5F55\u8DF3\u8F6C\u5730\u5740 \u2192 st_ticket \u672A\u88AB\u53D7\u7406");
+        } else {
+          let hop = loginUrl, hops = 0;
+          while (hop && hops < 3 && !this.rptId) {
+            hops++;
+            const rr = await this.req("get", hop, { redirect: false });
+            const loc = getHeader(rr.headers, "Location");
+            this.rptId = qs(loc).rptid || "";
+            this.log(`\u5929\u5929\u9886\u73B0\u91D1: \u2462 \u7B2C${hops}\u8DF3 HTTP ${rr.status}${loc ? ` \u2192 ${this.epayMask(loc)}` : "\uFF08\u65E0 Location\uFF09"}`);
+            if (!this.rptId && loc) hop = loc.indexOf("http") === 0 ? loc : `https://epay.10010.com${loc}`;
+          }
+                    auth = await this.postJSON("https://epay.10010.com/ps-pafs-auth-front/v1/auth/check", {}, { "bizchannelinfo": this.epayBiz() });
+          if (auth.code === "2101000100") this.log("\u5929\u5929\u9886\u73B0\u91D1: \u2463 \u5E26 rptid \u590D\u67E5\u4ECD\u672A\u767B\u5F55 \u2192 \u4F1A\u8BDD\u672A\u88AB\u670D\u52A1\u7AEF\u63A5\u53D7");
+        }
       }
       if (auth.code !== "0000") {
+        const msg = responseMessage(auth);
         this.ttlxjRetry = safeInt(this.ttlxjRetry) + 1;
+        const sig = `${auth.code}:${msg}`;
+        this.ttlxjSame = this.ttlxjLastErr === sig ? safeInt(this.ttlxjSame) + 1 : 1;
+        this.ttlxjLastErr = sig;
+        if (this.ttlxjSame >= 6) {
+          this.log(`\u6388\u6743\u5931\u8D25[${auth.code}]\uFF1A${msg}\uFF08\u8FDE\u7EED ${this.ttlxjSame} \u6B21\u5B8C\u5168\u65E0\u53D8\u5316\uFF0C\u63D0\u524D\u653E\u5F03\uFF0C\u4E0D\u518D\u7A7A\u7B49\uFF09`);
+          this.ttlxjRetry = 0;
+          this.ttlxjSame = 0;
+          return;
+        }
         if (this.ttlxjRetry < 30) {
-          this.log(`\u6388\u6743\u672A\u5C31\u7EEA\uFF1A${responseMessage(auth)}\uFF0C\u7B49\u5F85\u540E\u91CD\u8BD5(${this.ttlxjRetry}/30)`);
+          this.log(`\u6388\u6743\u672A\u5C31\u7EEA\uFF1A${msg}\uFF0C\u7B49\u5F85\u540E\u91CD\u8BD5(${this.ttlxjRetry}/30)`);
           await sleep(2000);
           return this.ttlxjTask();
         }
-        this.log(`\u6388\u6743\u5931\u8D25[${auth.code}]\uFF1A${responseMessage(auth)}`);
+        this.log(`\u6388\u6743\u5931\u8D25[${auth.code}]\uFF1A${msg}`);
         this.ttlxjRetry = 0;
+        this.ttlxjSame = 0;
         return;
       }
       this.ttlxjRetry = 0;
+      this.ttlxjSame = 0;
+      this.ttlxjLastErr = "";
       const ai = (auth.data || {}).authInfo || {};
       this.sessionId = ai.sessionId || "";
       this.tokenId = ai.tokenId || "";
