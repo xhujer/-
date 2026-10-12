@@ -35,15 +35,15 @@ grabAmount = input,"5",tag=话费券面额,desc=匹配包含指定面额的奖�
 ahAmount = input,"",tag=安徽红包面额,desc=例如 50；留空则不执行（周五 10 点开抢）
 requestNode = input,"",tag=请求策略或节点,desc=留空按当前分流
 provinceOverride = select,"","安徽","浙江","新疆","河南","云南","辽宁",tag=号码归属地,desc=默认自动识别；识别失败时手动选择
-zjDecodeData = input,"",tag=浙江能量站票据,desc=浙江号码签到用；微信打开浙江联通能量站页面，把网址里 decodeData= 后面那串粘进来
-zjToken = input,"",tag=浙江任务Token,desc=做任务用（可选）；抓包 mini.zj186.com 请求里的 access_token
-zjOpenId = input,"",tag=浙江open_id,desc=做任务用（可选）；同上的 open_id
 cloudImageFid = input,"",tag=云盘人脸图片 FID,desc=AI入戏指定图片，留空则自动从云盘挑选
 
 [Script]
 http-request ^https:\/\/(?:m\.client\.10010\.com\/mobileService\/(?:onLine|login|v1\/login)\.htm|(?:loginxx|loginhl)\.10010\.com\/mobileService\/(?:onLine|login_vcode_member)\.htm) script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,requires-body=true,timeout=30,tag=🔵中国联通抓取账号,enable={capture}
 
-cron {cron} script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🔵中国联通自动任务,argument=[{queryOnly},{enableSign},{enableLtzf},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{marketTask},{marketDraw},{marketClaim},{hometownEnable},{wostoreMaxDraw},{grabCoupon},{grabAmount},{ahAmount},{requestNode},{provinceOverride},{cloudImageFid},{zjDecodeData},{zjToken},{zjOpenId}]
+http-request ^https:\/\/(?:wechat|mini)\.zj186\.com\/ script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,requires-body=true,timeout=30,tag=🟢浙江能量站,enable=true
+
+
+cron {cron} script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=1800,tag=🔵中国联通自动任务,argument=[{queryOnly},{enableSign},{enableLtzf},{enableTtxc},{enableMarket},{enableSecurity},{enableCloud},{enableWoread},{enableAiting},{enableWostore},{enableRegional},{marketTask},{marketDraw},{marketClaim},{hometownEnable},{wostoreMaxDraw},{grabCoupon},{grabAmount},{ahAmount},{requestNode},{provinceOverride},{cloudImageFid}]
 
 cron 58 9,17 * * * script-path = https://raw.githubusercontent.com/xhujer/-/refs/heads/main/chinaUnicom.js,timeout=600,tag=🔴中国联通抢兑,argument=[{grabAmount},{requestNode}]
 
@@ -51,4 +51,4 @@ cron 58 9 * * 5 script-path = https://raw.githubusercontent.com/xhujer/-/refs/he
 
 
 [Mitm]
-hostname = m.client.10010.com,loginxx.10010.com,loginhl.10010.com,activity.10010.com,act.10010.com,epay.10010.com,wocare.unisk.cn,backward.bol.wo.cn,contact.bol.wo.cn,m.jf.10010.com,uca.wo116114.com,ims.wo116114.com,ai.wo.cn,panservice.mail.wo.cn,s.pan.wo.cn,10010.woread.com.cn,woread.com.cn,pcc.woread.com.cn,uphone.wostore.cn,h5forphone.wostore.cn,uphone.wo-adv.cn,zy100.xj169.com,app.shangdu.com,wsm.wx.yn10010.com,weixin.linktech.hk
+hostname = m.client.10010.com, loginxx.10010.com, loginhl.10010.com, activity.10010.com, act.10010.com, epay.10010.com, wocare.unisk.cn, backward.bol.wo.cn, contact.bol.wo.cn, m.jf.10010.com, uca.wo116114.com, ims.wo116114.com, ai.wo.cn, panservice.mail.wo.cn, s.pan.wo.cn, 10010.woread.com.cn, woread.com.cn, pcc.woread.com.cn, uphone.wostore.cn, h5forphone.wostore.cn, uphone.wo-adv.cn, zy100.xj169.com, app.shangdu.com, wsm.wx.yn10010.com, weixin.linktech.hk, wechat.zj186.com, mini.zj186.com
