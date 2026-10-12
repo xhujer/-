@@ -5202,17 +5202,21 @@
 
   // chinaUnicom.source.js
   var CryptoJS = require_crypto_js();
-  var VERSION = "v1.2.1-loon.9";
+  var VERSION = "v1.2.1-loon.15";
   var STORE_KEY = "cu_accounts_v2";
   var DEVICE_KEY = "cu_device_ids_v2";
   var UA = "Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}";
   var H5_UA = "Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.146 Mobile Safari/537.36; unicom{version:android@11.0802,desmobile:0};devicetype{deviceBrand:Xiaomi,deviceModel:MI 8}";
   var AITING_JF_UA = "Mozilla/5.0 (Linux; Android 12; Redmi K30 Pro Build/SKQ1.220303.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.159 Mobile Safari/537.36 WoReaderApp/Android";
   var SEC_APP_UA = "ChinaUnicom4.x/12.3.1 (com.chinaunicom.mobilebusiness; build:77; iOS 16.6.0) Alamofire/4.7.3 unicom{version:iphone_c@12.0301}";
+  var CLOUD_UPLOAD_NAME = "8648";
+  var TTXC_GARBAGE_WAIT_MS = 28e3;
+  var TTXC_GROW_MAX = 20;
+  var TTXC_NEWBIE_STEPS = ["G01", "G02", "G03", "G03_2", "G04", "G05", "G09", "G10", "G11", "G12"];
   var WOSTORE_SIGN_CODE = "Points_Sign_2507";
-  var WOSTORE_LOGIN_ACTIVITY_ID = "HD2026033000125";
-  var WOSTORE_ACTIVITY_CODES = ["Points_Obtain_2507", "Points_Obtain_2506", "Points_Obtain_2505", "Points_Obtain_2504"];
-  var WOSTORE_LOTTERY_CODES = ["HD2026062200218", "Lottery_251201"];
+  var WOSTORE_LOGIN_ACTIVITY_ID = "HD2026092100322";
+  var WOSTORE_ACTIVITY_CODES = ["Points_Obtain_2507"];
+  var WOSTORE_LOTTERY_CODES = ["HD2026092100322"];
   var WOSTORE_POINTS_ACT_CODE = "Points_Exchange_2507";
   var WOSTORE_GOODS_1 = "2026031001";
   var WOSTORE_GOODS_10 = "2026031010";
@@ -5254,19 +5258,13 @@
     marketClaim: true,
     grabCoupon: false,
     grabAmount: "5",
-    ahFriday: false,
     ahAmount: "",
     queryOnly: false,
     requestNode: "",
     provinceOverride: "",
-    clearAllAccounts: false,
-    deleteLastAccount: false,
-    captureVerify: true,
+    accountAction: "\u4E0D\u64CD\u4F5C",
     cloudImageFid: "",
-    cloudUploadName: "8648",
     hometownEnable: false,
-    ttxcGarbageWait: 28,
-    ttxcGrowMax: 20,
     wostoreMaxDraw: 1
   };
   var isRequest = typeof $request !== "undefined";
@@ -5295,19 +5293,13 @@
     marketClaim: bool(arg.marketClaim, DEFAULTS.marketClaim),
     grabCoupon: isGrabJob || bool(arg.grabCoupon, DEFAULTS.grabCoupon),
     grabAmount: String(arg.grabAmount || DEFAULTS.grabAmount),
-    ahFriday: isAhJob || bool(arg.ahFriday, DEFAULTS.ahFriday),
     ahAmount: String(arg.ahAmount || DEFAULTS.ahAmount),
     queryOnly: bool(arg.queryOnly, DEFAULTS.queryOnly),
     requestNode: String(arg.requestNode || DEFAULTS.requestNode).trim(),
     provinceOverride: String(arg.provinceOverride || DEFAULTS.provinceOverride).trim(),
-    clearAllAccounts: bool(arg["清空全部账号"] !== void 0 ? arg["清空全部账号"] : arg.clearAllAccounts, DEFAULTS.clearAllAccounts),
-    deleteLastAccount: bool(arg["\u5220\u9664\u672B\u4F4D\u8D26\u53F7"] !== void 0 ? arg["\u5220\u9664\u672B\u4F4D\u8D26\u53F7"] : arg.deleteLastAccount, DEFAULTS.deleteLastAccount),
-    captureVerify: bool(arg["\u6293\u5305\u6821\u9A8C\u624B\u673A\u53F7"] !== void 0 ? arg["\u6293\u5305\u6821\u9A8C\u624B\u673A\u53F7"] : arg.captureVerify, DEFAULTS.captureVerify),
+    accountAction: String(arg.accountAction || DEFAULTS.accountAction).trim(),
     cloudImageFid: String(arg.cloudImageFid || DEFAULTS.cloudImageFid).trim(),
-    cloudUploadName: String(arg.cloudUploadName || DEFAULTS.cloudUploadName).trim(),
     hometownEnable: bool(arg.hometownEnable, DEFAULTS.hometownEnable),
-    ttxcGarbageWait: num(arg.ttxcGarbageWait, DEFAULTS.ttxcGarbageWait),
-    ttxcGrowMax: num(arg.ttxcGrowMax, DEFAULTS.ttxcGrowMax),
     wostoreMaxDraw: num(arg.wostoreMaxDraw, DEFAULTS.wostoreMaxDraw)
   };
   function readJSON(key, fallback) {
@@ -5365,6 +5357,7 @@
   function mask(s) {
     s = String(s || "");
     if (/^\d{11}$/.test(s)) return `${s.slice(0, 3)}****${s.slice(7)}`;
+    if (s.indexOf("*") >= 0) return s;
     if (s.length >= 8) return `${s.slice(0, 4)}******${s.slice(-4)}`;
     return "****";
   }
@@ -5556,12 +5549,12 @@
     return true;
   }
   async function captureAccount() {
-    if (CFG.deleteLastAccount) {
+    if (CFG.accountAction === "\u5220\u9664\u672B\u4F4D\u8D26\u53F7") {
       removeLastAccount();
       $done({});
       return;
     }
-    if (CFG.clearAllAccounts) {
+    if (CFG.accountAction === "\u6E05\u7A7A\u5168\u90E8\u8D26\u53F7") {
       const accounts = readJSON(STORE_KEY, []);
       writeJSON(STORE_KEY, []);
       if (accounts.length) {
@@ -5596,7 +5589,7 @@
     // "\u540C\u4E00\u4E2A\u53F7\u91CD\u65B0\u767B\u5F55"\uFF09\u3002\u5DF2\u6709\u540C token \u8BB0\u5F55\u65F6\u8DF3\u8FC7\uFF0C\u4E0D\u4EA7\u751F\u989D\u5916\u8BF7\u6C42\u3002
     let mobile = "";
     const knownIdx = list.findIndex((x) => x.tokenOnline === token);
-    if (knownIdx < 0 && CFG.captureVerify) {
+    if (knownIdx < 0) {
       try {
         const vr = await http("post", "https://m.client.10010.com/mobileService/onLine.htm", {
           headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA },
@@ -5893,9 +5886,9 @@
       }
       if (auth.code !== "0000") {
         this.ttlxjRetry = safeInt(this.ttlxjRetry) + 1;
-        if (this.ttlxjRetry < 3) {
-          this.log(`\u6388\u6743\u672A\u5C31\u7EEA\uFF1A${responseMessage(auth)}\uFF0C\u7B49\u5F85\u540E\u91CD\u8BD5(${this.ttlxjRetry}/3)`);
-          await sleep(1500);
+        if (this.ttlxjRetry < 30) {
+          this.log(`\u6388\u6743\u672A\u5C31\u7EEA\uFF1A${responseMessage(auth)}\uFF0C\u7B49\u5F85\u540E\u91CD\u8BD5(${this.ttlxjRetry}/30)`);
+          await sleep(2000);
           return this.ttlxjTask();
         }
         this.log(`\u6388\u6743\u5931\u8D25[${auth.code}]\uFF1A${responseMessage(auth)}`);
@@ -5962,7 +5955,9 @@
       this.ttxcToken = r.token || "";
       this.ttxcCharge = u.chargeLevel || {};
       this.ttxcNewbie = u.newbieList;
+      this.ttxcNick = u.nickName || "";
       this.log(`\u901A\u901A\u4E61\u6751\u767B\u5F55\u6210\u529F\uFF0C\u78B3\u80FD\u91CF${this.ttxcCharge.carbonNum || 0}g\uFF0C\u751F\u6001\u503C${this.ttxcCharge.ecologyAmount || 0}`, true);
+      if (!this.ttxcNick && this.ttxcNewbieDone()) await this.ttxcUpdateNick();
       return true;
     }
     async ttxcTask() {
@@ -5985,7 +5980,7 @@
       if (garbage) {
         const s = await this.ttxcPost("/user/v1/start", {});
         if (s.data && s.data.answerNo) {
-          await sleep(CFG.ttxcGarbageWait * 1e3);
+          await sleep(TTXC_GARBAGE_WAIT_MS);
           await this.ttxcPost("/user/v1/finish", { answerNo: s.data.answerNo });
           this.log("\u5783\u573E\u5206\u7C7B\u4EFB\u52A1\u5DF2\u6267\u884C");
         }
@@ -5993,6 +5988,21 @@
       await this.ttxcFarm(tasks);
       tasks = await this.ttxcTasks();
       await this.ttxcClaim(tasks);
+    }
+    ttxcNewbieDone() {
+      const steps = this.ttxcNewbie;
+      return !Array.isArray(steps) || TTXC_NEWBIE_STEPS.every((x) => steps.indexOf(x) >= 0);
+    }
+    async ttxcUpdateNick() {
+      const nick = String(this.accountMobile || this.mobile || "").slice(-4) || String(1000 + Math.floor(Math.random() * 9000));
+      const r = await this.ttxcPost("/user/v1/updateNick", { nickName: nick });
+      if (r.code === 0) {
+        this.ttxcNick = nick;
+        this.log(`\u901A\u901A\u4E61\u6751: \u5DF2\u8BBE\u7F6E\u6635\u79F0 ${nick}`);
+        return true;
+      }
+      this.log(`\u901A\u901A\u4E61\u6751: \u8BBE\u7F6E\u6635\u79F0\u5931\u8D25[${r.code}]\uFF1A${responseMessage(r)}`);
+      return false;
     }
     async ttxcSign() {
       const info = await this.ttxcPost("/client/v1/sign/info", {});
@@ -6051,10 +6061,11 @@
       }
       return null;
     }
-    async ttxcHarvest(land) {
+    async ttxcHarvest(land, newbie = false) {
       const p = land.plant || {};
       if (!p.plantId) return false;
-      const r = await this.ttxcPost("/plant/v1/harvest", { landIndex: land.landIndex, plantId: p.plantId });
+      const path = newbie ? "/plant/v1/newHarvest" : "/plant/v1/harvest";
+      const r = await this.ttxcPost(path, { landIndex: land.landIndex, plantId: p.plantId });
       if (r.code === 0) {
         this.log(`\u5730\u5757${land.landIndex}\u6536\u83B7\u6210\u529F`);
         await this.ttxcPlant(land.landIndex);
@@ -6075,7 +6086,7 @@
           await this.ttxcHarvest(land);
           continue;
         }
-        for (let n = 0; n < CFG.ttxcGrowMax && land && land.status === 3; n++) {
+        for (let n = 0; n < TTXC_GROW_MAX && land && land.status === 3; n++) {
           land = await this.ttxcChargeLand(land);
           if (land && land.status === 2) {
             await this.ttxcHarvest(land);
@@ -6136,24 +6147,41 @@
     }
     async wocareActivity(a) {
       const tasks = await this.wocareApi("getDrawTask", { token: this.wocareToken, channelType: "wocareMBHServiceLife1", type: a.id, apiCode: "getDrawTask" });
-      for (const t of (tasks.data || {}).taskList || []) {
-        if (!t.taskStatus || String(t.taskStatus) === "0") {
-          for (const step of ["1", "4"]) {
-            const x = await this.wocareApi("completeTask", { token: this.wocareToken, channelType: "wocareMBHServiceLife1", task: t.id, taskStep: step, type: a.id, apiCode: "completeTask" });
-            this.log(`\u8054\u901A\u795D\u798F[${a.name}] ${t.title || ""}\uFF1A${responseMessage(x)}`);
-            await sleep(500);
-          }
-        }
+      const list = ((tasks.data || {}).taskList) || [];
+      if (list.length) this.log(`\u8054\u901A\u795D\u798F: [${a.name}] \u67E5\u8BE2\u5230 ${list.length} \u4E2A\u4EFB\u52A1`);
+      for (const t of list) {
+        const st = t.taskStatus;
+        if (String(st) === "0" || !st) await this.wocareComplete(a, t, "1");
       }
       const init = await this.wocareApi("loadInit", { token: this.wocareToken, channelType: "wocareMBHServiceLife1", type: a.id, apiCode: "loadInit" });
-      if (init.resultCode !== "0000") return;
+      if (init.resultCode !== "0000") {
+        this.log(`\u8054\u901A\u795D\u798F: [${a.name}] \u521D\u59CB\u5316\u5931\u8D25: ${init.resultMsg || init.resultDesc || responseMessage(init)}`);
+        return;
+      }
       const d = init.data || {};
-      let count = a.id === 2 ? (d.data || {}).isPartake ? 0 : 1 : a.id === 3 ? safeInt(d.raffleCountValue) : safeInt(d.mhRaffleCountValue);
+      let count = a.id === 2 ? ((d.data || {}).isPartake ? 0 : 1) : a.id === 3 ? safeInt(d.raffleCountValue) : safeInt(d.mhRaffleCountValue);
+      if (count > 0) this.log(`\u8054\u901A\u795D\u798F: [${a.name}] \u53EF\u62BD\u5956 ${count} \u6B21`);
       while (count-- > 0) {
         const x = await this.wocareApi("luckDraw", { token: this.wocareToken, channelType: "wocareMBHServiceLife1", zActiveModuleGroupId: d.zActiveModuleGroupId, type: a.id, apiCode: "luckDraw" });
         const prize = (((x.data || {}).data || {}).prize || {}).prizeName;
-        this.log(`\u8054\u901A\u795D\u798F[${a.name}]\uFF1A${prize || responseMessage(x)}`, !!prize);
+        if (prize) this.log(`\u8054\u901A\u795D\u798F: [${a.name}] \u62BD\u5956\u7ED3\u679C ${prize}`, true);
+        else if (x.resultCode !== "0000") this.log(`\u8054\u901A\u795D\u798F: [${a.name}] \u62BD\u5956\u5931\u8D25: ${x.resultMsg || x.resultDesc || responseMessage(x)}`);
+        else this.log(`\u8054\u901A\u795D\u798F: [${a.name}] \u62BD\u5956\u5B8C\u6210\uFF08\u672A\u4E2D\u5956\uFF09`);
         await sleep(1500);
+      }
+    }
+    async wocareComplete(a, task, step) {
+      const title = task.title || task.taskName || "";
+      const action = step === "1" ? "\u9886\u53D6\u4EFB\u52A1" : "\u5B8C\u6210\u4EFB\u52A1";
+      const x = await this.wocareApi("completeTask", { token: this.wocareToken, channelType: "wocareMBHServiceLife1", task: task.id, taskStep: step, type: a.id, apiCode: "completeTask" });
+      if (x.resultCode === "0000") {
+        this.log(`\u8054\u901A\u795D\u798F: [${a.name}] ${action}[${title}]\u6210\u529F`);
+        if (step === "1") {
+          await sleep(1000);
+          await this.wocareComplete(a, task, "4");
+        }
+      } else {
+        this.log(`\u8054\u901A\u795D\u798F: [${a.name}] ${action}[${title}]\u5931\u8D25: ${x.resultMsg || x.resultDesc || responseMessage(x)}`);
       }
     }
     marketHeaders(token) {
@@ -6264,13 +6292,10 @@
       }
       if (CFG.hometownEnable) {
         await this.hometownTask(this.cloudToken);
-        this.cloudDisk.uploadedFileCount = (this.hometownUploadedFiles || []).length ? 1 : 0;
+        this.cloudDisk.uploadedFileCount = this.hometownUploaded ? 1 : 0;
       }
       await this.islandTask(this.cloudToken);
       await this.cloudClean();
-    }
-    cloudUploadName() {
-      return String(CFG.cloudUploadName || "8648").trim() || "8648";
     }
     cloudEncrypt(text, token) {
       const key = String(token || "").padEnd(16, " ").slice(0, 16);
@@ -6323,7 +6348,7 @@
       }
     }
     async listUploadNamedFiles(maxPages = 4) {
-      const name = this.cloudUploadName();
+      const name = CLOUD_UPLOAD_NAME;
       if (!name) return [];
       const pattern = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\(\\d+\\))?(?:\\.[^.]+)?$`);
       const matched = [], seen = new Set();
@@ -6946,10 +6971,10 @@
       if (!fileIds.length) {
         const named = uploadedCount > 0 ? await this.listUploadNamedFiles() : [];
         if (named.length) {
-          this.log(`\u4E91\u76D8\u4EFB\u52A1: \u667A\u80FD\u6E05\u7406\u672A\u8BC6\u522B\u5230\u91CD\u590D\u9879\uFF0C\u4F46\u6839\u76EE\u5F55\u68C0\u6D4B\u5230${named.length}\u4E2A[${this.cloudUploadName()}]\u7CFB\u5217\u6587\u4EF6: ${preview(named)}`);
+          this.log(`\u4E91\u76D8\u4EFB\u52A1: \u667A\u80FD\u6E05\u7406\u672A\u8BC6\u522B\u5230\u91CD\u590D\u9879\uFF0C\u4F46\u6839\u76EE\u5F55\u68C0\u6D4B\u5230${named.length}\u4E2A[${CLOUD_UPLOAD_NAME}]\u7CFB\u5217\u6587\u4EF6: ${preview(named)}`);
           const deleted = await this.deleteRootFiles(named);
           if (this.cloudDisk) this.cloudDisk.uploadedFileCount = 0;
-          this.log(deleted ? `\u4E91\u76D8\u4EFB\u52A1: \u5DF2\u901A\u8FC7\u5B98\u65B9\u5220\u9664\u63A5\u53E3\u6E05\u7406${deleted}\u4E2A[${this.cloudUploadName()}]\u7CFB\u5217\u6587\u4EF6` : `\u4E91\u76D8\u4EFB\u52A1: [${this.cloudUploadName()}]\u7CFB\u5217\u6587\u4EF6\u5220\u9664\u5931\u8D25`);
+          this.log(deleted ? `\u4E91\u76D8\u4EFB\u52A1: \u5DF2\u901A\u8FC7\u5B98\u65B9\u5220\u9664\u63A5\u53E3\u6E05\u7406${deleted}\u4E2A[${CLOUD_UPLOAD_NAME}]\u7CFB\u5217\u6587\u4EF6` : `\u4E91\u76D8\u4EFB\u52A1: [${CLOUD_UPLOAD_NAME}]\u7CFB\u5217\u6587\u4EF6\u5220\u9664\u5931\u8D25`);
         } else {
           if (this.cloudDisk) this.cloudDisk.uploadedFileCount = 0;
           this.log("\u4E91\u76D8\u4EFB\u52A1: \u65E0\u91CD\u590D\u6587\u4EF6");
@@ -6964,9 +6989,9 @@
       }
       const named2 = uploadedCount > 0 ? await this.listUploadNamedFiles() : [];
       if (named2.length) {
-        this.log(`\u4E91\u76D8\u4EFB\u52A1: \u667A\u80FD\u6E05\u7406\u540E\u6839\u76EE\u5F55\u4ECD\u68C0\u6D4B\u5230${named2.length}\u4E2A[${this.cloudUploadName()}]\u7CFB\u5217\u6587\u4EF6: ${preview(named2)}`);
+        this.log(`\u4E91\u76D8\u4EFB\u52A1: \u667A\u80FD\u6E05\u7406\u540E\u6839\u76EE\u5F55\u4ECD\u68C0\u6D4B\u5230${named2.length}\u4E2A[${CLOUD_UPLOAD_NAME}]\u7CFB\u5217\u6587\u4EF6: ${preview(named2)}`);
         const deleted = await this.deleteRootFiles(named2);
-        if (deleted) this.log(`\u4E91\u76D8\u4EFB\u52A1: \u5DF2\u901A\u8FC7\u5B98\u65B9\u5220\u9664\u63A5\u53E3\u8865\u5145\u6E05\u7406${deleted}\u4E2A[${this.cloudUploadName()}]\u7CFB\u5217\u6587\u4EF6`);
+        if (deleted) this.log(`\u4E91\u76D8\u4EFB\u52A1: \u5DF2\u901A\u8FC7\u5B98\u65B9\u5220\u9664\u63A5\u53E3\u8865\u5145\u6E05\u7406${deleted}\u4E2A[${CLOUD_UPLOAD_NAME}]\u7CFB\u5217\u6587\u4EF6`);
       }
       if (this.cloudDisk) this.cloudDisk.uploadedFileCount = 0;
       this.log("\u4E91\u76D8\u4EFB\u52A1: \u4E91\u76D8\u91CD\u590D\u6587\u4EF6\u6E05\u7406\u5B8C\u6210");
@@ -7094,8 +7119,11 @@
       const mobile = this.accountMobile;
       const referer = `https://panservice.mail.wo.cn/h5/activitymobile/fileUploadActive?touchpoint=300200030001&type=06&ticket=${ticket}&version=iphone_c%4012.0801&timestamp=${nowMs()}&desmobile=${mobile}&num=0&postage=01addda9786dc7eb5ca0eacd9acd664a&activityId=${HOMETOWN_OPEN_ACTIVITY_ID}&clientid=1001000003&userNumber=${mobile}`;
       const res = await this.postJSON("https://panservice.mail.wo.cn/activity/openActivity", { activityId: HOMETOWN_LOTTERY_ACTIVITY_ID, provinceCode, provinceName }, this.hometownHeaders(token, { Referer: referer }), { timeout: 15000 });
-      this.log(`\u5BB6\u4E61\u6253\u5361: \u5F00\u542F\u7ED3\u679C ${res.msg || (res.meta || {}).message || "\u54CD\u5E94\u672A\u5305\u542B\u4E1A\u52A1\u72B6\u6001"}`);
-      return String((res.meta || {}).code) === "200";
+      const ok = String((res.meta || {}).code) === "200";
+      const msg = res.msg || (res.meta || {}).message || "\u54CD\u5E94\u672A\u5305\u542B\u4E1A\u52A1\u72B6\u6001";
+      if (ok) this.log(`\u5BB6\u4E61\u6253\u5361: \u5F00\u542F\u6210\u529F`);
+      else this.log(`\u5BB6\u4E61\u6253\u5361: \u6D3B\u52A8\u4E0D\u53EF\u7528\uFF08${msg}\uFF09\uFF0C\u8DF3\u8FC7\u4E0A\u4F20\u4E0E\u62BD\u5956\uFF1B\u82E5\u957F\u671F\u5982\u6B64\u53EF\u5173\u95ED\u201C\u4E91\u76D8\u5BB6\u4E61\u6253\u5361\u201D\u5F00\u5173`);
+      return ok;
     }
     async hometownLottery(token) {
       if (!token) return;
@@ -8351,7 +8379,7 @@
       if (r.yunnan) await this.yunnanTask();
       if (r.liaoning) await this.liaoningTask();
       if (r.anhui) {
-        if (!CFG.ahFriday || !CFG.ahAmount) {
+        if (!CFG.ahAmount) {
           this.log("\u5DF2\u8BC6\u522B\u5B89\u5FBD\u53F7\u7801\uFF1B\u8D85\u7EA7\u661F\u671F\u4E94\u9700\u5F00\u542F\u5F00\u5173\u5E76\u586B\u5199\u7EA2\u5305\u9762\u989D");
         } else if (CFG.queryOnly) this.log(`\u5B89\u5FBD\u8D85\u7EA7\u661F\u671F\u4E94\uFF1A[\u67E5\u8BE2\u6A21\u5F0F] \u76EE\u6807\u9762\u989D${CFG.ahAmount}\u5143\uFF08\u4EC5\u5468\u4E9410\u70B9\u6267\u884C\uFF09`);
         else await this.anhuiTask();
@@ -8653,7 +8681,7 @@
   };
   async function main() {
     const accounts = readJSON(STORE_KEY, []);
-    if (CFG.deleteLastAccount) {
+    if (CFG.accountAction === "\u5220\u9664\u672B\u4F4D\u8D26\u53F7") {
       removeLastAccount();
       $done();
       return;
