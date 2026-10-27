@@ -1,10 +1,13 @@
 #!name=小黑盒签到与任务
 #!desc=打开小黑盒自动保存账号；每天定时签到并完成分享帖子/游戏详情/游戏评价、发布内容与发表游戏评价，全部以服务器回查状态为准
-#!author=Ming
+#!author=Ming · Loon 改进版
 #!homepage=https://github.com/xhujer/-
 #!icon=https://api.xiaoheihe.cn/favicon.ico
+#!system=iOS,iPadOS
+#!system_version=15
 #!loon_version=3.5.1(983)
 #!date=2026-10-27
+#!version=3.2.2
 #!tag=小黑盒,签到,任务
 #!type=normal
 
@@ -16,9 +19,9 @@ cookieCapture = switch,true,type=boolean,tag=获取账号,desc=打开小黑盒 A
 
 [Script]
 
-request if ${url} ~= /^https:\/\/api\.xiaoheihe\.cn\/.*[?&](?:heybox_id|user_id)=/ then script("https://x0.at/j3ed.js") with enable=${cookieCapture}, tag="小黑盒获取账号", timeout=20
+request if ${url} ~= /^https:\/\/api\.xiaoheihe\.cn\/.*[?&](?:heybox_id|user_id)=/ then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/xiaoheihe.js") with enable=${cookieCapture}, tag="小黑盒获取账号", timeout=20
 
-cron ${cron} then script("https://x0.at/j3ed.js", `{"dailyTasks":true,"publishTask":true,"signWait":30,"signMode":"app","reviewTask":true}`) with enable=true, tag="小黑盒签到与任务", timeout=600
+cron ${cron} then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/xiaoheihe.js", `{"dailyTasks":true,"publishTask":true,"signWait":30,"signMode":"app","reviewTask":true}`) with enable=true, tag="小黑盒签到与任务", timeout=600
 
 [Mitm]
 
