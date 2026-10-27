@@ -51,6 +51,7 @@ const STEP_EMOJI = {
 
 let FORGE = null;
 let RSA_PUBLIC_KEY = null;
+let PUBLIC_KEY_B64 = PUBLIC_KEY;
 let DEADLINE = 0;
 const SENSITIVE_VALUES = new Set();
 
@@ -683,10 +684,50 @@ function seedRandom() {  if (!FORGE || !FORGE.random) return;
   } catch (_) {}
 }
 
+async function refreshPublicKey() {
+  try {
+    const response = await loonHttp("GET", {
+      url: `${BASE_URL}/api/web/open/encrypt/public-key`,
+      timeout: 8000,
+    });
+    if (response.status < 200 || response.status >= 300) return false;
+
+    let body;
+    try {
+      body = JSON.parse(response.body);
+    } catch (_) {
+      return false;
+    }
+
+    const data = body && body.data;
+    const candidates = [];
+    if (typeof data === "string") candidates.push(data);
+    if (data && typeof data === "object") candidates.push(data.publicKey, data.public_key, data.key);
+    candidates.push(body && body.publicKey, body && body.public_key);
+
+    const key = candidates.find((v) => typeof v === "string" && v.indexOf("MIIB") > -1);
+    if (!key) return false;
+
+    const cleaned = key.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----/g, "")
+      .replace(/\\n|\s/g, "");
+    // 先验证能被 forge 解析，再替换，避免坏公钥把后续请求全打挂
+    const lines = cleaned.match(/.{1,64}/g) || [];
+    FORGE.pki.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----`);
+
+    PUBLIC_KEY_B64 = cleaned;
+    RSA_PUBLIC_KEY = null;
+    debugLog("已刷新服务端公钥");
+    return true;
+  } catch (error) {
+    debugLog(`公钥刷新失败，沿用内置：${errText(error)}`);
+    return false;
+  }
+}
+
 function getPublicKey() {
   if (RSA_PUBLIC_KEY) return RSA_PUBLIC_KEY;
   if (!FORGE) throw new Error("加密库尚未初始化");
-  const lines = PUBLIC_KEY.match(/.{1,64}/g) || [];
+  const lines = PUBLIC_KEY_B64.match(/.{1,64}/g) || [];
   const pem = `-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----`;
   RSA_PUBLIC_KEY = FORGE.pki.publicKeyFromPem(pem);
   return RSA_PUBLIC_KEY;
@@ -844,7 +885,7 @@ class TomatoClient {
       browseTarget: (task && task.browseTarget) || "",
     };
     return this.call("POST", "/api/web/member/tomato/tasks/complete", payload, {
-      retries: 3,
+      retries: 4,
       baseSleep: 2.5,
     });
   }
@@ -877,7 +918,7 @@ class TomatoClient {
       "GET",
       `/api/web/member/tomato/friends/${encodeURIComponent(friendUserId)}/home`,
       null,
-      { retries: 1, baseSleep: 1.0 }
+      { retries: 2, baseSleep: 1.0 }
     );
     return (result && result.data) || {};
   }
@@ -898,7 +939,7 @@ class TomatoClient {
         "POST",
         "/api/web/member/tomato/energy/use",
         { syncHomeInfo: true },
-        { retries: 3, baseSleep: 2.5 }
+        { retries: 4, baseSleep: 2.5 }
       );
     } catch (error) {
       const message = errText(error);
@@ -1079,14 +1120,15 @@ async function collectFriendEnergy(client, logs) {
 
   // 先用 friendStatus 预筛（V5 的做法，少一个量级的请求）；
   // 字段缺失时不过滤，避免因格式变化漏收。
-  const candidates = friends.filter((friend) => {
-    if (!friend || !friend.friendTomatoUserId) return false;
-    const status = friend.friendStatus;
-    if (status === undefined || status === null || status === "") return true;
-    return String(status) === "0";
-  });
-
-  debugLog(`好友 ${friends.length} 人，候选 ${candidates.length} 人`);
+  // 上游是全量检查，再按 canSteal 判定；这里保留全量，只把 friendStatus=="0" 排前面
+  const claimable = [];
+  const others = [];
+  for (const friend of friends) {
+    if (!friend || !friend.friendTomatoUserId) continue;
+    (String(friend.friendStatus) === "0" ? claimable : others).push(friend);
+  }
+  const candidates = claimable.concat(others);
+  debugLog(`好友 ${friends.length} 人（可收标记 ${claimable.length} 人），逐个检查`);
 
   for (const friend of candidates) {
     const friendId = String(friend.friendTomatoUserId);
@@ -1348,6 +1390,7 @@ async function main() {
   }
 
   await loadForge();
+  await refreshPublicKey();
 
   console.log(
     `[${SCRIPT_NAME}] 开始处理 ${accounts.length} 个账号，预算 ${MAX_RUNTIME_SEC}s，浇水 ${WATER_TIMES} 次`
