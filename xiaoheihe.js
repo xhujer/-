@@ -1945,6 +1945,7 @@ async function runAccount(account, index, options, lines) {
     lines.push("🔏 签名模式：web（本地计算，无第三方服务）");
   }
   let snapshot = await fetchSnapshot(account);
+  const nickname = toText(snapshot.nickname);
   const coinBefore = Number(snapshot.coin) || 0;
   lines.push(
     "",
@@ -1992,12 +1993,6 @@ async function runAccount(account, index, options, lines) {
   const relevant = snapshot.tasks.filter(
     (task) => !isSignTask(task) && isTaskEnabled(task, options)
   );
-  if (!options.publishTask && snapshot.tasks.some((task) => task.taskId === "33")) {
-    lines.push("⚙️ 发布内容：已按脚本开关跳过（未发帖）");
-  }
-  if (!options.reviewTask && snapshot.tasks.some((task) => task.taskId === "24")) {
-    lines.push("⚙️ 游戏评价：已按脚本开关跳过（不发评）");
-  }
 
   for (let i = 0; i < relevant.length; i += 1) {
     const task = relevant[i];
@@ -2066,7 +2061,7 @@ async function runAccount(account, index, options, lines) {
   if (waiting.length) {
     lines.push("▫️ 仍待完成：" + waiting.map((task) => task.title).join("、"));
   }
-  return { signOk, tasksOk: waiting.length === 0 };
+  return { signOk, tasksOk: waiting.length === 0, nickname };
 }
 
 async function runAutomation() {
@@ -2081,8 +2076,9 @@ async function runAutomation() {
     return;
   }
 
-  const lines = ["📌 签到与任务结果"];
+  const lines = [];
   const deadline = Date.now() + RUN_BUDGET_MS;
+  const nicknames = [];
   let signOkCount = 0;
   let taskOkCount = 0;
   let skipped = 0;
@@ -2099,10 +2095,12 @@ async function runAutomation() {
         Object.assign({}, options, { deadline }),
         lines
       );
+      nicknames.push(result.nickname || "账号" + (i + 1) + "（" + maskId(accounts[i].heyboxId) + "）");
       if (result.signOk) signOkCount += 1;
       if (result.tasksOk) taskOkCount += 1;
     } catch (error) {
       const detail = String(error.message || error);
+      nicknames.push("账号" + (i + 1) + "（" + maskId(accounts[i].heyboxId) + "）");
       lines.push(
         "",
         "账号 " + (i + 1) + "（" + maskId(accounts[i].heyboxId) + "）",
@@ -2113,24 +2111,29 @@ async function runAutomation() {
     if (i < accounts.length - 1) await sleep(1200);
   }
 
-  lines.push(
-    "",
+  const allDone = signOkCount === accounts.length && taskOkCount === accounts.length && !skipped;
+  const nicknameLines = nicknames.map((name) => "用户昵称：" + name).join("\n");
+  const details = [
+    nicknameLines,
+    lines.join("\n"),
     "签到成功：" + signOkCount + "/" + accounts.length,
-    "任务完成：" + taskOkCount + "/" + accounts.length,
-    "版本：" + SCRIPT_VERSION
-  );
-  const allSign = signOkCount === accounts.length;
-  const allTask = taskOkCount === accounts.length;
+    "任务完成：" + taskOkCount + "/" + accounts.length
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  console.log(details);
   notify(
-    "===小黑盒===",
-    skipped
-      ? "⏱ 时间预算不足，部分账号未执行"
-      : allSign && allTask
-        ? "✅ 服务器已确认完成"
-        : allTask
-          ? "⚠️ 任务已完成，签到未确认"
-          : "⚠️ 存在未完成任务",
-    lines.join("\n")
+    "📌 小黑盒每日签到",
+    allDone
+      ? "今天已完成签到"
+      : skipped
+        ? "时间预算不足"
+        : taskOkCount < accounts.length
+          ? "存在未完成任务"
+          : "签到未确认",
+    allDone ? nicknameLines : details
   );
 }
 
