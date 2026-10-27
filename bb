@@ -1,5 +1,5 @@
 #!name = BiliBili每日等级任务
-#!desc = 登录/观看/分享/投币 + 大积分签到 + 漫画签到
+#!desc = 登录/观看/分享/投币
 #!icon = https://x0.at/TIqg.png
 #!tag = B站,签到
 #!loon_version = 3.5.1(983)
