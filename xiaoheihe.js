@@ -550,9 +550,7 @@ function makeWebSignature(path, timeSec, nonce) {
 }
 
 function notify(title, subtitle, content) {
-  const detail = String(content == null ? "" : content);
-  console.log([String(title), String(subtitle), detail].join("\n"));
-  $notification.post(String(title), String(subtitle), detail);
+  $notification.post(String(title), String(subtitle), String(content == null ? "" : content));
 }
 
 function md5(input) {
@@ -1201,13 +1199,11 @@ async function webRequest(account, path, extraQuery, baseUrl, bodyData) {
 
 async function webGet(account, path, extraQuery, baseUrl) {
   const payload = await webRequest(account, path, extraQuery, baseUrl);
-  console.log("[官方接口/web] " + path + " status=" + apiFailureMessage(payload, "空"));
   return payload;
 }
 
 async function webPostForm(account, path, bodyData, extraQuery, baseUrl) {
   const payload = await webRequest(account, path, extraQuery, baseUrl, bodyData || {});
-  console.log("[官方接口/web] " + path + " status=" + apiFailureMessage(payload, "空"));
   return payload;
 }
 
@@ -1237,7 +1233,6 @@ async function webPostEncryptedReport(account, path, textPayload, extraQuery) {
     },
     reportPath
   );
-  console.log("[任务上报/web] " + path + " status=" + apiFailureMessage(payload, "空"));
   return payload;
 }
 
@@ -1283,7 +1278,6 @@ async function appGet(account, path, extraQuery, baseUrl) {
       path
     );
   });
-  console.log("[官方接口" + (webMode ? "/web" : "") + "] " + path + " status=" + apiFailureMessage(payload, "空"));
   return payload;
 }
 
@@ -1311,7 +1305,6 @@ async function appPostForm(account, path, extraQuery, bodyData, baseUrl) {
     },
     path
   );
-  console.log("[官方接口] " + path + " status=" + apiFailureMessage(payload, "空"));
   return payload;
 }
 
@@ -1345,7 +1338,6 @@ async function postEncryptedForm(account, path, textPayload, extraQuery, baseUrl
     },
     path
   );
-  console.log("[任务上报] " + path + " status=" + apiFailureMessage(payload, "空"));
   return payload;
 }
 
@@ -1538,7 +1530,7 @@ async function settleTask(account, task, detail) {
       snapshot
     };
   }
-  return { ok: false, message: task.title + "仍为待完成", snapshot };
+  return { ok: false, message: "仍为待完成", snapshot };
 }
 
 function isSignedState(state) {
@@ -1596,7 +1588,9 @@ async function readSignState(account) {
 function signWaitBudget(options) {
   const wanted = Number(options && options.signWait);
   const seconds = Number.isFinite(wanted) && wanted > 0 ? wanted : SIGN_WAIT_DEFAULT_SEC;
-  return Math.min(Math.max(seconds, SIGN_WAIT_MIN_SEC), SIGN_WAIT_MAX_SEC) * 1000;
+  const clamped = Math.min(Math.max(seconds, SIGN_WAIT_MIN_SEC), SIGN_WAIT_MAX_SEC);
+  if (typeof globalThis !== "undefined") globalThis.__xhhSignBudget = clamped;
+  return clamped * 1000;
 }
 
 async function confirmSignState(account, budgetMs) {
@@ -1625,8 +1619,6 @@ async function confirmSignState(account, budgetMs) {
 async function executeSign(account, options) {
   const budget = signWaitBudget(options);
   const half = Math.round(budget / 2);
-  console.log("[签到确认预算] " + Math.round(budget / 1000) + " 秒（每轮 " + Math.round(half / 1000) + " 秒）");
-  const diagnostics = [];
   let last = null;
   try {
     last = await readSignState(account);
@@ -1652,7 +1644,6 @@ async function executeSign(account, options) {
     try {
       payload = await appGet(account, PATH_SIGN);
     } catch (error) {
-      diagnostics.push("签到" + attempt + "=" + String(error.message || error).slice(0, 180));
       if (attempt < SIGN_ATTEMPTS) await sleep(SIGN_RETRY_DELAY_MS);
       continue;
     }
@@ -1660,14 +1651,9 @@ async function executeSign(account, options) {
       payload && payload.result && typeof payload.result === "object" ? payload.result : {};
     const signState = toText(result.state || result.sign_state);
     const signMessage = toText(payload && (payload.msg || payload.message));
-    diagnostics.push("签到" + attempt + "=" + shortPayload(payload));
     if (isLoginExpired(payload.status, signMessage)) {
       return { ok: false, expired: true, message: LOGIN_EXPIRED_HINT };
     }
-    console.log(
-      "[签到状态详情] " +
-        JSON.stringify({ attempt, status: toText(payload.status), state: signState, msg: signMessage })
-    );
     if (signState === "ignore" || /已签到|重复签到/.test(signMessage)) {
       let state = last;
       try {
@@ -1686,26 +1672,19 @@ async function executeSign(account, options) {
       return { ok: true, state: confirm.state, message: signDetailText(confirm.state) || "签到成功" };
     }
     if (confirm.expired) return { ok: false, expired: true, message: LOGIN_EXPIRED_HINT };
-    if (confirm.state) {
-      last = confirm.state;
-      diagnostics.push("状态" + attempt + "=" + confirm.state.raw);
-    }
+    if (confirm.state) last = confirm.state;
     if (attempt < SIGN_ATTEMPTS) await sleep(SIGN_RETRY_DELAY_MS);
   }
 
   const finalCheck = await confirmSignState(account, SIGN_FINAL_WAIT_MS);
   if (finalCheck.ok) return { ok: true, state: finalCheck.state, message: signDetailText(finalCheck.state) || "签到成功" };
   if (finalCheck.expired) return { ok: false, expired: true, message: LOGIN_EXPIRED_HINT };
-  if (finalCheck.state) {
-    last = finalCheck.state;
-    diagnostics.push("终检=" + last.raw);
-  }
+  if (finalCheck.state) last = finalCheck.state;
   return {
     ok: false,
     state: last,
     message:
-      "已提交但服务器未确认（返回 " + ((last && (last.state || last.message)) || "未知状态") + "）",
-    diagnostic: diagnostics.join(" | ")
+      "已提交但服务器未确认（返回 " + ((last && (last.state || last.message)) || "未知状态") + "）"
   };
 }
 
@@ -1986,9 +1965,6 @@ async function runAccount(account, index, options, lines) {
   if (signGain !== 0) {
     lines.push("💰 H币：" + coinBefore + " → " + coinAfterSign);
   }
-  if (!signOk && signResult && signResult.diagnostic) {
-    lines.push("🔍 签到诊断：" + signResult.diagnostic);
-  }
 
   const relevant = snapshot.tasks.filter(
     (task) => !isSignTask(task) && isTaskEnabled(task, options)
@@ -2041,7 +2017,7 @@ async function runAccount(account, index, options, lines) {
           (latest.awardText ? "（" + latest.awardText + "）" : "")
       );
     } else {
-      lines.push("❌ " + latest.title + "：" + result.message);
+      lines.push("❌" + latest.title + "：" + result.message);
     }
     await sleep(800);
   }
@@ -2059,7 +2035,7 @@ async function runAccount(account, index, options, lines) {
     (task) => !isSignTask(task) && isTaskEnabled(task, options) && task.state === WAITING_STATE
   );
   if (waiting.length) {
-    lines.push("▫️ 仍待完成：" + waiting.map((task) => task.title).join("、"));
+    lines.push("❌仍待完成：" + waiting.map((task) => task.title).join("、"));
   }
   return { signOk, tasksOk: waiting.length === 0, nickname };
 }
@@ -2112,29 +2088,23 @@ async function runAutomation() {
   }
 
   const allDone = signOkCount === accounts.length && taskOkCount === accounts.length && !skipped;
+  const keepHeader = accounts.length > 1;
+  const body = lines
+    .filter((line) => line && (keepHeader || !/^账号 \d+（/.test(line)))
+    .join("\n");
   const nicknameLines = nicknames.map((name) => "用户昵称：" + name).join("\n");
-  const details = [
-    nicknameLines,
-    lines.join("\n"),
-    "签到成功：" + signOkCount + "/" + accounts.length,
-    "任务完成：" + taskOkCount + "/" + accounts.length
-  ]
-    .filter(Boolean)
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  console.log(details);
-  notify(
-    "📌 小黑盒每日签到",
-    allDone
-      ? "今天已完成签到"
-      : skipped
-        ? "时间预算不足"
-        : taskOkCount < accounts.length
-          ? "存在未完成任务"
-          : "签到未确认",
-    allDone ? nicknameLines : details
-  );
+  const details = nicknameLines + (body ? "\n" + body : "");
+  const subtitle = allDone
+    ? "今天已完成签到"
+    : skipped
+      ? "时间预算不足"
+      : taskOkCount < accounts.length
+        ? "存在未完成任务"
+        : "签到未确认";
+  const content = details;
+  if (typeof globalThis !== "undefined") globalThis.__xhhRunDetail = content;
+  console.log("📌 小黑盒每日签到\n" + subtitle + "\n" + content);
+  notify("📌 小黑盒每日签到", subtitle, content);
 }
 
 async function main() {
