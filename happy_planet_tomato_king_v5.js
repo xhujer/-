@@ -1,8 +1,18 @@
 'use strict';
 
-const SCRIPT_NAME = "Happy Planet Tomato King V5";
+/*
+ * 快乐星球·茄皇 V6（多账号 / Loon）
+ * 基准：统一茄皇青龙版 v1.0.3（2026-07-26）
+ * 移植时保留的：开卡状态守卫、page-visit 上报、好友能量、浇水循环、
+ *               频控退避、阶段间隔、日志脱敏
+ * 有意去掉的：登录包 shareTomatoUserId 邀请绑定（默认 null，可手动填 inviter）
+ * 保留自 V5 的：好友按 friendStatus 预筛、分享前创建小程序二维码
+ */
+
+const SCRIPT_NAME = "快乐星球·茄皇 V6";
 const BASE_URL = "https://farmgames.ioutu.cn";
 const ACCOUNT_KEY = "QH";
+
 const PUBLIC_KEY =
   "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA70sK419vy3MabW3lEGlk" +
   "7Zh1u78OdnVlioVazp5Y46eBh+/TDqo/wZ9VrQ/4MmAtoP0vJ2vmwP5gqO3WPoj" +
@@ -18,79 +28,219 @@ const USER_AGENT =
   "MicroMessenger/8.0.75(0x18004b42) NetType/WIFI Language/zh_CN " +
   "miniProgram/wx532ecb3bdaaf92f9";
 
-const SUPPORTED_TASK_TYPES = new Set(["SIGN", "BROWSE", "SHARE"]);
-const FRIEND_TASK_TYPE = "FRIEND_STEAL_ENERGY";
-const FRIEND_STATUS_CLAIMABLE = "0";
-const REQUEST_TIMEOUT_MS = 20000;
-const REQUEST_RETRIES = 2;
 const FORGE_URLS = [
   "https://cdn.jsdelivr.net/npm/node-forge@1.3.1/dist/forge.min.js",
   "https://unpkg.com/node-forge@1.3.1/dist/forge.min.js",
   "https://raw.githubusercontent.com/digitalbazaar/forge/1.3.1/dist/forge.min.js",
 ];
 
+// 风控节奏（秒），与青龙版一致
+const ACTION_DELAY = [2.5, 5.0];
+const PHASE_DELAY = [8.0, 15.0];
+const ACCOUNT_DELAY = [30.0, 60.0];
+const RATE_LIMIT_DELAY = [15.0, 25.0];
+
+const REQUEST_TIMEOUT_MS = 20000;
+const STEP_ORDER = ["登录", "主页", "开卡", "签到", "浏览任务", "分享任务", "浇水", "信息"];
+const STEP_EMOJI = {
+  "登录": "🔑",
+  "主页": "🏠",
+  "开卡": "💳",
+  "签到": "📅",
+  "浏览任务": "🔍",
+  "分享任务": "📤",
+  "浇水": "💧",
+  "信息": "ℹ️",
+};
+
 let FORGE = null;
 let RSA_PUBLIC_KEY = null;
+let DEADLINE = 0;
+const SENSITIVE_VALUES = new Set();
 
 const CONFIG = readConfig();
 
+// ==================== 配置 ====================
+
 function readConfig() {
-  const args = parseScriptArguments(
-    typeof $argument !== "undefined" ? $argument : ""
-  );
+  const raw = typeof $argument !== "undefined" ? $argument : "";
+  const args = parseScriptArguments(raw);
 
   return {
-    accounts: loadAccounts(),
-    capture: parseBoolean(args[0], true),
-    notify: parseBoolean(args[1], true),
-    debug: parseBoolean(args[2], false),
+    capture: toBool(args.capture, true),
+    notify: toBool(args.notify, true),
+    debug: toBool(args.debug, false),
+    // 邀请人 tomatoUserId：默认空 = 不绑定任何人，登录包发 null
+    inviter: clean(args.inviter),
+    waterTimes: clampInt(args.waterTimes, 1, 20, 5),
+    maxRuntime: clampInt(args.maxRuntime, 60, 280, 240),
+    manualAccounts: parseManualAccounts(args.accounts),
+    accounts: [],
   };
 }
 
 function parseScriptArguments(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item ?? ""));
-  }
+  const result = {
+    capture: "",
+    notify: "",
+    debug: "",
+    inviter: "",
+    waterTimes: "",
+    maxRuntime: "",
+    accounts: "",
+  };
+  const keys = ["capture", "notify", "debug", "inviter", "waterTimes", "maxRuntime", "accounts"];
 
-  if (value && typeof value === "object") {
-    if (
-      Object.prototype.hasOwnProperty.call(value, "capture") ||
-      Object.prototype.hasOwnProperty.call(value, "notify") ||
-      Object.prototype.hasOwnProperty.call(value, "debug")
-    ) {
-      return [value.capture, value.notify, value.debug].map((item) => String(item ?? ""));
+  if (value === null || value === undefined || value === "") return result;
+
+  // 新版 Script 语法（Loon 3.5.1 / build 983+）：插件对象参数，
+  // script("x.js", {${capture}, ${notify}}) 传进来的是 Object，值保留 String/Number/Boolean
+  if (typeof value === "object" && !Array.isArray(value)) {
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        const item = value[key];
+        result[key] = item === null || item === undefined ? "" : String(item);
+      }
     }
-    return Object.values(value).map((item) => String(item ?? ""));
+    return result;
   }
 
-  const text = String(value ?? "").trim();
-  if (!text) return [];
+  // 旧版插件数组参数：argument=[{capture},{notify},{debug}]
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      if (index < keys.length) result[keys[index]] = clean(item);
+    });
+    return result;
+  }
 
-  if (text.startsWith("[") && text.endsWith("]")) {
+  let text = clean(value);
+  if (!text) return result;
+
+  // 也可能是被序列化成 JSON 的对象/数组字符串
+  if (text.charAt(0) === "{" || text.charAt(0) === "[") {
     try {
       const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) {
-        return parsed.map((item) => String(item ?? ""));
-      }
+      if (parsed && typeof parsed === "object") return parseScriptArguments(parsed);
     } catch (_) {}
   }
 
-  return text.split(",").map((item) => item.trim());
+  if (text.indexOf("=") > -1) {
+    // key=value,key=value 形式（旧版 argument="capture=true,notify=true"）
+    for (const pair of text.split(",")) {
+      const at = pair.indexOf("=");
+      if (at < 0) continue;
+      const key = pair.slice(0, at).trim();
+      const val = pair.slice(at + 1).trim().replace(/^["']|["']$/g, "");
+      if (key in result) result[key] = val;
+    }
+    return result;
+  }
+
+  text.split(",").forEach((item, index) => {
+    if (index < keys.length) result[keys[index]] = clean(item);
+  });
+  return result;
 }
 
-function cleanArgument(value) {
-  const text = String(value ?? "").trim();
-  if (!text || text === "null" || text === "undefined") return "";
-  return text;
+function clean(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).replace(/^\s+|\s+$/g, "").replace(/^["']|["']$/g, "");
 }
 
-function parseBoolean(value, fallback) {
-  const text = cleanArgument(value).toLowerCase();
+function toBool(value, fallback) {
+  const text = clean(value).toLowerCase();
   if (!text) return fallback;
-  if (["true", "1", "yes", "on", "开启"].includes(text)) return true;
-  if (["false", "0", "no", "off", "关闭"].includes(text)) return false;
+  if (["1", "true", "yes", "on", "开", "启用"].indexOf(text) > -1) return true;
+  if (["0", "false", "no", "off", "关", "关闭"].indexOf(text) > -1) return false;
   return fallback;
 }
+
+function clampInt(value, min, max, fallback) {
+  const number = Number.parseInt(clean(value), 10);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+// ==================== 基础工具 ====================
+
+function debugLog(message) {
+  if (!CONFIG.debug) return;
+  console.log(`[${SCRIPT_NAME}] ${String(message)}`);
+}
+
+function sleep(seconds) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, seconds * 1000)));
+}
+
+function randomBetween(min, max) {
+  return min + Math.random() * Math.max(0, max - min);
+}
+
+function randomSleep(range) {
+  return sleep(randomBetween(range[0], range[1]));
+}
+
+function budgetLeftMs() {
+  if (!DEADLINE) return Number.MAX_SAFE_INTEGER;
+  return DEADLINE - Date.now();
+}
+
+function budgetLow(reserveMs) {
+  return budgetLeftMs() < reserveMs;
+}
+
+/** 受预算约束的等待：剩余时间不够就少睡，绝不拖过 Loon 的硬超时。 */
+async function pacedSleep(range, reserveMs) {
+  const want = randomBetween(range[0], range[1]);
+  const allowed = (budgetLeftMs() - (reserveMs || 5000)) / 1000;
+  if (allowed <= 0.5) return false;
+  await sleep(Math.min(want, allowed));
+  return true;
+}
+
+// ==================== 脱敏 ====================
+
+function registerSensitive() {
+  for (const value of arguments) {
+    const text = value === null || value === undefined ? "" : String(value);
+    if (text.length >= 4) SENSITIVE_VALUES.add(text);
+  }
+}
+
+function maskId(value) {
+  const text = value === null || value === undefined ? "" : String(value);
+  if (!text) return "-";
+  if (/^1\d{10}$/.test(text)) return `${text.slice(0, 3)}****${text.slice(-4)}`;
+  if (text.length <= 4) return "*".repeat(text.length);
+  if (text.length <= 8) return `${text.slice(0, 2)}****${text.slice(-2)}`;
+  return `${text.slice(0, 4)}…${text.slice(-4)}`;
+}
+
+function shortOpenId(openId) {
+  const text = String(openId || "");
+  if (!text) return "-";
+  return text.length > 12 ? `${text.slice(0, 6)}…${text.slice(-4)}` : maskId(text);
+}
+
+function redact(text) {
+  let out = String(text === null || text === undefined ? "" : text);
+  for (const secret of SENSITIVE_VALUES) {
+    if (secret && secret.length >= 4) out = out.split(secret).join(maskId(secret));
+  }
+  // 不用 lookbehind，兼容较老的 JavaScriptCore
+  out = out.replace(/(^|\D)(1\d{10})(?!\d)/g, (all, pre, phone) => {
+    return `${pre}${phone.slice(0, 3)}****${phone.slice(-4)}`;
+  });
+  return out;
+}
+
+function brief(value, limit) {
+  const text = redact(typeof value === "string" ? value : JSON.stringify(value || {}));
+  const max = limit || 120;
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+// ==================== 账号存储 ====================
 
 function safeStoreRead(key) {
   try {
@@ -100,56 +250,24 @@ function safeStoreRead(key) {
   }
 }
 
-function debugLog(message) {
-  if (CONFIG.debug) console.log(`[${SCRIPT_NAME}] ${message}`);
-}
-
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-function randomBetween(minimum, maximum) {
-  return minimum + Math.random() * (maximum - minimum);
-}
-
-function randomSleep(minimumSeconds, maximumSeconds) {
-  return sleep(Math.round(randomBetween(minimumSeconds, maximumSeconds) * 1000));
-}
-
-function shortOpenId(openId) {
-  const text = String(openId || "");
-  return text.length > 12
-    ? `${text.slice(0, 6)}...${text.slice(-4)}`
-    : text;
-}
-
-function parseSingleAccount(rawValue) {
-  const text = String(rawValue || "").trim();
-  if (!text) return { account: null, error: "未读取到已保存账号" };
-
-  const parts = text.split("#").map((item) => item.trim());
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    return { account: null, error: "已保存账号格式错误，应为 wid#openId" };
-  }
-
-  const wid = parts[0];
+function parseAccountString(rawValue) {
+  const parts = clean(rawValue).split("#").map((item) => item.trim());
+  if (parts.length < 2 || !parts[0] || !parts[1]) return null;
   const openId = parts[1];
-  if (!openId.startsWith("o")) {
-    return { account: null, error: "已保存的 openId 格式异常" };
-  }
-
-  return { account: { wid, openId }, error: "" };
+  if (openId.charAt(0) !== "o") return null;
+  return {
+    wid: parts[0],
+    openId,
+    phone: /^\d{6,15}$/.test(parts[2] || "") ? parts[2] : "",
+  };
 }
 
 function accountString(account) {
-  return `${account.wid}#${account.openId}`;
+  return account.phone
+    ? `${account.wid}#${account.openId}#${account.phone}`
+    : `${account.wid}#${account.openId}`;
 }
 
-function accountsEqual(a, b) {
-  return Boolean(a && b && a.wid === b.wid && a.openId === b.openId);
-}
-
-// 读取所有已保存账号，兼容旧版单账号字符串（"wid#openId"）与新版数组格式。
 function loadAccounts() {
   const raw = safeStoreRead(ACCOUNT_KEY);
   if (!raw) return [];
@@ -157,23 +275,20 @@ function loadAccounts() {
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed
-        .filter(Boolean)
-        .map((item) => parseSingleAccount(typeof item === "string" ? item : ""))
-        .filter((r) => r.account)
-        .map((r) => r.account);
+      return parsed.map((item) => parseAccountString(item)).filter(Boolean);
     }
   } catch (_) {}
 
-  const single = parseSingleAccount(raw);
-  return single.account ? [single.account] : [];
+  const single = parseAccountString(raw);
+  return single ? [single] : [];
 }
 
 function saveAccountList(accounts) {
   const list = accounts.filter(Boolean);
-  const value = JSON.stringify(list.map(accountString));
   try {
-    const saved = Boolean($persistentStore.write(value, ACCOUNT_KEY));
+    const saved = Boolean(
+      $persistentStore.write(JSON.stringify(list.map(accountString)), ACCOUNT_KEY)
+    );
     if (saved) CONFIG.accounts = list;
     return saved;
   } catch (_) {
@@ -181,13 +296,44 @@ function saveAccountList(accounts) {
   }
 }
 
-function getGlobalObject() {
-  try {
-    return Function("return this")();
-  } catch (_) {
-    return globalThis;
+/** 手动账号：wid@openId@手机号，多个用 & 分隔（与青龙版 TYQH 格式一致） */
+function parseManualAccounts(rawValue) {
+  const text = clean(rawValue);
+  if (!text) return [];
+
+  const list = [];
+  for (const chunk of text.split("&")) {
+    const parts = chunk.split("@").map((item) => item.trim());
+    const wid = parts[0] || "";
+    if (!wid) continue;
+    let openId = "";
+    let phone = "";
+    for (const part of parts.slice(1)) {
+      if (!part) continue;
+      if (/^\d{6,15}$/.test(part)) phone = part;
+      else if (!openId) openId = part;
+    }
+    list.push({ wid, openId, phone });
   }
+  return list;
 }
+
+function mergeAccounts() {
+  const stored = loadAccounts();
+  const merged = stored.slice();
+  for (const account of CONFIG.manualAccounts) {
+    const hit = merged.find((item) => item.wid === account.wid);
+    if (hit) {
+      if (!hit.openId && account.openId) hit.openId = account.openId;
+      if (!hit.phone && account.phone) hit.phone = account.phone;
+    } else {
+      merged.push(account);
+    }
+  }
+  return merged.filter((item) => item && item.wid);
+}
+
+// ==================== 抓包模式 ====================
 
 function getHeader(headers, name) {
   if (!headers) return "";
@@ -200,7 +346,7 @@ function getHeader(headers, name) {
 
 function safeDecode(value) {
   let text = String(value || "");
-  for (let index = 0; index < 3; index += 1) {
+  for (let i = 0; i < 3; i += 1) {
     try {
       const decoded = decodeURIComponent(text.replace(/\+/g, "%20"));
       if (decoded === text) break;
@@ -229,13 +375,13 @@ function findParam(text, names) {
   return "";
 }
 
-function extractAccountFromRequest(request) {
-  const headers = request && request.headers ? request.headers : {};
+function extractAccount(request) {
+  const headers = (request && request.headers) || {};
   const sources = [
-    request && request.url ? request.url : "",
+    (request && request.url) || "",
     getHeader(headers, "Referer"),
     getHeader(headers, "Referrer"),
-    request && request.body ? request.body : "",
+    (request && request.body) || "",
   ].filter(Boolean);
 
   let wid = "";
@@ -248,182 +394,326 @@ function extractAccountFromRequest(request) {
 
   wid = String(wid || "").replace(/["'<>]/g, "").trim();
   openId = String(openId || "").replace(/["'<>]/g, "").trim();
-  if (!wid || !openId || !openId.startsWith("o")) return null;
-  return { wid, openId };
+  if (!wid || !openId || openId.charAt(0) !== "o") return null;
+  return { wid, openId, phone: "" };
 }
 
-function saveCapturedAccount(account) {
-  const current = CONFIG.accounts || loadAccounts();
-  const existing = current.find((a) => accountsEqual(a, account));
-
-  if (existing) {
-    debugLog(`账号已存在：wid=${account.wid}，index=${current.indexOf(existing)}`);
-    return { saved: true, changed: false, previous: current.length, index: current.indexOf(existing) };
+function handleCapture() {
+  if (!CONFIG.capture) {
+    debugLog("未开启自动获取账号，跳过");
+    return;
   }
 
-  const number = current.length + 1;
+  const account = extractAccount($request);
+  if (!account) {
+    debugLog("请求中没有 wid/openId，跳过");
+    return;
+  }
+
+  const current = CONFIG.accounts.length ? CONFIG.accounts : loadAccounts();
+  const exists = current.find((item) => item.wid === account.wid);
+  if (exists) {
+    debugLog(`账号已保存：wid=${maskId(account.wid)}`);
+    return;
+  }
+
   const next = current.concat([account]);
   const saved = saveAccountList(next);
-  return { saved, changed: saved, previous: current.length, index: current.length + 1 };
+  const total = next.length;
+  const message =
+    `已保存账号（wid ${maskId(account.wid)}）\n` +
+    `当前共 ${total} 个账号，每天定时自动执行`;
+
+  console.log(`[${SCRIPT_NAME}] ${redact(message)}`);
+  if (CONFIG.notify && saved) {
+    try {
+      $notification.post(SCRIPT_NAME, "账号获取成功", message);
+    } catch (_) {}
+  }
 }
 
-function handleCaptureMode() {
-  if (!CONFIG.capture) {
-    debugLog("自动抓取开关已关闭");
-    return;
-  }
+// ==================== HTTP ====================
 
-  const account = extractAccountFromRequest($request);
-  if (!account) {
-    debugLog(`当前请求未发现 wid/openId：${$request && $request.url ? $request.url : "未知地址"}`);
-    return;
+/** Loon 在 binary-mode 或非 UTF-8 响应时会给 Uint8Array，这里统一转成字符串 */
+function utf8Decode(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    const byte = bytes[i];
+    if (byte < 0x80) {
+      out += String.fromCharCode(byte);
+    } else if (byte >= 0xc0 && byte < 0xe0) {
+      out += String.fromCharCode(((byte & 0x1f) << 6) | (bytes[i + 1] & 0x3f));
+      i += 1;
+    } else if (byte >= 0xe0 && byte < 0xf0) {
+      out += String.fromCharCode(
+        ((byte & 0x0f) << 12) | ((bytes[i + 1] & 0x3f) << 6) | (bytes[i + 2] & 0x3f)
+      );
+      i += 2;
+    } else if (byte >= 0xf0) {
+      const code =
+        ((byte & 0x07) << 18) |
+        ((bytes[i + 1] & 0x3f) << 12) |
+        ((bytes[i + 2] & 0x3f) << 6) |
+        (bytes[i + 3] & 0x3f);
+      const point = code - 0x10000;
+      out += String.fromCharCode(0xd800 + (point >> 10), 0xdc00 + (point & 0x3ff));
+      i += 3;
+    }
   }
+  return out;
+}
 
-  const result = saveCapturedAccount(account);
-  if (!result.saved) {
-    const message = "识别到账号，但写入 Loon 本地存储失败";
-    console.log(`[${SCRIPT_NAME}] ${message}`);
-    postNotification(SCRIPT_NAME, "账号保存失败", message);
-    return;
+function toText(data) {
+  if (data === null || data === undefined) return "";
+  if (typeof data === "string") return data;
+  if (typeof data === "object" && typeof data.length === "number") {
+    try {
+      const bytes = new Uint8Array(data.length);
+      bytes.set(data);
+      return utf8Decode(bytes);
+    } catch (_) {
+      return String(data);
+    }
   }
-  if (!result.changed) return;
-
-  const total = CONFIG.accounts.length;
-  let action = result.previous === 0 ? "账号获取成功" : "新账号已保存";
-  let detail = `账号 #${result.index}/${total}\nwid：${account.wid}\nopenId：${shortOpenId(account.openId)}`;
-  const message = `wid：${account.wid}\nopenId：${shortOpenId(account.openId)}\n当前共 ${total} 个账号`;
-  console.log(`[${SCRIPT_NAME}] ${action}\n${message}`);
-  postNotification(SCRIPT_NAME, action, detail);
+  return String(data);
 }
 
 function loonHttp(method, options) {
   return new Promise((resolve, reject) => {
-    const functionName = String(method || "GET").toLowerCase();
-    const requester = $httpClient[functionName];
+    const name = String(method || "GET").toLowerCase();
+    const requester = $httpClient[name];
     if (typeof requester !== "function") {
       reject(new Error(`Loon 不支持 HTTP 方法：${method}`));
       return;
     }
 
     requester(options, (error, response, data) => {
-      if (error) {
+      if (error && String(error).length) {
         reject(new Error(String(error)));
         return;
       }
-
       resolve({
-        status: Number(response?.status || response?.statusCode || 0),
-        headers: response?.headers || {},
-        body: typeof data === "string" ? data : String(data ?? ""),
+        status: Number((response && (response.status || response.statusCode)) || 0),
+        headers: (response && response.headers) || {},
+        body: toText(data),
       });
     });
   });
 }
 
-function sanitizeExternalScript(source) {
-  let text = String(source || "");
-  text = text.replace(/^\uFEFF/, "");
+const RATE_LIMIT_MARKERS = ["频繁", "稍后再试", "稍后重试", "活动火热进行中"];
 
-  // 部分 Loon JavaScriptCore 环境在 eval 外部脚本时，会把开头的 /*! ... */
-  // 错误解析为以 * 开头的代码，因此先剥离所有开头注释。
+function isRateLimited(message) {
+  const text = String(message || "");
+  return RATE_LIMIT_MARKERS.some((marker) => text.indexOf(marker) > -1);
+}
+
+function isNeedOpenCard(message) {
+  return String(message || "").indexOf("开卡") > -1;
+}
+
+function apiError(message, result) {
+  const error = new Error(message);
+  error.payload = result;
+  return error;
+}
+
+async function requestWithRetry(options) {
+  const {
+    method,
+    path,
+    payload = null,
+    encrypted = true,
+    retries = 3,
+    baseSleep = 2.0,
+    headers = {},
+  } = options;
+
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const requestHeaders = Object.assign({}, headers);
+      const request = {
+        url: `${BASE_URL}${path}`,
+        timeout: REQUEST_TIMEOUT_MS,
+        headers: requestHeaders,
+      };
+
+      if (payload !== null) {
+        if (encrypted) {
+          request.body = JSON.stringify(encryptPayload(payload));
+          requestHeaders["Content-Type"] = "application/json";
+          requestHeaders["X-Request-Encrypted"] = "true";
+        } else {
+          request.body = typeof payload === "string" ? payload : JSON.stringify(payload);
+        }
+      }
+
+      debugLog(`${method} ${path}（第 ${attempt + 1} 次）`);
+      const response = await loonHttp(method, request);
+
+      if (response.status === 429 || response.status === 503) {
+        const retryAfter = Number.parseFloat(getHeader(response.headers, "Retry-After") || "0");
+        const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : baseSleep * (attempt + 1);
+        if (attempt < retries) {
+          await sleep(Math.max(wait, 2));
+          continue;
+        }
+      }
+
+      let result;
+      try {
+        result = JSON.parse(response.body);
+      } catch (_) {
+        throw apiError(
+          `非 JSON 响应（HTTP ${response.status}）：${brief(response.body, 120)}`,
+          null
+        );
+      }
+
+      if (response.status >= 400) {
+        throw apiError(result && (result.msg || result.message) || `HTTP ${response.status}`, result);
+      }
+
+      if (result && (Number(result.code) === 200 || result.success === true)) {
+        return result;
+      }
+
+      const message = String((result && (result.msg || result.message)) || "接口返回异常");
+
+      // 频控：按青龙版节奏指数退避，15–25s × (次数+1)
+      if (attempt < retries && isRateLimited(message)) {
+        const low = Math.max(baseSleep, RATE_LIMIT_DELAY[0]);
+        const high = Math.max(low, RATE_LIMIT_DELAY[1]);
+        const wait = randomBetween(low, high) * (attempt + 1);
+        console.log(`[${SCRIPT_NAME}] 触发频控，${wait.toFixed(1)}s 后重试（${attempt + 1}/${retries}）`);
+        const allowed = (budgetLeftMs() - 15000) / 1000;
+        if (allowed <= 1) {
+          // 预算不够等退避窗口，直接放弃并如实上报，避免把"没时间"说成"接口失败"
+          throw apiError("时间预算不足，已放弃重试", result);
+        }
+        await sleep(Math.min(wait, allowed));
+        continue;
+      }
+
+      throw apiError(message, result);
+    } catch (error) {
+      lastError = error;
+      const message = String((error && error.message) || error);
+      const retryable = /timeout|timed out|network|连接|网络|HTTP 5\d\d|非 JSON/i.test(message);
+      if (attempt < retries && retryable && !isNeedOpenCard(message)) {
+        await sleep(baseSleep * (attempt + 1));
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError || new Error("请求重试后仍未成功");
+}
+
+// ==================== 加密 ====================
+
+function globalObject() {
+  try {
+    return Function("return this")();
+  } catch (_) {
+    return globalThis;
+  }
+}
+
+function sanitizeLibrarySource(source) {
+  let text = String(source || "").replace(/^\uFEFF/, "");
+  // Loon 的 JSC 偶尔把开头的 /*! ... */ 误解析成代码，先剥掉前导注释
   for (;;) {
     const before = text;
     text = text.replace(/^\s*\/\*[\s\S]*?\*\//, "");
     text = text.replace(/^\s*\/\/[^\r\n]*(?:\r?\n|$)/, "");
     if (text === before) break;
   }
-
   return text.trim();
 }
 
 async function loadForge() {
   if (FORGE) return FORGE;
 
-  const globalObject = getGlobalObject();
-  if (globalObject.forge?.cipher && globalObject.forge?.pki) {
-    FORGE = globalObject.forge;
+  const root = globalObject();
+  if (root.forge && root.forge.cipher && root.forge.pki) {
+    FORGE = root.forge;
     return FORGE;
   }
 
-  if (typeof globalObject.window === "undefined") globalObject.window = globalObject;
-  if (typeof globalObject.self === "undefined") globalObject.self = globalObject;
-  if (typeof globalObject.navigator === "undefined") {
-    globalObject.navigator = { userAgent: "Loon JavaScriptCore" };
-  }
+  if (typeof root.window === "undefined") root.window = root;
+  if (typeof root.self === "undefined") root.self = root;
+  if (typeof root.navigator === "undefined") root.navigator = { userAgent: "Loon JavaScriptCore" };
 
   let lastError = null;
   for (const url of FORGE_URLS) {
     try {
       debugLog(`加载加密库：${url}`);
-      const response = await loonHttp("GET", {
-        url,
-        timeout: REQUEST_TIMEOUT_MS,
-        headers: { "User-Agent": USER_AGENT },
-      });
+      const response = await loonHttp("GET", { url, timeout: REQUEST_TIMEOUT_MS });
+      if (response.status < 200 || response.status >= 300) throw new Error(`HTTP ${response.status}`);
+      if (!response.body || response.body.length < 100000) throw new Error("加密库内容不完整");
 
-      if (response.status < 200 || response.status >= 300) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      if (!response.body || response.body.length < 100000) {
-        throw new Error("加密库内容不完整");
-      }
+      const source = sanitizeLibrarySource(response.body);
+      if (!source || source.charAt(0) === "*") throw new Error("加密库源码开头异常");
 
-      const librarySource = sanitizeExternalScript(response.body);
-      if (!librarySource || librarySource[0] === "*") {
-        throw new Error("加密库源码开头异常");
-      }
-      (0, eval)(`${librarySource}\n//# sourceURL=node-forge-1.3.1.min.js`);
-      if (!globalObject.forge?.cipher || !globalObject.forge?.pki) {
-        throw new Error("加密库初始化失败");
-      }
+      hideIncompatibleCrypto(root);
+      (0, eval)(`${source}\n//# sourceURL=node-forge-1.3.1.min.js`);
+      if (!root.forge || !root.forge.cipher || !root.forge.pki) throw new Error("加密库初始化失败");
 
-      FORGE = globalObject.forge;
-      seedForgeRandom();
+      FORGE = root.forge;
+      seedRandom();
       debugLog("加密库加载成功");
       return FORGE;
     } catch (error) {
       lastError = error;
-      debugLog(`加密库加载失败：${error.message || error}`);
+      debugLog(`加密库加载失败：${(error && error.message) || error}`);
     }
   }
 
-  throw new Error(`无法加载加密库：${lastError?.message || lastError || "未知错误"}`);
+  throw new Error(`无法加载加密库：${(lastError && lastError.message) || "未知错误"}`);
 }
 
-function seedForgeRandom() {
-  if (!FORGE?.random) return;
-  const seed = [
-    Date.now(),
-    Math.random(),
-    Math.random(),
-    typeof $loon !== "undefined" ? JSON.stringify($loon) : "Loon",
-    typeof $script !== "undefined" ? String($script.startTime || "") : "",
-  ].join(":");
-
+/**
+ * forge 会优先使用 self.crypto.randomBytes。某些环境（含 node 的 webcrypto）
+ * 只提供 getRandomValues，forge 探测到 crypto 却在 randomBytes 处抛错。
+ * 这类环境隐藏它，让 forge 退回 Math.random，再由 seedRandom() 补熵。
+ */
+function hideIncompatibleCrypto(root) {
   try {
-    FORGE.random.collect(seed);
+    const source = root.crypto;
+    if (source && typeof source.randomBytes !== "function") {
+      Object.defineProperty(root, "crypto", { value: undefined, configurable: true, writable: true });
+      debugLog("已隐藏不兼容的 crypto 实现");
+    }
+  } catch (error) {
+    debugLog(`crypto 兼容处理失败：${(error && error.message) || error}`);
+  }
+}
+
+function seedRandom() {  if (!FORGE || !FORGE.random) return;
+  try {
+    FORGE.random.collect([Date.now(), Math.random(), Math.random()].join(":"));
     FORGE.random.collectInt(Date.now() >>> 0, 32);
   } catch (_) {}
 }
 
-function getRsaPublicKey() {
+function getPublicKey() {
   if (RSA_PUBLIC_KEY) return RSA_PUBLIC_KEY;
   if (!FORGE) throw new Error("加密库尚未初始化");
-
   const lines = PUBLIC_KEY.match(/.{1,64}/g) || [];
-  const pem =
-    "-----BEGIN PUBLIC KEY-----\n" +
-    lines.join("\n") +
-    "\n-----END PUBLIC KEY-----";
-
+  const pem = `-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----`;
   RSA_PUBLIC_KEY = FORGE.pki.publicKeyFromPem(pem);
   return RSA_PUBLIC_KEY;
 }
 
+/** 与青龙版 encrypt_request_body 等价：AES-256-GCM + RSA-OAEP(SHA256) 包裹密钥 */
 function encryptPayload(payload) {
   if (!FORGE) throw new Error("加密库尚未初始化");
+  seedRandom();
 
-  seedForgeRandom();
   const plaintext = JSON.stringify(payload);
   const aesKey = FORGE.random.getBytesSync(32);
   const iv = FORGE.random.getBytesSync(12);
@@ -431,12 +721,11 @@ function encryptPayload(payload) {
   const cipher = FORGE.cipher.createCipher("AES-GCM", aesKey);
   cipher.start({ iv, tagLength: 128 });
   cipher.update(FORGE.util.createBuffer(plaintext, "utf8"));
-
   if (!cipher.finish()) throw new Error("AES-GCM 加密失败");
 
-  // Python AESGCM.encrypt 的结果顺序为 ciphertext || 16-byte tag。
+  // Python 的 AESGCM.encrypt 输出为 ciphertext || 16 字节 tag
   const encryptedData = cipher.output.getBytes() + cipher.mode.tag.getBytes();
-  const encryptedKey = getRsaPublicKey().encrypt(aesKey, "RSA-OAEP", {
+  const encryptedKey = getPublicKey().encrypt(aesKey, "RSA-OAEP", {
     md: FORGE.md.sha256.create(),
     mgf1: { md: FORGE.md.sha256.create() },
   });
@@ -448,423 +737,709 @@ function encryptPayload(payload) {
   };
 }
 
+// ==================== 接口客户端 ====================
+
 class TomatoClient {
-  constructor(wid, openId) {
-    this.wid = wid;
-    this.openId = openId;
-    this.tomatoUserId = null;
+  constructor(account) {
+    this.account = account;
+    this.wid = account.wid;
+    this.openId = account.openId || "";
+    this.phone = account.phone || "";
     this.token = "";
+    this.tomatoUserId = "";
+    this.nickName = "";
+
+    const query = [`wid=${encodeURIComponent(this.wid)}`];
+    if (this.openId) query.push(`openId=${encodeURIComponent(this.openId)}`);
+
     this.baseHeaders = {
       "User-Agent": USER_AGENT,
+      Accept: "*/*",
       "Content-Type": "application/json",
       Origin: BASE_URL,
-      Referer: `${BASE_URL}/?wid=${encodeURIComponent(wid)}&openId=${encodeURIComponent(openId)}`,
+      Referer: `${BASE_URL}/?${query.join("&")}`,
+      "Accept-Language": "zh-CN,zh;q=0.9",
     };
   }
 
-  async request(method, path, payload = null, encrypted = true, retry = REQUEST_RETRIES) {
-    const url = `${BASE_URL}${path}`;
-    let lastError = null;
+  headers() {
+    const headers = Object.assign({}, this.baseHeaders);
+    if (this.token) headers.Authorization = this.token;
+    return headers;
+  }
 
-    for (let attempt = 0; attempt <= retry; attempt += 1) {
-      try {
-        const headers = { ...this.baseHeaders };
-        if (this.token) headers.Authorization = this.token;
-
-        const options = {
-          url,
-          timeout: REQUEST_TIMEOUT_MS,
-          headers,
-        };
-
-        if (payload !== null && payload !== undefined) {
-          const requestBody = encrypted ? encryptPayload(payload) : payload;
-          options.body = JSON.stringify(requestBody);
-          if (encrypted) headers["X-Request-Encrypted"] = "true";
-        }
-
-        debugLog(`${method} ${path}，第 ${attempt + 1} 次`);
-        const response = await loonHttp(method, options);
-
-        if (response.status === 429 && attempt < retry) {
-          const retryAfter = Number.parseFloat(
-            getHeader(response.headers, "Retry-After") || "2"
-          );
-          const waitSeconds = Number.isFinite(retryAfter)
-            ? Math.max(1, retryAfter)
-            : 2;
-          await sleep((waitSeconds + attempt) * 1000);
-          continue;
-        }
-
-        let result;
-        try {
-          result = JSON.parse(response.body);
-        } catch (_) {
-          throw new Error(
-            `接口返回非 JSON 数据（HTTP ${response.status}）：${response.body.slice(0, 200)}`
-          );
-        }
-
-        if (response.status < 200 || response.status >= 300) {
-          throw new Error(
-            result?.msg || result?.message || `HTTP ${response.status}`
-          );
-        }
-
-        const message = String(result?.msg || result?.message || "");
-        if (Number(result?.code) === 200) return result;
-
-        if (
-          attempt < retry &&
-          (response.status === 429 || message.includes("频繁") || message.includes("稍后"))
-        ) {
-          await sleep((2.5 + attempt * 1.5) * 1000);
-          continue;
-        }
-
-        throw new Error(message || `接口返回 code=${result?.code}`);
-      } catch (error) {
-        lastError = error;
-        const message = String(error?.message || error || "未知错误");
-        const retryable =
-          /timeout|timed out|network|连接|网络|频繁|稍后|HTTP 429/i.test(message);
-
-        if (attempt < retry && retryable) {
-          await sleep((2 + attempt * 1.5) * 1000);
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    throw new Error(lastError?.message || "请求重试后仍未成功");
+  call(method, path, payload, options) {
+    const config = Object.assign(
+      { method, path, payload: payload === undefined ? null : payload, headers: this.headers() },
+      options || {}
+    );
+    return requestWithRetry(config);
   }
 
   async login() {
-    const result = await this.request("POST", "/api/web/open/tomato/login", {
-      shareTomatoUserId: null,
-      openId: this.openId,
-      wid: this.wid,
-      queryCardStatus: true,
+    const payload = { wid: String(this.wid), queryCardStatus: true };
+    if (this.openId) payload.openId = this.openId;
+    if (this.phone) {
+      payload.wm_phone = this.phone;
+      payload.mobile = this.phone;
+    }
+    // 青龙版默认把每个号绑到作者邀请人 11422，这里默认不绑；需要时在插件参数 inviter 填
+    payload.shareTomatoUserId = CONFIG.inviter || null;
+
+    const result = await this.call("POST", "/api/web/open/tomato/login", payload, {
+      retries: 2,
+      baseSleep: 1.5,
     });
 
-    const data = result?.data || {};
+    const data = (result && result.data) || {};
     if (!data.token) throw new Error("登录响应中没有 token");
 
     this.token = data.token;
-    this.tomatoUserId = data.tomatoUserId || null;
+    this.tomatoUserId = data.tomatoUserId || "";
+    this.nickName = data.nickName || "";
+    registerSensitive(data.token, data.wid, data.openId, data.mobile, data.tomatoUserId);
     return data;
   }
 
   async home() {
-    const result = await this.request("GET", "/api/web/member/tomato/home");
-    return result?.data || {};
+    const result = await this.call("GET", "/api/web/member/tomato/home", null, {
+      retries: 2,
+      baseSleep: 1.2,
+    });
+    return (result && result.data) || {};
+  }
+
+  async cardStatus() {
+    try {
+      const result = await this.call("GET", "/api/web/member/tomato/cardStatus", null, {
+        retries: 1,
+        baseSleep: 1,
+      });
+      const data = result && result.data;
+      if (data && typeof data === "object") return String(data.cardStatus || data.status || "");
+      if (data !== undefined && data !== null) return String(data);
+    } catch (error) {
+      debugLog(`开卡状态查询失败：${(error && error.message) || error}`);
+    }
+    return "";
   }
 
   async tasks() {
-    const result = await this.request("GET", "/api/web/member/tomato/tasks");
-    return Array.isArray(result?.data) ? result.data : [];
+    const result = await this.call("GET", "/api/web/member/tomato/tasks", null, {
+      retries: 2,
+      baseSleep: 1.2,
+    });
+    let rows = result && result.data;
+    if (rows && !Array.isArray(rows) && typeof rows === "object") {
+      rows = rows.list || rows.rows || [];
+    }
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  async pageVisit(pagePath) {
+    return this.call(
+      "POST",
+      "/api/web/member/tomato/page-visit",
+      { pagePath: String(pagePath).slice(0, 500) },
+      { retries: 1, baseSleep: 1.5 }
+    );
+  }
+
+  async createShareQrcode() {
+    if (!this.tomatoUserId) return false;
+    await this.call(
+      "POST",
+      "/api/web/member/tomato/miniprogram/qrcode/create",
+      { page: "packages/wm-cloud-qiehuang/home/index", scene: String(this.tomatoUserId) },
+      { retries: 1, baseSleep: 1.2 }
+    );
+    return true;
   }
 
   async completeTask(task) {
-    const taskType = task?.taskType;
-    const payload = { taskType };
-
-    if (taskType !== "SHARE") {
-      payload.browseTarget = task?.browseTarget || "";
-    } else if (this.tomatoUserId) {
-      try {
-        await this.request(
-          "POST",
-          "/api/web/member/tomato/miniprogram/qrcode/create",
-          {
-            page: "packages/wm-cloud-qiehuang/home/index",
-            scene: String(this.tomatoUserId),
-          }
-        );
-      } catch (error) {
-        debugLog(`分享二维码创建失败，继续完成 SHARE：${error.message || error}`);
-      }
-    }
-
-    const result = await this.request(
-      "POST",
-      "/api/web/member/tomato/tasks/complete",
-      payload
-    );
-    return result?.data || {};
+    const taskType = String((task && task.taskType) || "");
+    const payload = {
+      taskType,
+      browseTarget: (task && task.browseTarget) || "",
+    };
+    return this.call("POST", "/api/web/member/tomato/tasks/complete", payload, {
+      retries: 3,
+      baseSleep: 2.5,
+    });
   }
 
-  async friends(pageSize = 20) {
-    const friends = [];
-    let pageNum = 1;
-
-    while (pageNum <= 50) {
-      const result = await this.request(
+  async friends(pageSize) {
+    const size = pageSize || 20;
+    const list = [];
+    for (let pageNum = 1; pageNum <= 50; pageNum += 1) {
+      const result = await this.call(
         "GET",
-        `/api/web/member/tomato/friends?pageNum=${pageNum}&pageSize=${pageSize}`
+        `/api/web/member/tomato/friends?pageNum=${pageNum}&pageSize=${size}`,
+        null,
+        { retries: 2, baseSleep: 1.2 }
       );
-      const rows = Array.isArray(result?.rows) ? result.rows : [];
-      friends.push(...rows);
+      const rows = Array.isArray(result && result.rows) ? result.rows : [];
+      list.push.apply(list, rows);
 
-      const total = Number(result?.total || 0);
-      if (
-        rows.length === 0 ||
-        (total > 0 && friends.length >= total) ||
-        rows.length < pageSize
-      ) {
+      const total = Number((result && result.total) || 0);
+      if (rows.length === 0 || (total > 0 && list.length >= total) || rows.length < size) break;
+      if (budgetLow(30000)) {
+        debugLog("时间预算不足，提前结束好友列表翻页");
         break;
       }
-      pageNum += 1;
     }
-
-    return friends;
+    return list;
   }
 
   async friendHome(friendUserId) {
-    const result = await this.request(
+    const result = await this.call(
       "GET",
-      `/api/web/member/tomato/friends/${encodeURIComponent(friendUserId)}/home`
+      `/api/web/member/tomato/friends/${encodeURIComponent(friendUserId)}/home`,
+      null,
+      { retries: 1, baseSleep: 1.0 }
     );
-    return result?.data || {};
+    return (result && result.data) || {};
   }
 
-  async stealFriendEnergy(friendUserId) {
-    const result = await this.request(
+  async steal(friendUserId) {
+    return this.call(
       "POST",
       "/api/web/member/tomato/friends/steal",
-      { friendTomatoUserId: friendUserId }
+      { friendTomatoUserId: friendUserId },
+      { retries: 2, baseSleep: 1.5 }
     );
-    return result?.data;
   }
 
+  /** 浇水：青龙版发加密 {syncHomeInfo:true}；失败则回退官方前端的空 POST */
   async useEnergy() {
-    // 官方前端发送空 POST，不附加加密请求体。
-    const result = await this.request(
-      "POST",
-      "/api/web/member/tomato/energy/use",
-      null,
-      false
-    );
-    return result?.data || {};
+    try {
+      return await this.call(
+        "POST",
+        "/api/web/member/tomato/energy/use",
+        { syncHomeInfo: true },
+        { retries: 3, baseSleep: 2.5 }
+      );
+    } catch (error) {
+      const message = String((error && error.message) || error);
+      // 频控/未开卡/预算不足都不是"请求格式不对"，回退空请求没有意义
+      if (isRateLimited(message) || isNeedOpenCard(message) || message.indexOf("时间预算不足") > -1) {
+        throw error;
+      }
+      debugLog(`浇水加密请求失败（${message}），回退空 POST`);
+      return this.call("POST", "/api/web/member/tomato/energy/use", null, {
+        retries: 1,
+        baseSleep: 2,
+        encrypted: false,
+      });
+    }
   }
 }
 
-function homeLine(data, prefix = "当前状态") {
-  return (
-    `${prefix}：能量 ${Number(data?.energyBalance || 0)}，` +
-    `番茄 ${Number(data?.tomatoBalance || 0)}，` +
-    `${data?.stageName || "未知阶段"} ` +
-    `${Number(data?.currentExp || 0)}/${Number(data?.stageRequiredExp || 0)}`
-  );
+// ==================== 业务流程 ====================
+
+function logStep(logs, step, message) {
+  const line = `${step}: ${redact(message)}`;
+  logs.push(line);
+  console.log(`[${SCRIPT_NAME}] ${line}`);
 }
 
-async function processUser(wid, openId, index) {
-  const logs = [`账号（wid=${wid}，openId=${shortOpenId(openId)}）`];
-  const client = new TomatoClient(wid, openId);
+function homeLine(home, prefix) {
+  if (!home || typeof home !== "object") return `${prefix || "当前状态"}：无数据`;
+  const parts = [`能量☀️${home.energyBalance === undefined ? "?" : home.energyBalance}`];
+  parts.push(`番茄🍅${home.tomatoBalance === undefined ? "?" : home.tomatoBalance}`);
+  if (home.stageName) parts.push(`阶段=${home.stageName}`);
+  if (home.currentExp !== undefined && home.stageRequiredExp !== undefined) {
+    parts.push(`经验=${home.currentExp}/${home.stageRequiredExp}`);
+  }
+  if (home.cardStatus !== undefined && home.cardStatus !== null && home.cardStatus !== "") {
+    parts.push(`开卡=${home.cardStatus}`);
+  }
+  return `${prefix || "当前状态"}：${parts.join(" ")}`;
+}
 
-  const loginData = await client.login();
-  logs.push(`登录成功：${loginData?.nickName || "未设置昵称"}`);
+async function ensureCardOpened(client, loginData, logs) {
+  let status = String((loginData && loginData.cardStatus) || "");
+  if (status !== "0" && status !== "1") status = await client.cardStatus();
 
-  let home = await client.home();
-  logs.push(homeLine(home));
+  if (status === "1") {
+    logStep(logs, "开卡", "活动卡已开通 ✅");
+    return true;
+  }
+  if (status === "0") {
+    logStep(logs, "开卡", "登录已请求自动开卡，但状态仍为未开通 ⚠️");
+    return false;
+  }
+  logStep(logs, "开卡", `状态未知（${status || "空"}），继续尝试 ⚠️`);
+  return true;
+}
 
-  let completed = 0;
-  let skipped = 0;
-  let friendTask = null;
-  const tasks = await client.tasks();
+function taskStepName(taskType) {
+  const type = String(taskType || "").toUpperCase();
+  if (type === "SIGN") return "签到";
+  if (type === "BROWSE") return "浏览任务";
+  if (type === "SHARE") return "分享任务";
+  return "";
+}
+
+async function runTasks(client, cardOpened, logs) {
+  let tasks;
+  try {
+    tasks = await client.tasks();
+  } catch (error) {
+    const message = `获取任务列表失败：${(error && error.message) || error}`;
+    logStep(logs, "签到", message);
+    logStep(logs, "浏览任务", message);
+    return { completed: 0, skipped: 0, todo: 0 };
+  }
+
+  if (!tasks.length) {
+    logStep(logs, "签到", "任务列表为空 ⚠️");
+    logStep(logs, "浏览任务", "任务列表为空 ⚠️");
+    return { completed: 0, skipped: 0, todo: 0 };
+  }
+
+  const done = { "签到": [], "浏览任务": [], "分享任务": [] };
+  const todo = [];
+  const others = [];
 
   for (const task of tasks) {
-    const name = task?.taskName || task?.taskCode || "未知任务";
-    const taskType = task?.taskType;
+    const type = String((task && task.taskType) || "").toUpperCase();
+    const name = (task && (task.taskName || task.taskCode)) || type || "未知任务";
+    const isDone = String((task && task.completed) || "0") === "1";
 
-    if (taskType === FRIEND_TASK_TYPE) {
-      friendTask = task;
-      if (String(task?.completed) === "1") logs.push(`任务已完成：${name}`);
-      continue;
-    }
+    if (type === "FRIEND_STEAL_ENERGY") continue;
 
-    if (String(task?.completed) === "1") {
-      logs.push(`任务已完成：${name}`);
-      continue;
+    const step = taskStepName(type);
+    if (step) {
+      if (isDone) done[step].push(name);
+      else todo.push(task);
+    } else {
+      others.push(task);
     }
+  }
 
-    if (!SUPPORTED_TASK_TYPES.has(taskType)) {
-      skipped += 1;
-      logs.push(`跳过任务：${name}（需在小程序内操作）`);
-      continue;
+  for (const step of ["签到", "浏览任务", "分享任务"]) {
+    if (done[step].length) logStep(logs, step, `今日已完成 ✅（${done[step].join("、")}）`);
+  }
+
+  if (!cardOpened) {
+    for (const task of todo.concat(others)) {
+      const step = taskStepName(task && task.taskType) || "信息";
+      const name = (task && (task.taskName || task.taskCode)) || "任务";
+      logStep(logs, step, `${name} 跳过：账号未开卡 ⚠️`);
     }
+    return { completed: 0, skipped: todo.length + others.length, todo: 0 };
+  }
+
+  let completed = 0;
+  let failed = 0;
+
+  for (const task of todo) {
+    const type = String((task && task.taskType) || "").toUpperCase();
+    const step = taskStepName(type);
+    const name = (task && (task.taskName || task.taskCode)) || type;
+    if (!step) continue;
 
     try {
+      // 浏览任务先上报页面访问，与官方前端一致
+      if (type === "BROWSE" && task.browseTarget) {
+        try {
+          await client.pageVisit(task.browseTarget);
+        } catch (error) {
+          debugLog(`page-visit 失败（忽略）：${(error && error.message) || error}`);
+        }
+        await pacedSleep(ACTION_DELAY, 20000);
+      }
+
+      // 分享任务先建小程序码，避免服务端判无效
+      if (type === "SHARE") {
+        try {
+          await client.createShareQrcode();
+        } catch (error) {
+          debugLog(`分享二维码创建失败（忽略）：${(error && error.message) || error}`);
+        }
+      }
+
       const result = await client.completeTask(task);
-      const reward = result?.rewardText || task?.rewardText || "已领取";
-      logs.push(`任务完成：${name}，${reward}`);
+      const data = (result && result.data) || {};
+      const reward =
+        data.rewardText ||
+        (data.rewardEnergy !== undefined ? `+${data.rewardEnergy} 能量` : "已领取");
+      logStep(logs, step, `${name} 完成成功 ✅ 奖励=${reward}`);
       completed += 1;
     } catch (error) {
-      logs.push(`任务失败：${name}，${error.message || error}`);
+      const message = String((error && error.message) || error);
+      if (isNeedOpenCard(message)) {
+        logStep(logs, step, `${name} 失败：请先开卡后再操作 ⚠️`);
+      } else {
+        logStep(logs, step, `${name} 失败：${brief(message, 80)} ❌`);
+      }
+      failed += 1;
     }
 
-    await randomSleep(2.5, 3.5);
+    if (budgetLow(20000)) {
+      logStep(logs, "信息", "时间预算不足，停止剩余任务 ⚠️");
+      break;
+    }
+    await pacedSleep(ACTION_DELAY, 15000);
   }
 
+  for (const task of others) {
+    const type = String((task && task.taskType) || "").toUpperCase();
+    const name = (task && (task.taskName || task.taskCode)) || type;
+    logStep(logs, "信息", `暂不自动处理类型 ${type}：${name}`);
+  }
+
+  return { completed, skipped: others.length, failed, todo: todo.length };
+}
+
+async function collectFriendEnergy(client, logs) {
+  const stat = { checked: 0, collected: 0, energy: 0, failed: 0 };
+
+  let friends;
   try {
-    const allFriends = await client.friends();
-    const claimableFriends = allFriends.filter(
-      (friend) =>
-        String(friend?.friendStatus) === FRIEND_STATUS_CLAIMABLE &&
-        friend?.friendTomatoUserId
-    );
+    friends = await client.friends(20);
+  } catch (error) {
+    logStep(logs, "信息", `好友列表获取失败：${brief((error && error.message) || error, 80)} ❌`);
+    return stat;
+  }
 
-    let stolenCount = 0;
-    let stolenEnergy = 0;
-    let failedCount = 0;
+  // 先用 friendStatus 预筛（V5 的做法，少一个量级的请求）；
+  // 字段缺失时不过滤，避免因格式变化漏收。
+  const candidates = friends.filter((friend) => {
+    if (!friend || !friend.friendTomatoUserId) return false;
+    const status = friend.friendStatus;
+    if (status === undefined || status === null || status === "") return true;
+    return String(status) === "0";
+  });
 
-    for (const friend of claimableFriends) {
-      const friendUserId = friend.friendTomatoUserId;
+  debugLog(`好友 ${friends.length} 人，候选 ${candidates.length} 人`);
+
+  for (const friend of candidates) {
+    const friendId = String(friend.friendTomatoUserId);
+    registerSensitive(friendId);
+    stat.checked += 1;
+
+    try {
+      const home = await client.friendHome(friendId);
+      const amount = Number((home && home.stealAmount) || 0);
+      if (String((home && home.canSteal) || "") !== "1" || amount <= 0) continue;
+
+      stat.collected += 1;
+      stat.energy += amount;
       try {
-        const friendHome = await client.friendHome(friendUserId);
-        const amount = Number(friendHome?.stealAmount || 0);
-        if (String(friendHome?.canSteal) !== "1" || amount <= 0) continue;
-
-        await client.stealFriendEnergy(friendUserId);
-        stolenCount += 1;
-        stolenEnergy += amount;
+        const result = await client.steal(friendId);
+        const gained = result && result.data;
+        if (gained && typeof gained === "object") {
+          const actual = Number(gained.stealAmount || gained.energyAmount || 0);
+          if (actual > 0) stat.energy += actual - amount;
+        }
       } catch (error) {
-        failedCount += 1;
-        debugLog(`好友 ${friendUserId} 收取失败：${error.message || error}`);
+        stat.collected -= 1;
+        stat.energy -= amount;
+        stat.failed += 1;
+        debugLog(`好友收取失败：${brief((error && error.message) || error, 60)}`);
       }
-      await randomSleep(1.5, 2.5);
+    } catch (error) {
+      stat.failed += 1;
+      debugLog(`好友主页失败：${brief((error && error.message) || error, 60)}`);
     }
 
-    if (stolenCount > 0) {
-      let detail = `好友能量：成功收取 ${stolenCount} 位好友，共 ${stolenEnergy} 能量`;
-      if (failedCount > 0) detail += `，失败 ${failedCount} 位`;
-      logs.push(detail);
-      if (friendTask && String(friendTask?.completed) !== "1") completed += 1;
-    } else if (failedCount > 0) {
-      logs.push(`好友能量：收取失败 ${failedCount} 位`);
-    } else {
-      logs.push("好友能量：暂无可收取能量");
+    if (budgetLow(20000)) {
+      debugLog("时间预算不足，停止好友能量收集");
+      break;
+    }
+    await pacedSleep(ACTION_DELAY, 15000);
+  }
+
+  const summary =
+    stat.collected > 0
+      ? `好友能量：检查 ${stat.checked} 人，收取 ${stat.collected} 人，共 ${stat.energy} 能量` +
+        (stat.failed ? `，失败 ${stat.failed} 人` : "")
+      : stat.failed > 0
+        ? `好友能量：检查 ${stat.checked} 人，收取失败 ${stat.failed} 人`
+        : `好友能量：检查 ${stat.checked} 人，暂无可收能量`;
+  logStep(logs, "信息", summary);
+  return stat;
+}
+
+async function waterEnergy(client, home, cardOpened, logs) {
+  const times = CONFIG.waterTimes;
+  if (!cardOpened) {
+    logStep(logs, "浇水", "账号未开卡，跳过浇水 ⚠️");
+    return home;
+  }
+
+  const startEnergy = Number((home && home.energyBalance) || 0);
+  if (startEnergy <= 0) {
+    logStep(logs, "浇水", "当前能量为 0，跳过 ⚠️");
+    return home;
+  }
+
+  let success = 0;
+  let last = home;
+  let lastMessage = "";
+
+  for (let i = 0; i < times; i += 1) {
+    try {
+      const result = await client.useEnergy();
+      const data = (result && result.data) || {};
+      if (data && typeof data === "object" && Object.keys(data).length) last = data;
+      success += 1;
+      debugLog(
+        `浇水#${success} 能量=${last.energyBalance} 经验=${last.currentExp}/${last.stageRequiredExp}`
+      );
+
+      const left = Number((data && data.energyBalance) || 0);
+      if (left <= 0) break;
+    } catch (error) {
+      lastMessage = String((error && error.message) || error);
+      if (success === 0) {
+        logStep(logs, "浇水", `浇水失败：${brief(lastMessage, 80)} ❌`);
+      } else {
+        logStep(logs, "浇水", `成功 ${success} 次后停止：${brief(lastMessage, 60)} ⚠️`);
+      }
+      return last;
+    }
+
+    if (budgetLow(15000)) {
+      debugLog("时间预算不足，停止浇水");
+      break;
+    }
+    await pacedSleep(ACTION_DELAY, 10000);
+  }
+
+  if (success > 0) {
+    logStep(
+      logs,
+      "浇水",
+      `成功 ${success} 次 ✅ 能量☀️${last.energyBalance === undefined ? "?" : last.energyBalance} ` +
+        `番茄🍅${last.tomatoBalance === undefined ? "?" : last.tomatoBalance} ` +
+        `经验=${last.currentExp === undefined ? "?" : last.currentExp}/${
+          last.stageRequiredExp === undefined ? "?" : last.stageRequiredExp
+        } 阶段=${last.stageName || "?"}`
+    );
+  }
+  return last;
+}
+
+async function processUser(account, index, total) {
+  const wid = String(account.wid || "");
+  const openId = String(account.openId || "");
+  const phone = String(account.phone || "");
+  registerSensitive(wid, openId, phone);
+
+  const logs = [
+    `账号 ${index}/${total}：wid ${maskId(wid)} · openId ${shortOpenId(openId)}` +
+      (phone ? ` · 手机 ${maskId(phone)}` : ""),
+  ];
+  const client = new TomatoClient(account);
+
+  // 1. 登录
+  let loginData;
+  try {
+    loginData = await client.login();
+  } catch (error) {
+    logStep(logs, "登录", `失败：${brief((error && error.message) || error, 90)} ❌`);
+    return logs;
+  }
+
+  logStep(
+    logs,
+    "登录",
+    `成功 ✅ ${
+      loginData.nickName || "未设置昵称"
+    } 能量=${loginData.energyBalance} 番茄=${loginData.tomatoBalance} 阶段=${
+      loginData.stageName || "?"
+    } 开卡=${loginData.cardStatus}`
+  );
+  await pacedSleep(ACTION_DELAY, 30000);
+
+  // 2. 开卡状态
+  let cardOpened = await ensureCardOpened(client, loginData, logs);
+
+  // 3. 主页
+  let home = {};
+  try {
+    home = await client.home();
+    logStep(logs, "主页", homeLine(home, "同步成功"));
+  } catch (error) {
+    logStep(logs, "主页", `失败：${brief((error && error.message) || error, 80)} ❌`);
+  }
+
+  if (String(home.cardStatus || "") === "1") cardOpened = true;
+  else if (String(home.cardStatus || "") === "0") cardOpened = false;
+
+  // 4. 任务（签到 / 浏览 / 分享）
+  if (budgetLow(35000)) {
+    logStep(logs, "信息", "时间预算不足，跳过任务阶段 ⚠️");
+  } else {
+    await pacedSleep(PHASE_DELAY, 30000);
+    await runTasks(client, cardOpened, logs);
+  }
+
+  // 5. 好友能量
+  if (budgetLow(35000)) {
+    logStep(logs, "信息", "时间预算不足，跳过好友能量 ⚠️");
+  } else if (!cardOpened) {
+    logStep(logs, "信息", "账号活动卡未开通，跳过好友能量 ⚠️");
+  } else {
+    await pacedSleep(PHASE_DELAY, 30000);
+    await collectFriendEnergy(client, logs);
+  }
+
+  // 6. 刷新主页后浇水
+  try {
+    if (!budgetLow(30000)) {
+      const refreshed = await client.home();
+      if (refreshed && typeof refreshed === "object") home = refreshed;
     }
   } catch (error) {
-    logs.push(`好友能量失败：${error.message || error}`);
+    debugLog(`浇水前主页刷新失败：${(error && error.message) || error}`);
   }
 
-  home = await client.home();
-  logs.push(homeLine(home, "任务后状态"));
-
-  const energy = Number(home?.energyBalance || 0);
-  if (energy > 0) {
-    const beforeTomato = Number(home?.tomatoBalance || 0);
-    try {
-      const grown = await client.useEnergy();
-      const afterTomato = Number(grown?.tomatoBalance || 0);
-      let gained = Number(grown?.gainedTomatoAmount || 0);
-      if (!gained) gained = Math.max(0, afterTomato - beforeTomato);
-
-      logs.push(
-        `使用能量：消耗 ${Number(grown?.usedEnergyAmount || energy)}，` +
-          `成长到 ${grown?.stageName || "未知阶段"} ` +
-          `${Number(grown?.currentExp || 0)}/${Number(grown?.stageRequiredExp || 0)}，` +
-          `获得番茄 ${gained}`
-      );
-      home = grown;
-    } catch (error) {
-      logs.push(`使用能量失败：${error.message || error}`);
-    }
+  if (budgetLow(25000)) {
+    logStep(logs, "浇水", "时间预算不足，跳过浇水 ⚠️");
   } else {
-    logs.push("使用能量：当前没有可用能量");
+    await pacedSleep(ACTION_DELAY, 20000);
+    const after = await waterEnergy(client, home, cardOpened, logs);
+    if (after && typeof after === "object") home = after;
+    await pacedSleep(ACTION_DELAY, 20000);
   }
 
-  logs.push(homeLine(home, "最终状态"));
-  logs.push(`本次完成任务 ${completed} 个，跳过 ${skipped} 个`);
+  // 7. 最终状态
+  try {
+    const finalHome = await client.home();
+    if (finalHome && typeof finalHome === "object") home = finalHome;
+  } catch (error) {
+    debugLog(`最终主页刷新失败：${(error && error.message) || error}`);
+  }
+  logStep(logs, "主页", homeLine(home, "最终状态"));
+
   return logs;
 }
 
+// ==================== 报告与入口 ====================
+
 function renderReport(allLogs) {
-  const lines = [SCRIPT_NAME];
-  for (const logs of allLogs) {
-    lines.push("━━━━━━━━━━━━━━━━━━━━");
-    lines.push(...logs);
+  const out = [];
+  out.push("━━━━━━━━━━━━━━━━━━━━");
+
+  for (const block of allLogs) {
+    if (!block || !block.length) continue;
+    out.push(block[0]);
+
+    // 每步只保留最后一条，避免刷屏
+    const byStep = {};
+    for (const line of block.slice(1)) {
+      const at = line.indexOf(": ");
+      if (at < 0) continue;
+      const step = line.slice(0, at);
+      byStep[step] = line.slice(at + 2);
+    }
+
+    for (const step of STEP_ORDER) {
+      if (!byStep[step]) continue;
+      out.push(`${STEP_EMOJI[step] || "•"} ${step}：${byStep[step]}`);
+    }
+
+    const extra = Object.keys(byStep).filter((step) => STEP_ORDER.indexOf(step) < 0);
+    for (const step of extra) out.push(`• ${step}：${byStep[step]}`);
+
+    out.push("━━━━━━━━━━━━━━━━━━━━");
   }
-  lines.push("━━━━━━━━━━━━━━━━━━━━");
-  return lines.join("\n");
+
+  return redact(out.join("\n"));
 }
 
-function postNotification(title, subtitle, body) {
+function notify(title, subtitle, body) {
   if (!CONFIG.notify) return;
   try {
     $notification.post(title, subtitle, body);
   } catch (error) {
-    console.log(`[${SCRIPT_NAME}] 通知失败：${error.message || error}`);
+    console.log(`[${SCRIPT_NAME}] 通知失败：${(error && error.message) || error}`);
   }
 }
 
 async function main() {
-  const accounts = CONFIG.accounts || loadAccounts();
-  if (accounts.length === 0) {
-    const message = "没有可用账号。请先在微信中打开一次茄皇活动页面自动获取";
-    console.log(message);
-    postNotification(SCRIPT_NAME, "尚未获取账号", message);
+  DEADLINE = Date.now() + CONFIG.maxRuntime * 1000;
+
+  const accounts = mergeAccounts();
+  if (!accounts.length) {
+    const message = "没有可用账号。请先在微信打开一次茄皇活动页面自动获取，或在插件参数 accounts 里填 wid@openId@手机号";
+    console.log(`[${SCRIPT_NAME}] ${message}`);
+    notify(SCRIPT_NAME, "尚未获取账号", message);
     return;
   }
 
+  for (const account of accounts) registerSensitive(account.wid, account.openId, account.phone);
+
   await loadForge();
 
-  console.log(`===== 开始处理 ${accounts.length} 个账号 =====`);
+  console.log(
+    `[${SCRIPT_NAME}] 开始处理 ${accounts.length} 个账号，预算 ${CONFIG.maxRuntime}s，浇水 ${CONFIG.waterTimes} 次，邀请人=${CONFIG.inviter || "不绑定"}`
+  );
+
   const allLogs = [];
+  let done = 0;
 
   for (let i = 0; i < accounts.length; i += 1) {
-    const { wid, openId } = accounts[i];
-    const index = i + 1;
-    console.log(`\n===== 开始处理账号 ${index}/${accounts.length}（wid=${wid}）=====`);
+    // 至少保证第一个账号跑完；后续账号才按预算决定是否跳过
+    if (i > 0 && budgetLow(45000)) {
+      allLogs.push([
+        `账号 ${i + 1}/${accounts.length}：时间预算不足，已跳过`,
+      ]);
+      debugLog(`剩余 ${Math.round(budgetLeftMs() / 1000)}s，跳过剩余账号`);
+      break;
+    }
 
     let logs;
     try {
-      logs = await processUser(wid, openId, index);
+      logs = await processUser(accounts[i], i + 1, accounts.length);
     } catch (error) {
       logs = [
-        `账号 ${index}/${accounts.length}（wid=${wid}，openId=${shortOpenId(openId)}）`,
-        `处理失败：${error.message || error}`,
+        `账号 ${i + 1}/${accounts.length}：wid ${maskId(accounts[i].wid)}`,
+        `信息: 处理异常：${brief((error && error.message) || error, 100)} ❌`,
       ];
     }
 
-    console.log(logs.join("\n"));
     allLogs.push(logs);
+    done += 1;
 
-    // 多账号之间错峰，降低触发限流概率
-    if (i < accounts.length - 1) await randomSleep(3, 6);
+    if (i < accounts.length - 1) {
+      if (budgetLow(90000)) {
+        debugLog("时间预算不足以等待账号间隔，缩短等待");
+        await pacedSleep([5, 10], 60000);
+      } else {
+        await pacedSleep(ACCOUNT_DELAY, 60000);
+      }
+    }
   }
 
   const report = renderReport(allLogs);
-  console.log(`
-${report}`);
-  postNotification(
+  console.log(`\n${report}\n`);
+  notify(
     SCRIPT_NAME,
-    `多账号任务完成（${accounts.length} 个账号）`,
+    `完成 ${done}/${accounts.length} 个账号 · 耗时 ${Math.round((Date.now() - (DEADLINE - CONFIG.maxRuntime * 1000)) / 1000)}s`,
     report
   );
 }
 
 (async () => {
-  const requestMode = typeof $request !== "undefined" && Boolean($request && $request.url);
+  const captureMode = typeof $request !== "undefined" && Boolean($request && $request.url);
 
   try {
-    if (requestMode) {
-      handleCaptureMode();
+    if (captureMode) {
+      handleCapture();
     } else {
       await main();
     }
   } catch (error) {
-    const message = `${requestMode ? "账号获取" : "脚本运行"}失败：${error.message || error}`;
-    console.log(`[${SCRIPT_NAME}] ${message}`);
-    postNotification(SCRIPT_NAME, requestMode ? "账号获取失败" : "运行失败", message);
+    const message = `${captureMode ? "账号获取" : "脚本运行"}失败：${(error && error.message) || error}`;
+    console.log(`[${SCRIPT_NAME}] ${redact(message)}`);
+    notify(SCRIPT_NAME, captureMode ? "账号获取失败" : "运行失败", redact(message));
   } finally {
-    if (requestMode) {
-      $done({});
-    } else {
-      $done();
-    }
+    if (captureMode) $done({});
+    else $done();
   }
 })();
