@@ -1041,9 +1041,8 @@ async function processUser(account, index, total) {
   const phone = String(account.phone || "");
   registerSensitive(wid, openId, phone);
 
-  const logs = [
-    redact(`账号（wid=${maskId(wid)}，openId=${shortOpenId(openId)}${phone ? `，手机=${maskId(phone)}` : ""}）`),
-  ];
+  const logs = [];
+  logs.title = `账号 ${maskId(wid)}`;
   const client = new TomatoClient(account);
 
   let loginData;
@@ -1054,7 +1053,8 @@ async function processUser(account, index, total) {
     return logs;
   }
 
-  say(logs, `登录成功：${loginData.nickName || "未设置昵称"}`);
+  logs.title = loginData.nickName || "未设置昵称";
+  console.log(`[${SCRIPT_NAME}] 登录成功：${logs.title}`);
   await sleepHuman(ACTION_DELAY);
 
   let home = {};
@@ -1117,13 +1117,12 @@ async function processUser(account, index, total) {
 }
 
 function renderReport(allLogs) {
-  const lines = [SCRIPT_NAME];
+  const blocks = [];
   for (const logs of allLogs) {
-    lines.push("━━━━━━━━━━━━━━━━━━━━");
-    lines.push.apply(lines, logs);
+    if (!logs || (!logs.title && !logs.length)) continue;
+    blocks.push([logs.title || "账号"].concat(logs).join("\n"));
   }
-  lines.push("━━━━━━━━━━━━━━━━━━━━");
-  return redact(lines.join("\n"));
+  return redact(blocks.join("\n━━━━━━━━━━━━━━━━━━━━\n"));
 }
 
 function notify(title, subtitle, body) {
