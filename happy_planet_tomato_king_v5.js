@@ -1,8 +1,5 @@
 'use strict';
 
-/* 快乐星球·茄皇 V6（Loon）— 忠实移植青龙版 tyqh.py v1.0.3
-   唯一偏离：登录包不填 shareTomatoUserId（上游默认绑定作者邀请人） */
-
 const SCRIPT_NAME = "快乐星球·茄皇 V6";
 const BASE_URL = "https://farmgames.ioutu.cn";
 const ACCOUNT_KEY = "QH";
@@ -28,7 +25,6 @@ const FORGE_URLS = [
   "https://raw.githubusercontent.com/digitalbazaar/forge/1.3.1/dist/forge.min.js",
 ];
 
-// 风控节奏（秒），与青龙版一致
 const ACTION_DELAY = [2.5, 5.0];
 const PHASE_DELAY = [8.0, 15.0];
 const ACCOUNT_DELAY = [30.0, 60.0];
@@ -36,17 +32,6 @@ const RATE_LIMIT_DELAY = [15.0, 25.0];
 const MAX_WATER_TIMES = 5;
 
 const REQUEST_TIMEOUT_MS = 20000;
-const STEP_ORDER = ["登录", "主页", "开卡", "签到", "浏览任务", "分享任务", "浇水", "信息"];
-const STEP_EMOJI = {
-  "登录": "🔑",
-  "主页": "🏠",
-  "开卡": "💳",
-  "签到": "📅",
-  "浏览任务": "🔍",
-  "分享任务": "📤",
-  "浇水": "💧",
-  "信息": "ℹ️",
-};
 
 let FORGE = null;
 let RSA_PUBLIC_KEY = null;
@@ -356,12 +341,11 @@ function handleCapture() {
       emptyOpenId.openId = account.openId;
       const saved = saveAccountList(current);
       const message =
-        `已补全账号 openId（wid ${maskId(account.wid)}，openId ${shortOpenId(account.openId)}）\n` +
-        `当前共 ${current.length} 个账号`;
-      console.log(`[${SCRIPT_NAME}] ${redact(message)}`);
+        `wid：${maskId(account.wid)}\nopenId：${shortOpenId(account.openId)}\n当前共 ${current.length} 个账号`;
+      console.log(`[${SCRIPT_NAME}] 账号已补全\n${redact(message)}`);
       if (saved) {
         try {
-          $notification.post(SCRIPT_NAME, "账号已补全", message);
+          $notification.post(SCRIPT_NAME, "账号已补全", redact(message));
         } catch (_) {}
       }
       return;
@@ -370,15 +354,17 @@ function handleCapture() {
 
   const next = current.concat([account]);
   const saved = saveAccountList(next);
+  const action = current.length === 0 ? "账号获取成功" : "新账号已保存";
+  const detail =
+    `账号 #${next.length}/${next.length}\nwid：${maskId(account.wid)}\nopenId：${shortOpenId(account.openId) || "未获取"}` +
+    (sameWid.length ? "\n注意：与已有账号 wid 相同、openId 不同，已按独立账号保存" : "");
   const message =
-    `已保存账号 #${next.length}（wid ${maskId(account.wid)}，openId ${shortOpenId(account.openId) || "未获取"}）\n` +
-    (sameWid.length ? "注意：与已有账号 wid 相同、openId 不同，已按独立账号保存\n" : "") +
-    `当前共 ${next.length} 个账号，每天定时自动执行`;
+    `wid：${maskId(account.wid)}\nopenId：${shortOpenId(account.openId) || "未获取"}\n当前共 ${next.length} 个账号`;
 
-  console.log(`[${SCRIPT_NAME}] ${redact(message)}`);
+  console.log(`[${SCRIPT_NAME}] ${action}\n${redact(message)}`);
   if (saved) {
     try {
-      $notification.post(SCRIPT_NAME, "账号获取成功", message);
+      $notification.post(SCRIPT_NAME, action, redact(detail));
     } catch (_) {}
   }
 }
@@ -456,15 +442,10 @@ function isRateLimited(message) {
   return RATE_LIMIT_MARKERS.some((marker) => text.indexOf(marker) > -1);
 }
 
-function isNeedOpenCard(message) {
-  return String(message || "").indexOf("开卡") > -1;
-}
-
 function ok(result) {
   return Boolean(result) && (Number(result.code) === 200 || result.success === true);
 }
 
-/** 与青龙版 request_with_retry 等价：只有频控会重试，其余返回最后一次结果由调用方判断 */
 async function requestWithRetry(options) {
   const {
     method,
@@ -610,7 +591,6 @@ function seedRandom() {
   } catch (_) {}
 }
 
-/** 青龙版每次登录前刷新公钥；失败沿用内置 */
 async function refreshPublicKey() {
   try {
     const response = await loonHttp("GET", {
@@ -674,7 +654,6 @@ function encryptPayload(payload) {
   cipher.update(FORGE.util.createBuffer(plaintext, "utf8"));
   if (!cipher.finish()) throw new Error("AES-GCM 加密失败");
 
-  // Python 的 AESGCM.encrypt 输出为 ciphertext || 16 字节 tag
   const encryptedData = cipher.output.getBytes() + cipher.mode.tag.getBytes();
   const encryptedKey = getPublicKey().encrypt(aesKey, "RSA-OAEP", {
     md: FORGE.md.sha256.create(),
@@ -753,10 +732,6 @@ class TomatoClient {
     return this.call("GET", "/api/web/member/tomato/home", null, { retries: 2, baseSleep: 1.2 });
   }
 
-  cardStatus() {
-    return this.call("GET", "/api/web/member/tomato/cardStatus", null, { retries: 1, baseSleep: 1 });
-  }
-
   tasks() {
     return this.call("GET", "/api/web/member/tomato/tasks", null, { retries: 2, baseSleep: 1.2 });
   }
@@ -831,53 +806,20 @@ class TomatoClient {
   }
 }
 
-function logStep(logs, step, message) {
-  const line = `${step}: ${redact(message)}`;
+function homeLine(data, prefix) {
+  const home = data || {};
+  return (
+    `${prefix || "当前状态"}：能量 ${Number(home.energyBalance || 0)}，` +
+    `番茄 ${Number(home.tomatoBalance || 0)}，` +
+    `${home.stageName || "未知阶段"} ` +
+    `${Number(home.currentExp || 0)}/${Number(home.stageRequiredExp || 0)}`
+  );
+}
+
+function say(logs, message) {
+  const line = redact(message);
   logs.push(line);
-  console.log(`[${SCRIPT_NAME}] ${step === "信息" ? line.slice(3) : line}`);
-}
-
-function homeLine(home, prefix) {
-  if (!home || typeof home !== "object") return `${prefix || "当前状态"}：无数据`;
-  const parts = [`能量☀️${val(home.energyBalance)}`, `番茄🍅${val(home.tomatoBalance)}`];
-  if (home.stageName) parts.push(`阶段=${home.stageName}`);
-  if (home.currentExp !== undefined && home.stageRequiredExp !== undefined) {
-    parts.push(`经验=${val(home.currentExp)}/${val(home.stageRequiredExp)}`);
-  }
-  if (home.todayUsedEnergy !== undefined) parts.push(`今日已用=${val(home.todayUsedEnergy)}`);
-  if (home.cardStatus !== undefined && home.cardStatus !== null && home.cardStatus !== "") {
-    parts.push(`开卡=${home.cardStatus}`);
-  }
-  return `${prefix || "当前状态"}：${parts.join(" ")}`;
-}
-
-async function ensureCardOpened(client, loginData, logs) {
-  let status = String((loginData && loginData.cardStatus) || "");
-
-  if (status !== "0" && status !== "1") {
-    try {
-      const result = await client.cardStatus();
-      if (ok(result)) {
-        const data = result.data;
-        status = data && typeof data === "object"
-          ? String(data.cardStatus || data.status || "")
-          : String(data === undefined || data === null ? "" : data);
-      }
-    } catch (error) {
-      debugLog(`开卡状态查询失败：${errText(error)}`);
-    }
-  }
-
-  if (status === "1") {
-    logStep(logs, "开卡", "活动卡已开通 ✅");
-    return true;
-  }
-  if (status === "0") {
-    logStep(logs, "开卡", "活动登录已请求自动开卡，但返回状态仍为未开通 ⚠️");
-    return false;
-  }
-  logStep(logs, "开卡", `开卡状态未知(${status || "空"})，继续尝试 ⚠️`);
-  return true;
+  console.log(`[${SCRIPT_NAME}] ${line}`);
 }
 
 function taskStepName(taskType) {
@@ -888,69 +830,55 @@ function taskStepName(taskType) {
   return "";
 }
 
-async function runTasks(client, cardOpened, logs) {
+async function runTasks(client, logs) {
+  const result = { completed: 0, skipped: 0 };
+
   let tasks;
   try {
-    const result = await client.tasks();
-    if (!ok(result)) throw new Error(brief(result, 140));
-    let rows = result.data;
+    const response = await client.tasks();
+    if (!ok(response)) throw new Error(brief(response, 140));
+    let rows = response.data;
     if (rows && !Array.isArray(rows) && typeof rows === "object") {
       rows = rows.list || rows.rows || [];
     }
     tasks = Array.isArray(rows) ? rows : [];
   } catch (error) {
-    const message = `获取任务列表失败：${brief(errText(error), 120)}`;
-    logStep(logs, "签到", message);
-    logStep(logs, "浏览任务", message);
-    return;
+    say(logs, `获取任务列表失败：${brief(errText(error), 100)}`);
+    return result;
   }
 
   if (!tasks.length) {
-    logStep(logs, "签到", "任务列表为空 ⚠️");
-    logStep(logs, "浏览任务", "任务列表为空 ⚠️");
-    return;
+    say(logs, "任务列表为空");
+    return result;
   }
 
-  const done = { "签到": [], "浏览任务": [], "分享任务": [] };
   const todo = [];
-  const others = [];
 
   for (const task of tasks) {
     const type = String((task && task.taskType) || "").toUpperCase();
     const name = (task && (task.taskName || task.taskCode)) || type || "未知任务";
+
+    if (type === "FRIEND_STEAL_ENERGY") continue;
+
     const isDone =
       String((task && task.completed) || "0") === "1" ||
       String((task && task.actionType) || "").toUpperCase() === "DONE";
 
-    if (type === "FRIEND_STEAL_ENERGY") continue;
-
-    const step = taskStepName(type);
-    if (step) {
-      if (isDone) done[step].push(name);
-      else todo.push(task);
-    } else {
-      others.push(task);
+    if (!taskStepName(type)) {
+      result.skipped += 1;
+      say(logs, `跳过任务：${name}（需在小程序内操作）`);
+      continue;
     }
-  }
-
-  for (const step of ["签到", "浏览任务", "分享任务"]) {
-    if (done[step].length) logStep(logs, step, `今日已完成 ✅（${done[step].join("、")}）`);
-  }
-
-  if (!cardOpened) {
-    for (const task of todo.concat(others)) {
-      const step = taskStepName(task && task.taskType) || "信息";
-      const name = (task && (task.taskName || task.taskCode)) || "任务";
-      logStep(logs, step, `${name} 跳过：账号未开卡 ⚠️`);
+    if (isDone) {
+      say(logs, `任务已完成：${name}`);
+      continue;
     }
-    return;
+    todo.push(task);
   }
 
   for (const task of todo) {
     const type = String((task && task.taskType) || "").toUpperCase();
-    const step = taskStepName(type);
-    const name = (task && (task.taskName || task.taskName || task.taskCode)) || type;
-    if (!step) continue;
+    const name = (task && (task.taskName || task.taskCode)) || type;
 
     try {
       if (type === "BROWSE" && task.browseTarget) {
@@ -962,33 +890,31 @@ async function runTasks(client, cardOpened, logs) {
         await sleepHuman(ACTION_DELAY);
       }
 
-      const result = await client.completeTask(task);
-      if (ok(result)) {
-        const data = (result && result.data) || {};
+      const response = await client.completeTask(task);
+      if (ok(response)) {
+        const data = (response && response.data) || {};
         const reward =
           data.rewardText ||
-          `+${data.rewardEnergy !== undefined ? data.rewardEnergy : (task.rewardEnergy !== undefined ? task.rewardEnergy : "")} 能量`;
-        logStep(logs, step, `${name} 完成成功 ✅ 奖励=${reward}`);
+          (data.rewardEnergy !== undefined
+            ? `+${data.rewardEnergy} 能量`
+            : task.rewardEnergy !== undefined
+              ? `+${task.rewardEnergy} 能量`
+              : "已领取");
+        say(logs, `任务完成：${name}，${reward}`);
+        result.completed += 1;
       } else {
-        const message = String((result && (result.msg || result.message)) || "");
-        if (isNeedOpenCard(message)) {
-          logStep(logs, step, `${name} 失败: 请先开卡后再操作 ⚠️`);
-        } else {
-          logStep(logs, step, `${name} 失败: ${brief(result, 80)} ❌`);
-        }
+        result.skipped += 1;
+        say(logs, `任务失败：${name}，${brief(response, 60)}`);
       }
     } catch (error) {
-      logStep(logs, step, `${name} 出错: ${brief(errText(error), 80)} ❌`);
+      result.skipped += 1;
+      say(logs, `任务失败：${name}，${brief(errText(error), 60)}`);
     }
 
     await sleepHuman(ACTION_DELAY);
   }
 
-  for (const task of others) {
-    const type = String((task && task.taskType) || "").toUpperCase();
-    const name = (task && (task.taskName || task.taskCode)) || type;
-    logStep(logs, "信息", `暂不自动处理任务类型 ${type}: ${name}`);
-  }
+  return result;
 }
 
 async function collectFriendEnergy(client, logs) {
@@ -998,7 +924,7 @@ async function collectFriendEnergy(client, logs) {
   try {
     friends = await client.friends(20);
   } catch (error) {
-    logStep(logs, "信息", `好友能量处理失败: ${brief(errText(error), 100)} ❌`);
+    say(logs, `好友能量失败：${brief(errText(error), 80)}`);
     return stat;
   }
 
@@ -1009,16 +935,16 @@ async function collectFriendEnergy(client, logs) {
     stat.checked += 1;
 
     try {
-      const homeResult = await client.friendHome(friendId);
-      const home = (homeResult && homeResult.data) || null;
-      if (!ok(homeResult) || !home) {
+      const response = await client.friendHome(friendId);
+      const home = (response && response.data) || null;
+      if (!ok(response) || !home) {
         stat.failed += 1;
       } else {
         const available = Number(home.stealAmount || 0);
         if (String(home.canSteal || "") === "1" && available > 0) {
-          const stealResult = await client.steal(friendId);
-          if (ok(stealResult)) {
-            let gained = stealResult.data;
+          const stealResponse = await client.steal(friendId);
+          if (ok(stealResponse)) {
+            let gained = stealResponse.data;
             if (gained && typeof gained === "object") {
               gained = gained.stealAmount !== undefined ? gained.stealAmount : gained.energyAmount;
             }
@@ -1038,22 +964,26 @@ async function collectFriendEnergy(client, logs) {
     await sleepHuman(ACTION_DELAY);
   }
 
-  logStep(
-    logs,
-    "信息",
-    `好友能量：检查${stat.checked}人，收取${stat.collected}人，共${stat.energy}能量，失败${stat.failed}人`
-  );
+  if (stat.collected > 0) {
+    say(
+      logs,
+      `好友能量：成功收取 ${stat.collected} 位好友，共 ${stat.energy} 能量` +
+        (stat.failed > 0 ? `，失败 ${stat.failed} 位` : "")
+    );
+  } else if (stat.failed > 0) {
+    say(logs, `好友能量：收取失败 ${stat.failed} 位`);
+  } else {
+    say(logs, "好友能量：暂无可收取能量");
+  }
+
   return stat;
 }
 
-async function waterEnergy(client, home, cardOpened, logs) {
-  if (!cardOpened) {
-    logStep(logs, "浇水", "账号未开卡，跳过浇水 ⚠️");
-    return home;
-  }
-
-  if (Number((home && home.energyBalance) || 0) <= 0) {
-    logStep(logs, "浇水", "当前能量为 0，跳过 ⚠️");
+async function waterEnergy(client, home, logs) {
+  const startEnergy = Number((home && home.energyBalance) || 0);
+  const startTomato = Number((home && home.tomatoBalance) || 0);
+  if (startEnergy <= 0) {
+    say(logs, "使用能量：当前没有可用能量");
     return home;
   }
 
@@ -1061,25 +991,25 @@ async function waterEnergy(client, home, cardOpened, logs) {
   let last = home;
 
   for (let i = 0; i < MAX_WATER_TIMES; i += 1) {
-    let result;
+    let response;
     try {
-      result = await client.useEnergy();
+      response = await client.useEnergy();
     } catch (error) {
-      logStep(logs, "浇水", `浇水异常: ${brief(errText(error), 80)} ❌`);
+      say(logs, `使用能量失败：${brief(errText(error), 80)}`);
       break;
     }
 
-    if (!ok(result)) {
-      const message = String((result && (result.msg || result.message)) || "") || brief(result, 80);
-      logStep(logs, "浇水", success === 0 ? `浇水失败: ${message} ❌` : `共成功 ${success} 次后停止: ${message} ⚠️`);
+    if (!ok(response)) {
+      const message = String((response && (response.msg || response.message)) || "") || brief(response, 60);
+      say(logs, success === 0 ? `使用能量失败：${message}` : `使用能量：成功 ${success} 次后停止，${message}`);
       break;
     }
 
-    const data = (result && result.data) || {};
+    const data = (response && response.data) || {};
     if (data && typeof data === "object" && Object.keys(data).length) last = data;
     success += 1;
     debugLog(
-      `浇水#${success} 成功 能量=${val(last.energyBalance)} 经验=${val(last.currentExp)}/${val(last.stageRequiredExp)}`
+      `浇水#${success} 能量=${val(last.energyBalance)} 经验=${val(last.currentExp)}/${val(last.stageRequiredExp)}`
     );
 
     let left = 0;
@@ -1094,11 +1024,12 @@ async function waterEnergy(client, home, cardOpened, logs) {
   }
 
   if (success > 0) {
-    logStep(
+    const used = Math.max(0, startEnergy - Number(last.energyBalance || 0));
+    const gained = Math.max(0, Number(last.tomatoBalance || 0) - startTomato);
+    say(
       logs,
-      "浇水",
-      `浇水成功 ${success} 次 ✅ 能量☀️${val(last.energyBalance)} 番茄🍅${val(last.tomatoBalance)} ` +
-        `经验=${val(last.currentExp)}/${val(last.stageRequiredExp)} 阶段=${last.stageName || "?"}`
+      `使用能量：浇水 ${success} 次，消耗 ${used}，成长到 ${last.stageName || "未知阶段"} ` +
+        `${Number(last.currentExp || 0)}/${Number(last.stageRequiredExp || 0)}，获得番茄 ${gained}`
     );
   }
   return last;
@@ -1111,8 +1042,7 @@ async function processUser(account, index, total) {
   registerSensitive(wid, openId, phone);
 
   const logs = [
-    `账号 ${index}/${total}：wid ${maskId(wid)} · openId ${shortOpenId(openId)}` +
-      (phone ? ` · 手机 ${maskId(phone)}` : ""),
+    redact(`账号（wid=${maskId(wid)}，openId=${shortOpenId(openId)}${phone ? `，手机=${maskId(phone)}` : ""}）`),
   ];
   const client = new TomatoClient(account);
 
@@ -1120,99 +1050,80 @@ async function processUser(account, index, total) {
   try {
     loginData = await client.login();
   } catch (error) {
-    logStep(logs, "登录", `失败: ${brief(errText(error), 100)} ❌`);
+    say(logs, `登录失败：${brief(errText(error), 100)}`);
     return logs;
   }
 
-  logStep(
-    logs,
-    "登录",
-    `成功 ✅ ${loginData.nickName || "未设置昵称"} 能量=${val(loginData.energyBalance)} ` +
-      `番茄=${val(loginData.tomatoBalance)} 阶段=${loginData.stageName || "?"} 开卡=${val(loginData.cardStatus)}`
-  );
+  say(logs, `登录成功：${loginData.nickName || "未设置昵称"}`);
   await sleepHuman(ACTION_DELAY);
-
-  let cardOpened = await ensureCardOpened(client, loginData, logs);
 
   let home = {};
   try {
-    const homeResult = await client.home();
-    if (ok(homeResult) && homeResult.data && typeof homeResult.data === "object") {
-      home = homeResult.data;
-      logStep(logs, "主页", homeLine(home, "同步成功"));
+    const response = await client.home();
+    if (ok(response) && response.data && typeof response.data === "object") {
+      home = response.data;
+      say(logs, homeLine(home));
     } else {
-      logStep(logs, "主页", `失败: ${brief(homeResult, 100)} ❌`);
+      say(logs, `获取主页失败：${brief(response, 80)}`);
     }
   } catch (error) {
-    logStep(logs, "主页", `出错: ${brief(errText(error), 100)} ❌`);
+    say(logs, `获取主页失败：${brief(errText(error), 80)}`);
   }
 
-  if (String(home.cardStatus || "") === "1") cardOpened = true;
-  else if (String(home.cardStatus || "") === "0") cardOpened = false;
-
   await sleepHuman(PHASE_DELAY);
-  await runTasks(client, cardOpened, logs);
 
-  await sleepHuman(PHASE_DELAY);
-  if (cardOpened) {
-    await collectFriendEnergy(client, logs);
-  } else {
-    logStep(logs, "信息", "账号活动卡未开通，跳过好友能量 ⚠️");
+  let taskStat = { completed: 0, skipped: 0 };
+  try {
+    taskStat = await runTasks(client, logs);
+  } catch (error) {
+    say(logs, `任务处理失败：${brief(errText(error), 80)}`);
   }
 
   await sleepHuman(PHASE_DELAY);
   try {
-    const refreshed = await client.home();
-    if (ok(refreshed) && refreshed.data && typeof refreshed.data === "object") home = refreshed.data;
+    await collectFriendEnergy(client, logs);
+  } catch (error) {
+    say(logs, `好友能量失败：${brief(errText(error), 80)}`);
+  }
+
+  await sleepHuman(PHASE_DELAY);
+  try {
+    const response = await client.home();
+    if (ok(response) && response.data && typeof response.data === "object") {
+      home = response.data;
+      say(logs, homeLine(home, "任务后状态"));
+    }
   } catch (error) {
     debugLog(`主页刷新失败：${errText(error)}`);
   }
 
   await sleepHuman(ACTION_DELAY);
-  home = await waterEnergy(client, home, cardOpened, logs);
+  home = await waterEnergy(client, home, logs);
   await sleepHuman(ACTION_DELAY);
 
   try {
-    const finalResult = await client.home();
-    if (ok(finalResult) && finalResult.data && typeof finalResult.data === "object") {
-      home = finalResult.data;
+    const response = await client.home();
+    if (ok(response) && response.data && typeof response.data === "object") {
+      home = response.data;
     }
   } catch (error) {
     debugLog(`终态主页刷新失败：${errText(error)}`);
   }
-  logStep(logs, "主页", homeLine(home, "最终状态"));
+  say(logs, homeLine(home, "最终状态"));
+
+  say(logs, `本次完成任务 ${taskStat.completed} 个，跳过 ${taskStat.skipped} 个`);
 
   return logs;
 }
 
 function renderReport(allLogs) {
-  const out = [];
-  out.push("━━━━━━━━━━━━━━━━━━━━");
-
-  for (const block of allLogs) {
-    if (!block || !block.length) continue;
-    out.push(block[0]);
-
-    const byStep = {};
-    for (const line of block.slice(1)) {
-      const at = line.indexOf(": ");
-      if (at < 0) continue;
-      byStep[line.slice(0, at)] = line.slice(at + 2);
-    }
-
-    for (const step of STEP_ORDER) {
-      if (!byStep[step]) continue;
-      out.push(`${STEP_EMOJI[step] || "•"} ${step}：${byStep[step]}`);
-    }
-
-    for (const step of Object.keys(byStep)) {
-      if (STEP_ORDER.indexOf(step) < 0) out.push(`• ${step}：${byStep[step]}`);
-    }
-
-    out.push("━━━━━━━━━━━━━━━━━━━━");
+  const lines = [SCRIPT_NAME];
+  for (const logs of allLogs) {
+    lines.push("━━━━━━━━━━━━━━━━━━━━");
+    lines.push.apply(lines, logs);
   }
-
-  return redact(out.join("\n"));
+  lines.push("━━━━━━━━━━━━━━━━━━━━");
+  return redact(lines.join("\n"));
 }
 
 function notify(title, subtitle, body) {
@@ -1249,7 +1160,7 @@ async function main() {
 
   const report = renderReport(allLogs);
   console.log(`\n${report}\n`);
-  notify(SCRIPT_NAME, `共 ${accounts.length} 个账号`, report);
+  notify(SCRIPT_NAME, `多账号任务完成（${accounts.length} 个账号）`, report);
 }
 
 (async () => {
