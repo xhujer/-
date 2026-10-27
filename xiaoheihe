@@ -1,21 +1,16 @@
 #!name=小黑盒签到与任务
-#!desc=打开小黑盒自动保存账号；每天定时签到并完成分享帖子/游戏详情/游戏评价、发布内容与发表游戏评价，全部以服务器回查状态为准
-#!author=Ming · Loon 改进版
-#!homepage=https://github.com/xhujer/-
+#!desc=定时签到并完成分享帖子/游戏详情/游戏评价、发布内容与发表游戏评价，全部以服务器回查状态为准
 #!icon=https://api.xiaoheihe.cn/favicon.ico
-#!system=iOS,iPadOS
-#!system_version=15
 #!loon_version=3.5.1(983)
 #!date=2026-10-27
-#!version=3.2.2
 #!tag=小黑盒,签到,任务
 #!type=normal
 
 [Argument]
 
-cron = input,"0 8 * * *",type=string,tag=签到时间,desc=每天执行的 cron 表达式，默认上午 08:00
+cron = input,"0 8 * * *",type=string,tag=签到时间,desc=默认上午 08:00
 
-cookieCapture = switch,true,type=boolean,tag=获取账号,desc=打开小黑盒 App 进入“我的”页面或刷新时自动保存账号凭据（只保留 pkey 与 x_xhh_tokenid）
+cookieCapture = switch,true,type=boolean,tag=获取账号,desc=打开小黑盒 App 进入“我的”页面或刷新时自动保存账号凭据
 
 [Script]
 
