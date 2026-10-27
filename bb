@@ -1,16 +1,13 @@
 #!name = BiliBili每日等级任务
-#!desc = 登录/观看/分享/投币 + 大积分签到 + 漫画签到，全部默认执行
-#!author = MartinsKing（@ClydeTime）
-#!homepage = https://github.com/ClydeTime/BiliBili/tree/master
-#!icon = https://raw.githubusercontent.com/ClydeTime/BiliBili/main/database/icon_Avatar.png
+#!desc = 登录/观看/分享/投币 
+#!icon = https://x0.at/TIqg.png
 #!tag = B站,签到
-#!type = normal
 #!loon_version = 3.5.1(983)
 #!date = 2026-10-27
 
 [Argument]
-qrCookie = switch,false,type=boolean,tag=扫码Cookie,desc=需要抓 cookie 时打开 抓完关掉
-runTime = input,"30 7 * * *",type=string,tag=执行时间,desc=主任务执行时间 默认早上7点30分
+qrCookie = switch,false,type=boolean,tag=扫码Cookie,desc=默认开启，抓取Cookie后可关闭 
+runTime = input,"30 7 * * *",type=string,tag=执行时间,desc=默认7:00执行签到
 ogvTask = switch,true,type=boolean,tag=观看剧集大积分
 
 [Script]
