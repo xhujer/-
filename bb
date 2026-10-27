@@ -6,7 +6,7 @@
 
 [Argument]
 qrCookie = switch,false,type=boolean,tag=扫码Cookie,desc=默认开启，抓完Cookie后可关闭 
-runTime = input,"30 7 * * *",type=string,tag=执行时间
+runTime = input,"0 7 * * *",type=string,tag=执行时间
 ogvTask = switch,true,type=boolean,tag=观看剧集大积分
 
 [Script]
