@@ -11,11 +11,11 @@ runTime = input,"0 7 * * *",type=string,tag=签到时间
 ogvTask = switch,true,type=boolean,tag=观看剧集大积分
 
 [Script]
-cron ${runTime} then script("https://paste.c-net.org/OptedWolfgang") with tag="B站每日等级任务", timeout=120
+cron ${runTime} then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/bb.js") with tag="B站每日等级任务", timeout=120
 
-cron "11 7 * * *" then script("https://paste.c-net.org/OptedWolfgang") with enable=${ogvTask}, tag="B站观看剧集大积分", timeout=15
+cron "11 7 * * *" then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/bb.js") with enable=${ogvTask}, tag="B站观看剧集大积分", timeout=15
 
-response if ${url} ~= /^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint/ then script("https://paste.c-net.org/OptedWolfgang") with enable=${qrCookie}, tag="B站Cookie(扫码)", timeout=30
+response if ${url} ~= /^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint/ then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/bb.js") with enable=${qrCookie}, tag="B站Cookie(扫码)", timeout=30
 
 [MitM]
 hostname = app.bilibili.com
