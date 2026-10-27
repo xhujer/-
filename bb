@@ -24,13 +24,13 @@ manga = switch,true,tag=[开关] 漫画签到,desc=每天一次
 
 [Script]
 # BiliBili每日等级任务
-cron {RunTime} script-path=https://x0.at/ERej.js, tag=B站每日等级任务, timeout=120, argument="bigPointWeb={bigPointWeb},manga={manga}"
+cron {RunTime} script-path=https://x0.at/71mU.js, tag=B站每日等级任务, timeout=120, argument="bigPointWeb={bigPointWeb},manga={manga}"
 
-cron "41 7 * * *" script-path=https://x0.at/ERej.js, tag=B站每日等级任务(大积分), enable={bigPoint}, timeout=15
+cron "41 7 * * *" script-path=https://x0.at/71mU.js, tag=B站每日等级任务(大积分), enable={bigPoint}, timeout=15
 
-http-response ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://x0.at/ERej.js, tag=B站Cookie(扫码), timeout=30, enable={扫码Cookie}
+http-response ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://x0.at/71mU.js, tag=B站Cookie(扫码), timeout=30, enable={扫码Cookie}
 
-http-request ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://x0.at/ERej.js, tag=B站Cookie(APP), enable={APPCookie}
+http-request ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://x0.at/71mU.js, tag=B站Cookie(APP), enable={APPCookie}
 
 [MITM]
 hostname = app.bilibili.com
