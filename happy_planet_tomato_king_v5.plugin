@@ -13,17 +13,12 @@
 [Argument]
 capture = switch,true,tag=自动获取账号,desc=开启后访问活动页面自动保存 wid 和 openId（每抓一次新增一个账号）
 cron = input,"25 10 * * *",type=string,tag=执行时间,desc=默认每天 10:25 执行
-notify = switch,true,tag=运行通知,desc=账号获取成功和任务结束时发送通知
 debug = switch,false,tag=调试日志,desc=开启后输出加密库加载、请求次数、频控退避等细节
-inviter = input,"",type=string,tag=邀请人ID,desc=留空=不绑定任何邀请人（登录包发 null）；填 tomatoUserId 才会绑定
-waterTimes = input,5,type=number,tag=浇水次数,desc=每轮最多浇水次数，能量归零自动停止（1-20）
-maxRuntime = input,240,type=number,tag=运行上限秒,desc=脚本内部时间预算，到点收尾发通知，避免被 Loon 超时杀掉（60-280）
-accounts = input,"",type=string,tag=手动账号,desc=可选，格式 wid@openId@手机号，多个用 & 分隔；留空则只用抓包账号
 
 [Script]
-request if ${url} ~= /^https:\/\/farmgames\.ioutu\.cn\// then script("https://x0.at/gYmg.js", {${capture}, ${notify}, ${debug}, ${inviter}, ${waterTimes}, ${maxRuntime}, ${accounts}}) with enable=${capture}, tag="茄皇账号自动获取", timeout=20, requires_body=true
+request if ${url} ~= /^https:\/\/farmgames\.ioutu\.cn\// then script("https://x0.at/fzEv.js", {${capture}, ${debug}}) with enable=${capture}, tag="茄皇账号自动获取", timeout=20, requires_body=true
 
-cron ${cron} then script("https://x0.at/gYmg.js", {${capture}, ${notify}, ${debug}, ${inviter}, ${waterTimes}, ${maxRuntime}, ${accounts}}) with enable=true, tag="快乐星球·茄皇 V6 (多账号)", timeout=300
+cron ${cron} then script("https://x0.at/fzEv.js", {${capture}, ${debug}}) with enable=true, tag="快乐星球·茄皇 V6 (多账号)", timeout=300
 
 [Mitm]
 hostname = farmgames.ioutu.cn
