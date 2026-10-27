@@ -1,7 +1,7 @@
 'use strict';
 
-/* 快乐星球·茄皇 V6（Loon）— 移植自青龙版 tyqh.py v1.0.3
-   登录包默认不填 shareTomatoUserId（上游默认绑定作者邀请人 11422） */
+/* 快乐星球·茄皇 V6（Loon）— 忠实移植青龙版 tyqh.py v1.0.3
+   唯一偏离：登录包不填 shareTomatoUserId（上游默认绑定作者邀请人） */
 
 const SCRIPT_NAME = "快乐星球·茄皇 V6";
 const BASE_URL = "https://farmgames.ioutu.cn";
@@ -33,10 +33,9 @@ const ACTION_DELAY = [2.5, 5.0];
 const PHASE_DELAY = [8.0, 15.0];
 const ACCOUNT_DELAY = [30.0, 60.0];
 const RATE_LIMIT_DELAY = [15.0, 25.0];
+const MAX_WATER_TIMES = 5;
 
 const REQUEST_TIMEOUT_MS = 20000;
-const WATER_TIMES = 5;          // 每轮最多浇水次数，能量归零自动停
-const MAX_RUNTIME_SEC = 240;    // 脚本内部预算，避免被 Loon 超时杀掉
 const STEP_ORDER = ["登录", "主页", "开卡", "签到", "浏览任务", "分享任务", "浇水", "信息"];
 const STEP_EMOJI = {
   "登录": "🔑",
@@ -52,15 +51,12 @@ const STEP_EMOJI = {
 let FORGE = null;
 let RSA_PUBLIC_KEY = null;
 let PUBLIC_KEY_B64 = PUBLIC_KEY;
-let DEADLINE = 0;
 const SENSITIVE_VALUES = new Set();
 
 const CONFIG = readConfig();
 
 function readConfig() {
-  const raw = typeof $argument !== "undefined" ? $argument : "";
-  const args = parseScriptArguments(raw);
-
+  const args = parseScriptArguments(typeof $argument !== "undefined" ? $argument : "");
   return {
     capture: toBool(args.capture, true),
     debug: toBool(args.debug, false),
@@ -73,8 +69,6 @@ function parseScriptArguments(value) {
 
   if (value === null || value === undefined || value === "") return result;
 
-  // 新版 Script 语法（Loon 3.5.1 / build 983+）：插件对象参数，
-  // script("x.js", {${capture}, ${notify}}) 传进来的是 Object，值保留 String/Number/Boolean
   if (typeof value === "object" && !Array.isArray(value)) {
     for (const key of keys) {
       if (Object.prototype.hasOwnProperty.call(value, key)) {
@@ -132,20 +126,8 @@ function toBool(value, fallback) {
   return fallback;
 }
 
-function clampInt(value, min, max, fallback) {
-  const number = Number.parseInt(clean(value), 10);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(max, Math.max(min, number));
-}
-
 function errText(error) {
   return String((error && error.message) || error || "未知错误");
-}
-
-function explainError(message) {
-  return /HTTPClient|Socket|SSL|TLS|Error Domain|not connected|refused|reset/i.test(message)
-    ? "网络连接失败（已尝试直连）"
-    : message;
 }
 
 function val(value) {
@@ -165,22 +147,8 @@ function randomBetween(min, max) {
   return min + Math.random() * Math.max(0, max - min);
 }
 
-function budgetLeftMs() {
-  if (!DEADLINE) return Number.MAX_SAFE_INTEGER;
-  return DEADLINE - Date.now();
-}
-
-function budgetLow(reserveMs) {
-  return budgetLeftMs() < reserveMs;
-}
-
-/** 受预算约束的等待：剩余时间不够就少睡，绝不拖过 Loon 的硬超时。 */
-async function pacedSleep(range, reserveMs) {
-  const want = randomBetween(range[0], range[1]);
-  const allowed = (budgetLeftMs() - (reserveMs || 5000)) / 1000;
-  if (allowed <= 0.5) return false;
-  await sleep(Math.min(want, allowed));
-  return true;
+function sleepHuman(range) {
+  return sleep(randomBetween(range[0], range[1]));
 }
 
 function registerSensitive() {
@@ -210,7 +178,6 @@ function redact(text) {
   for (const secret of SENSITIVE_VALUES) {
     if (secret && secret.length >= 4) out = out.split(secret).join(maskId(secret));
   }
-  // 不用 lookbehind，兼容较老的 JavaScriptCore
   out = out.replace(/(^|\D)(1\d{10})(?!\d)/g, (all, pre, phone) => {
     return `${pre}${phone.slice(0, 3)}****${phone.slice(-4)}`;
   });
@@ -235,7 +202,6 @@ function parseAccountString(rawValue) {
   const parts = clean(rawValue).split("#").map((item) => item.trim());
   const wid = parts[0] || "";
   if (!wid) return null;
-  // openId 允许为空：只有 wid 也能登录，抓包时可能拿不到 openId
   const openId = parts[1] || "";
   if (openId && openId.charAt(0) !== "o") return null;
   return {
@@ -250,6 +216,10 @@ function accountString(account) {
   return account.phone ? `${account.wid}#${openId}#${account.phone}` : `${account.wid}#${openId}`;
 }
 
+function accountKey(account) {
+  return `${account.wid}#${account.openId || ""}`;
+}
+
 function dedupeAccounts(list) {
   const seen = {};
   const out = [];
@@ -257,7 +227,6 @@ function dedupeAccounts(list) {
     if (!item || !item.wid) continue;
     const key = accountKey(item);
     if (seen[key]) {
-      // 同 wid 同 openId 的重复项，顺手把缺失的手机号补上
       if (!seen[key].phone && item.phone) seen[key].phone = item.phone;
       continue;
     }
@@ -285,10 +254,7 @@ function loadAccounts() {
 function saveAccountList(accounts) {
   const list = accounts.filter(Boolean);
   try {
-    const saved = Boolean(
-      $persistentStore.write(JSON.stringify(list.map(accountString)), ACCOUNT_KEY)
-    );
-    return saved;
+    return Boolean($persistentStore.write(JSON.stringify(list.map(accountString)), ACCOUNT_KEY));
   } catch (_) {
     return false;
   }
@@ -353,14 +319,9 @@ function extractAccount(request) {
 
   wid = String(wid || "").replace(/["'<>]/g, "").trim();
   openId = String(openId || "").replace(/["'<>]/g, "").trim();
-
   if (!wid) return null;
   if (openId && openId.charAt(0) !== "o") openId = "";
   return { wid, openId, phone: "" };
-}
-
-function accountKey(account) {
-  return `${account.wid}#${account.openId || ""}`;
 }
 
 function handleCapture() {
@@ -375,7 +336,6 @@ function handleCapture() {
     return;
   }
 
-  // 每次都以存储为准重新读，缩小并发请求互相覆盖的窗口
   const current = loadAccounts();
   const duplicate = current.find((item) => accountKey(item) === accountKey(account));
   if (duplicate) {
@@ -385,16 +345,13 @@ function handleCapture() {
     return;
   }
 
-  // 同一个 wid：可能是同一会员换了微信号（openId 不同），也可能这次请求没带 openId
   const sameWid = current.filter((item) => item.wid === account.wid);
   if (sameWid.length) {
     const emptyOpenId = sameWid.find((item) => !item.openId);
-
     if (!account.openId && sameWid.some((item) => item.openId)) {
       debugLog(`[抓包] wid=${maskId(account.wid)} 已有 openId 记录，忽略这次无 openId 的请求`);
       return;
     }
-
     if (account.openId && emptyOpenId) {
       emptyOpenId.openId = account.openId;
       const saved = saveAccountList(current);
@@ -413,12 +370,10 @@ function handleCapture() {
 
   const next = current.concat([account]);
   const saved = saveAccountList(next);
-  const total = next.length;
-  const shared = sameWid.length > 0;
   const message =
-    `已保存账号 #${total}（wid ${maskId(account.wid)}，openId ${shortOpenId(account.openId) || "未获取"}）\n` +
-    (shared ? "注意：与已有账号 wid 相同、openId 不同，已按独立账号保存\n" : "") +
-    `当前共 ${total} 个账号，每天定时自动执行`;
+    `已保存账号 #${next.length}（wid ${maskId(account.wid)}，openId ${shortOpenId(account.openId) || "未获取"}）\n` +
+    (sameWid.length ? "注意：与已有账号 wid 相同、openId 不同，已按独立账号保存\n" : "") +
+    `当前共 ${next.length} 个账号，每天定时自动执行`;
 
   console.log(`[${SCRIPT_NAME}] ${redact(message)}`);
   if (saved) {
@@ -428,7 +383,6 @@ function handleCapture() {
   }
 }
 
-/** Loon 在 binary-mode 或非 UTF-8 响应时会给 Uint8Array，这里统一转成字符串 */
 function utf8Decode(bytes) {
   let out = "";
   for (let i = 0; i < bytes.length; i += 1) {
@@ -506,12 +460,11 @@ function isNeedOpenCard(message) {
   return String(message || "").indexOf("开卡") > -1;
 }
 
-function apiError(message, result) {
-  const error = new Error(message);
-  error.payload = result;
-  return error;
+function ok(result) {
+  return Boolean(result) && (Number(result.code) === 200 || result.success === true);
 }
 
+/** 与青龙版 request_with_retry 等价：只有频控会重试，其余返回最后一次结果由调用方判断 */
 async function requestWithRetry(options) {
   const {
     method,
@@ -523,80 +476,58 @@ async function requestWithRetry(options) {
     headers = {},
   } = options;
 
-  let lastError = null;
-  let forceDirect = false;
+  let last = null;
 
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      const requestHeaders = Object.assign({}, headers);
-      const request = {
-        url: `${BASE_URL}${path}`,
-        timeout: REQUEST_TIMEOUT_MS,
-        headers: requestHeaders,
-      };
-      if (forceDirect) request.node = "DIRECT";
+  for (let i = 0; i < retries; i += 1) {
+    const requestHeaders = Object.assign({}, headers);
+    const request = {
+      url: `${BASE_URL}${path}`,
+      timeout: REQUEST_TIMEOUT_MS,
+      headers: requestHeaders,
+    };
 
-      if (payload !== null) {
-        if (encrypted) {
-          request.body = JSON.stringify(encryptPayload(payload));
-          requestHeaders["Content-Type"] = "application/json";
-          requestHeaders["X-Request-Encrypted"] = "true";
-        } else {
-          request.body = typeof payload === "string" ? payload : JSON.stringify(payload);
-        }
+    if (payload !== null) {
+      if (encrypted) {
+        request.body = JSON.stringify(encryptPayload(payload));
+        requestHeaders["Content-Type"] = "application/json";
+        requestHeaders["X-Request-Encrypted"] = "true";
+      } else {
+        request.body = typeof payload === "string" ? payload : JSON.stringify(payload);
       }
-
-      debugLog(`${method} ${path}（第 ${attempt + 1} 次）`);
-      const response = await loonHttp(method, request);
-
-      let result;
-      try {
-        result = JSON.parse(response.body);
-      } catch (_) {
-        throw apiError(`非 JSON 响应（HTTP ${response.status}）：${brief(response.body, 120)}`, null);
-      }
-
-      const message = String((result && (result.msg || result.message)) || "");
-      if (response.status < 300 && (Number(result && result.code) === 200 || (result && result.success === true))) {
-        return result;
-      }
-      if (attempt >= retries) throw apiError(message || `HTTP ${response.status}`, result);
-
-      // 429/503 优先用 Retry-After，频控按 15–25s × 递增，其余按 baseSleep 线性退避
-      let wait = baseSleep * (attempt + 1);
-      if (response.status === 429 || response.status === 503) {
-        const retryAfter = Number.parseFloat(getHeader(response.headers, "Retry-After") || "0");
-        if (Number.isFinite(retryAfter) && retryAfter > 0) wait = Math.max(retryAfter, 2);
-      } else if (isRateLimited(message)) {
-        wait = randomBetween(Math.max(baseSleep, RATE_LIMIT_DELAY[0]), RATE_LIMIT_DELAY[1]) * (attempt + 1);
-        console.log(`[${SCRIPT_NAME}] 触发频控，${wait.toFixed(1)}s 后重试（${attempt + 1}/${retries}）`);
-      } else if (response.status < 400) {
-        throw apiError(message || "接口返回异常", result);
-      }
-
-      const allowed = (budgetLeftMs() - 15000) / 1000;
-      if (allowed <= 1) throw apiError("时间预算不足，已放弃重试", result);
-      await sleep(Math.min(wait, allowed));
-      continue;
-    } catch (error) {
-      lastError = error;
-      const message = errText(error);
-      const socketError = /HTTPClient|Socket|SSL|TLS|refused|reset|closed|Error Domain|not connected/i.test(message);
-      if (socketError && !forceDirect) {
-        forceDirect = true;
-        debugLog(`网络层失败，改用 DIRECT 重试：${message}`);
-        continue;
-      }
-      const retryable = /timeout|timed out|network|连接|网络|HTTP 5\d\d|非 JSON/i.test(message);
-      if (attempt < retries && retryable && !isNeedOpenCard(message)) {
-        await sleep(baseSleep * (attempt + 1));
-        continue;
-      }
-      throw error;
     }
+
+    debugLog(`${method} ${path}（第 ${i + 1} 次）`);
+    const response = await loonHttp(method, request);
+
+    let result;
+    try {
+      result = JSON.parse(response.body);
+    } catch (_) {
+      throw new Error(`非 JSON 响应（HTTP ${response.status}）：${brief(response.body, 120)}`);
+    }
+
+    if (response.status >= 400) {
+      throw new Error(
+        (result && (result.msg || result.message)) || `HTTP ${response.status}`
+      );
+    }
+
+    last = result;
+    if (ok(result)) return result;
+
+    const message = String((result && (result.msg || result.message)) || "");
+    if (isRateLimited(message) && i < retries - 1) {
+      const low = Math.max(baseSleep, RATE_LIMIT_DELAY[0]);
+      const high = Math.max(low, RATE_LIMIT_DELAY[1]);
+      const wait = randomBetween(low, high) * (i + 1);
+      console.log(`[${SCRIPT_NAME}] 触发频控，${wait.toFixed(1)}s 后重试（${i + 1}/${retries - 1}）`);
+      await sleep(wait);
+      continue;
+    }
+    return result;
   }
 
-  throw lastError || new Error("请求重试后仍未成功");
+  return last;
 }
 
 function globalObject() {
@@ -609,7 +540,6 @@ function globalObject() {
 
 function sanitizeLibrarySource(source) {
   let text = String(source || "").replace(/^\uFEFF/, "");
-  // Loon 的 JSC 偶尔把开头的 /*! ... */ 误解析成代码，先剥掉前导注释
   for (;;) {
     const before = text;
     text = text.replace(/^\s*\/\*[\s\S]*?\*\//, "");
@@ -617,6 +547,18 @@ function sanitizeLibrarySource(source) {
     if (text === before) break;
   }
   return text.trim();
+}
+
+function hideIncompatibleCrypto(root) {
+  try {
+    const source = root.crypto;
+    if (source && typeof source.randomBytes !== "function") {
+      Object.defineProperty(root, "crypto", { value: undefined, configurable: true, writable: true });
+      debugLog("已隐藏不兼容的 crypto 实现");
+    }
+  } catch (error) {
+    debugLog(`crypto 兼容处理失败：${errText(error)}`);
+  }
 }
 
 async function loadForge() {
@@ -657,38 +599,23 @@ async function loadForge() {
     }
   }
 
-  throw new Error(`无法加载加密库：${(lastError && lastError.message) || "未知错误"}`);
+  throw new Error(`无法加载加密库：${lastError ? errText(lastError) : "未知错误"}`);
 }
 
-/**
- * forge 会优先使用 self.crypto.randomBytes。某些环境（含 node 的 webcrypto）
- * 只提供 getRandomValues，forge 探测到 crypto 却在 randomBytes 处抛错。
- * 这类环境隐藏它，让 forge 退回 Math.random，再由 seedRandom() 补熵。
- */
-function hideIncompatibleCrypto(root) {
-  try {
-    const source = root.crypto;
-    if (source && typeof source.randomBytes !== "function") {
-      Object.defineProperty(root, "crypto", { value: undefined, configurable: true, writable: true });
-      debugLog("已隐藏不兼容的 crypto 实现");
-    }
-  } catch (error) {
-    debugLog(`crypto 兼容处理失败：${errText(error)}`);
-  }
-}
-
-function seedRandom() {  if (!FORGE || !FORGE.random) return;
+function seedRandom() {
+  if (!FORGE || !FORGE.random) return;
   try {
     FORGE.random.collect([Date.now(), Math.random(), Math.random()].join(":"));
     FORGE.random.collectInt(Date.now() >>> 0, 32);
   } catch (_) {}
 }
 
+/** 青龙版每次登录前刷新公钥；失败沿用内置 */
 async function refreshPublicKey() {
   try {
     const response = await loonHttp("GET", {
       url: `${BASE_URL}/api/web/open/encrypt/public-key`,
-      timeout: 8000,
+      timeout: 15000,
     });
     if (response.status < 200 || response.status >= 300) return false;
 
@@ -708,18 +635,19 @@ async function refreshPublicKey() {
     const key = candidates.find((v) => typeof v === "string" && v.indexOf("MIIB") > -1);
     if (!key) return false;
 
-    const cleaned = key.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----/g, "")
+    const cleaned = key
+      .replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----/g, "")
       .replace(/\\n|\s/g, "");
-    // 先验证能被 forge 解析，再替换，避免坏公钥把后续请求全打挂
     const lines = cleaned.match(/.{1,64}/g) || [];
-    FORGE.pki.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----`);
+    FORGE.pki.publicKeyFromPem(
+      `-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----`
+    );
 
     PUBLIC_KEY_B64 = cleaned;
     RSA_PUBLIC_KEY = null;
-    debugLog("已刷新服务端公钥");
     return true;
   } catch (error) {
-    debugLog(`公钥刷新失败，沿用内置：${errText(error)}`);
+    debugLog(`刷新公钥失败，使用内置公钥：${errText(error)}`);
     return false;
   }
 }
@@ -733,7 +661,6 @@ function getPublicKey() {
   return RSA_PUBLIC_KEY;
 }
 
-/** 与青龙版 encrypt_request_body 等价：AES-256-GCM + RSA-OAEP(SHA256) 包裹密钥 */
 function encryptPayload(payload) {
   if (!FORGE) throw new Error("加密库尚未初始化");
   seedRandom();
@@ -768,8 +695,6 @@ class TomatoClient {
     this.openId = account.openId || "";
     this.phone = account.phone || "";
     this.token = "";
-    this.tomatoUserId = "";
-    this.nickName = "";
 
     const query = [`wid=${encodeURIComponent(this.wid)}`];
     if (this.openId) query.push(`openId=${encodeURIComponent(this.openId)}`);
@@ -799,13 +724,14 @@ class TomatoClient {
   }
 
   async login() {
+    await refreshPublicKey();
+
     const payload = { wid: String(this.wid), queryCardStatus: true };
     if (this.openId) payload.openId = this.openId;
     if (this.phone) {
       payload.wm_phone = this.phone;
       payload.mobile = this.phone;
     }
-    // 青龙版默认把每个号绑到作者邀请人 11422，这里默认不绑；需要时在插件参数 inviter 填
     payload.shareTomatoUserId = null;
 
     const result = await this.call("POST", "/api/web/open/tomato/login", payload, {
@@ -814,51 +740,28 @@ class TomatoClient {
     });
 
     const data = (result && result.data) || {};
-    if (!data.token) throw new Error("登录响应中没有 token");
+    if (!ok(result) || !data.token) {
+      throw new Error(brief(result, 160));
+    }
 
     this.token = data.token;
-    this.tomatoUserId = data.tomatoUserId || "";
-    this.nickName = data.nickName || "";
     registerSensitive(data.token, data.wid, data.openId, data.mobile, data.tomatoUserId);
     return data;
   }
 
-  async home() {
-    const result = await this.call("GET", "/api/web/member/tomato/home", null, {
-      retries: 2,
-      baseSleep: 1.2,
-    });
-    return (result && result.data) || {};
+  home() {
+    return this.call("GET", "/api/web/member/tomato/home", null, { retries: 2, baseSleep: 1.2 });
   }
 
-  async cardStatus() {
-    try {
-      const result = await this.call("GET", "/api/web/member/tomato/cardStatus", null, {
-        retries: 1,
-        baseSleep: 1,
-      });
-      const data = result && result.data;
-      if (data && typeof data === "object") return String(data.cardStatus || data.status || "");
-      if (data !== undefined && data !== null) return String(data);
-    } catch (error) {
-      debugLog(`开卡状态查询失败：${errText(error)}`);
-    }
-    return "";
+  cardStatus() {
+    return this.call("GET", "/api/web/member/tomato/cardStatus", null, { retries: 1, baseSleep: 1 });
   }
 
-  async tasks() {
-    const result = await this.call("GET", "/api/web/member/tomato/tasks", null, {
-      retries: 2,
-      baseSleep: 1.2,
-    });
-    let rows = result && result.data;
-    if (rows && !Array.isArray(rows) && typeof rows === "object") {
-      rows = rows.list || rows.rows || [];
-    }
-    return Array.isArray(rows) ? rows : [];
+  tasks() {
+    return this.call("GET", "/api/web/member/tomato/tasks", null, { retries: 2, baseSleep: 1.2 });
   }
 
-  async pageVisit(pagePath) {
+  pageVisit(pagePath) {
     return this.call(
       "POST",
       "/api/web/member/tomato/page-visit",
@@ -867,27 +770,16 @@ class TomatoClient {
     );
   }
 
-  async createShareQrcode() {
-    if (!this.tomatoUserId) return false;
-    await this.call(
+  completeTask(task) {
+    return this.call(
       "POST",
-      "/api/web/member/tomato/miniprogram/qrcode/create",
-      { page: "packages/wm-cloud-qiehuang/home/index", scene: String(this.tomatoUserId) },
-      { retries: 1, baseSleep: 1.2 }
+      "/api/web/member/tomato/tasks/complete",
+      {
+        taskType: (task && task.taskType) || "",
+        browseTarget: (task && task.browseTarget) || "",
+      },
+      { retries: 4, baseSleep: 2.5 }
     );
-    return true;
-  }
-
-  async completeTask(task) {
-    const taskType = String((task && task.taskType) || "");
-    const payload = {
-      taskType,
-      browseTarget: (task && task.browseTarget) || "",
-    };
-    return this.call("POST", "/api/web/member/tomato/tasks/complete", payload, {
-      retries: 4,
-      baseSleep: 2.5,
-    });
   }
 
   async friends(pageSize) {
@@ -900,77 +792,59 @@ class TomatoClient {
         null,
         { retries: 2, baseSleep: 1.2 }
       );
-      const rows = Array.isArray(result && result.rows) ? result.rows : [];
+      if (!ok(result)) throw new Error(`获取好友列表失败：${brief(result, 120)}`);
+
+      const rows = Array.isArray(result.rows) ? result.rows : [];
       list.push.apply(list, rows);
 
-      const total = Number((result && result.total) || 0);
+      const total = Number(result.total || 0);
       if (rows.length === 0 || (total > 0 && list.length >= total) || rows.length < size) break;
-      if (budgetLow(30000)) {
-        debugLog("时间预算不足，提前结束好友列表翻页");
-        break;
-      }
     }
     return list;
   }
 
-  async friendHome(friendUserId) {
-    const result = await this.call(
+  friendHome(friendUserId) {
+    return this.call(
       "GET",
       `/api/web/member/tomato/friends/${encodeURIComponent(friendUserId)}/home`,
       null,
       { retries: 2, baseSleep: 1.0 }
     );
-    return (result && result.data) || {};
   }
 
-  async steal(friendUserId) {
+  steal(friendUserId) {
     return this.call(
       "POST",
       "/api/web/member/tomato/friends/steal",
       { friendTomatoUserId: friendUserId },
-      { retries: 2, baseSleep: 1.5 }
+      { retries: 2, baseSleep: 1.2 }
     );
   }
 
-  /** 浇水：青龙版发加密 {syncHomeInfo:true}；失败则回退官方前端的空 POST */
-  async useEnergy() {
-    try {
-      return await this.call(
-        "POST",
-        "/api/web/member/tomato/energy/use",
-        { syncHomeInfo: true },
-        { retries: 4, baseSleep: 2.5 }
-      );
-    } catch (error) {
-      const message = errText(error);
-      // 频控/未开卡/预算不足都不是"请求格式不对"，回退空请求没有意义
-      if (isRateLimited(message) || isNeedOpenCard(message) || message.indexOf("时间预算不足") > -1) {
-        throw error;
-      }
-      debugLog(`浇水加密请求失败（${message}），回退空 POST`);
-      return this.call("POST", "/api/web/member/tomato/energy/use", null, {
-        retries: 1,
-        baseSleep: 2,
-        encrypted: false,
-      });
-    }
+  useEnergy() {
+    return this.call(
+      "POST",
+      "/api/web/member/tomato/energy/use",
+      { syncHomeInfo: true },
+      { retries: 4, baseSleep: 2.5 }
+    );
   }
 }
 
 function logStep(logs, step, message) {
   const line = `${step}: ${redact(message)}`;
   logs.push(line);
-  console.log(`[${SCRIPT_NAME}] ${line}`);
+  console.log(`[${SCRIPT_NAME}] ${step === "信息" ? line.slice(3) : line}`);
 }
 
 function homeLine(home, prefix) {
   if (!home || typeof home !== "object") return `${prefix || "当前状态"}：无数据`;
-  const parts = [`能量☀️${val(home.energyBalance)}`];
-  parts.push(`番茄🍅${val(home.tomatoBalance)}`);
+  const parts = [`能量☀️${val(home.energyBalance)}`, `番茄🍅${val(home.tomatoBalance)}`];
   if (home.stageName) parts.push(`阶段=${home.stageName}`);
   if (home.currentExp !== undefined && home.stageRequiredExp !== undefined) {
-    parts.push(`经验=${home.currentExp}/${home.stageRequiredExp}`);
+    parts.push(`经验=${val(home.currentExp)}/${val(home.stageRequiredExp)}`);
   }
+  if (home.todayUsedEnergy !== undefined) parts.push(`今日已用=${val(home.todayUsedEnergy)}`);
   if (home.cardStatus !== undefined && home.cardStatus !== null && home.cardStatus !== "") {
     parts.push(`开卡=${home.cardStatus}`);
   }
@@ -979,17 +853,30 @@ function homeLine(home, prefix) {
 
 async function ensureCardOpened(client, loginData, logs) {
   let status = String((loginData && loginData.cardStatus) || "");
-  if (status !== "0" && status !== "1") status = await client.cardStatus();
+
+  if (status !== "0" && status !== "1") {
+    try {
+      const result = await client.cardStatus();
+      if (ok(result)) {
+        const data = result.data;
+        status = data && typeof data === "object"
+          ? String(data.cardStatus || data.status || "")
+          : String(data === undefined || data === null ? "" : data);
+      }
+    } catch (error) {
+      debugLog(`开卡状态查询失败：${errText(error)}`);
+    }
+  }
 
   if (status === "1") {
     logStep(logs, "开卡", "活动卡已开通 ✅");
     return true;
   }
   if (status === "0") {
-    logStep(logs, "开卡", "登录已请求自动开卡，但状态仍为未开通 ⚠️");
+    logStep(logs, "开卡", "活动登录已请求自动开卡，但返回状态仍为未开通 ⚠️");
     return false;
   }
-  logStep(logs, "开卡", `状态未知（${status || "空"}），继续尝试 ⚠️`);
+  logStep(logs, "开卡", `开卡状态未知(${status || "空"})，继续尝试 ⚠️`);
   return true;
 }
 
@@ -1004,9 +891,15 @@ function taskStepName(taskType) {
 async function runTasks(client, cardOpened, logs) {
   let tasks;
   try {
-    tasks = await client.tasks();
+    const result = await client.tasks();
+    if (!ok(result)) throw new Error(brief(result, 140));
+    let rows = result.data;
+    if (rows && !Array.isArray(rows) && typeof rows === "object") {
+      rows = rows.list || rows.rows || [];
+    }
+    tasks = Array.isArray(rows) ? rows : [];
   } catch (error) {
-    const message = `获取任务列表失败：${errText(error)}`;
+    const message = `获取任务列表失败：${brief(errText(error), 120)}`;
     logStep(logs, "签到", message);
     logStep(logs, "浏览任务", message);
     return;
@@ -1025,7 +918,9 @@ async function runTasks(client, cardOpened, logs) {
   for (const task of tasks) {
     const type = String((task && task.taskType) || "").toUpperCase();
     const name = (task && (task.taskName || task.taskCode)) || type || "未知任务";
-    const isDone = String((task && task.completed) || "0") === "1";
+    const isDone =
+      String((task && task.completed) || "0") === "1" ||
+      String((task && task.actionType) || "").toUpperCase() === "DONE";
 
     if (type === "FRIEND_STEAL_ENERGY") continue;
 
@@ -1054,57 +949,46 @@ async function runTasks(client, cardOpened, logs) {
   for (const task of todo) {
     const type = String((task && task.taskType) || "").toUpperCase();
     const step = taskStepName(type);
-    const name = (task && (task.taskName || task.taskCode)) || type;
+    const name = (task && (task.taskName || task.taskName || task.taskCode)) || type;
     if (!step) continue;
 
     try {
-      // 浏览任务先上报页面访问，与官方前端一致
       if (type === "BROWSE" && task.browseTarget) {
         try {
           await client.pageVisit(task.browseTarget);
         } catch (error) {
           debugLog(`page-visit 失败（忽略）：${errText(error)}`);
         }
-        await pacedSleep(ACTION_DELAY, 20000);
-      }
-
-      // 分享任务先建小程序码，避免服务端判无效
-      if (type === "SHARE") {
-        try {
-          await client.createShareQrcode();
-        } catch (error) {
-          debugLog(`分享二维码创建失败（忽略）：${errText(error)}`);
-        }
+        await sleepHuman(ACTION_DELAY);
       }
 
       const result = await client.completeTask(task);
-      const data = (result && result.data) || {};
-      const reward =
-        data.rewardText ||
-        (data.rewardEnergy !== undefined ? `+${data.rewardEnergy} 能量` : "已领取");
-      logStep(logs, step, `${name} 完成成功 ✅ 奖励=${reward}`);
-    } catch (error) {
-      const message = errText(error);
-      if (isNeedOpenCard(message)) {
-        logStep(logs, step, `${name} 失败：请先开卡后再操作 ⚠️`);
+      if (ok(result)) {
+        const data = (result && result.data) || {};
+        const reward =
+          data.rewardText ||
+          `+${data.rewardEnergy !== undefined ? data.rewardEnergy : (task.rewardEnergy !== undefined ? task.rewardEnergy : "")} 能量`;
+        logStep(logs, step, `${name} 完成成功 ✅ 奖励=${reward}`);
       } else {
-        logStep(logs, step, `${name} 失败：${brief(message, 80)} ❌`);
+        const message = String((result && (result.msg || result.message)) || "");
+        if (isNeedOpenCard(message)) {
+          logStep(logs, step, `${name} 失败: 请先开卡后再操作 ⚠️`);
+        } else {
+          logStep(logs, step, `${name} 失败: ${brief(result, 80)} ❌`);
+        }
       }
+    } catch (error) {
+      logStep(logs, step, `${name} 出错: ${brief(errText(error), 80)} ❌`);
     }
 
-    if (budgetLow(20000)) {
-      logStep(logs, "信息", "时间预算不足，停止剩余任务 ⚠️");
-      break;
-    }
-    await pacedSleep(ACTION_DELAY, 15000);
+    await sleepHuman(ACTION_DELAY);
   }
 
   for (const task of others) {
     const type = String((task && task.taskType) || "").toUpperCase();
     const name = (task && (task.taskName || task.taskCode)) || type;
-    logStep(logs, "信息", `暂不自动处理类型 ${type}：${name}`);
+    logStep(logs, "信息", `暂不自动处理任务类型 ${type}: ${name}`);
   }
-
 }
 
 async function collectFriendEnergy(client, logs) {
@@ -1114,71 +998,61 @@ async function collectFriendEnergy(client, logs) {
   try {
     friends = await client.friends(20);
   } catch (error) {
-    logStep(logs, "信息", `好友列表获取失败：${brief(errText(error), 80)} ❌`);
+    logStep(logs, "信息", `好友能量处理失败: ${brief(errText(error), 100)} ❌`);
     return stat;
   }
 
-  // 先用 friendStatus 预筛（V5 的做法，少一个量级的请求）；
-  // 字段缺失时不过滤，避免因格式变化漏收。
-  // 上游是全量检查，再按 canSteal 判定；这里保留全量，只把 friendStatus=="0" 排前面
-  const claimable = [];
-  const others = [];
   for (const friend of friends) {
-    if (!friend || !friend.friendTomatoUserId) continue;
-    (String(friend.friendStatus) === "0" ? claimable : others).push(friend);
-  }
-  const candidates = claimable.concat(others);
-  debugLog(`好友 ${friends.length} 人（可收标记 ${claimable.length} 人），逐个检查`);
-
-  for (const friend of candidates) {
-    const friendId = String(friend.friendTomatoUserId);
+    const friendId = String((friend && friend.friendTomatoUserId) || "");
+    if (!friendId) continue;
     registerSensitive(friendId);
     stat.checked += 1;
 
     try {
-      const home = await client.friendHome(friendId);
-      const amount = Number((home && home.stealAmount) || 0);
-      if (String((home && home.canSteal) || "") === "1" && amount > 0) {
-        const result = await client.steal(friendId);
-        const gained = result && result.data;
-        const actual = gained && typeof gained === "object"
-          ? Number(gained.stealAmount || gained.energyAmount || 0) || amount
-          : amount;
-        stat.collected += 1;
-        stat.energy += actual;
+      const homeResult = await client.friendHome(friendId);
+      const home = (homeResult && homeResult.data) || null;
+      if (!ok(homeResult) || !home) {
+        stat.failed += 1;
+      } else {
+        const available = Number(home.stealAmount || 0);
+        if (String(home.canSteal || "") === "1" && available > 0) {
+          const stealResult = await client.steal(friendId);
+          if (ok(stealResult)) {
+            let gained = stealResult.data;
+            if (gained && typeof gained === "object") {
+              gained = gained.stealAmount !== undefined ? gained.stealAmount : gained.energyAmount;
+            }
+            const amount = Number(gained);
+            stat.collected += 1;
+            stat.energy += Number.isFinite(amount) ? amount : available;
+          } else {
+            stat.failed += 1;
+          }
+        }
       }
     } catch (error) {
       stat.failed += 1;
       debugLog(`好友处理失败：${brief(errText(error), 60)}`);
     }
 
-    if (budgetLow(20000)) {
-      debugLog("时间预算不足，停止好友能量收集");
-      break;
-    }
-    await pacedSleep(ACTION_DELAY, 15000);
+    await sleepHuman(ACTION_DELAY);
   }
 
-  const summary =
-    stat.collected > 0
-      ? `好友能量：检查 ${stat.checked} 人，收取 ${stat.collected} 人，共 ${stat.energy} 能量` +
-        (stat.failed ? `，失败 ${stat.failed} 人` : "")
-      : stat.failed > 0
-        ? `好友能量：检查 ${stat.checked} 人，收取失败 ${stat.failed} 人`
-        : `好友能量：检查 ${stat.checked} 人，暂无可收能量`;
-  logStep(logs, "信息", summary);
+  logStep(
+    logs,
+    "信息",
+    `好友能量：检查${stat.checked}人，收取${stat.collected}人，共${stat.energy}能量，失败${stat.failed}人`
+  );
   return stat;
 }
 
 async function waterEnergy(client, home, cardOpened, logs) {
-  const times = WATER_TIMES;
   if (!cardOpened) {
     logStep(logs, "浇水", "账号未开卡，跳过浇水 ⚠️");
     return home;
   }
 
-  const startEnergy = Number((home && home.energyBalance) || 0);
-  if (startEnergy <= 0) {
+  if (Number((home && home.energyBalance) || 0) <= 0) {
     logStep(logs, "浇水", "当前能量为 0，跳过 ⚠️");
     return home;
   }
@@ -1186,40 +1060,45 @@ async function waterEnergy(client, home, cardOpened, logs) {
   let success = 0;
   let last = home;
 
-  for (let i = 0; i < times; i += 1) {
+  for (let i = 0; i < MAX_WATER_TIMES; i += 1) {
+    let result;
     try {
-      const result = await client.useEnergy();
-      const data = (result && result.data) || {};
-      if (data && typeof data === "object" && Object.keys(data).length) last = data;
-      success += 1;
-      debugLog(
-        `浇水#${success} 能量=${last.energyBalance} 经验=${last.currentExp}/${last.stageRequiredExp}`
-      );
-
-      const left = Number((data && data.energyBalance) || 0);
-      if (left <= 0) break;
+      result = await client.useEnergy();
     } catch (error) {
-      const message = brief(errText(error), 70);
-      logStep(logs, "浇水", success === 0 ? `浇水失败：${message} ❌` : `成功 ${success} 次后停止：${message} ⚠️`);
-      return last;
-    }
-
-    if (budgetLow(15000)) {
-      debugLog("时间预算不足，停止浇水");
+      logStep(logs, "浇水", `浇水异常: ${brief(errText(error), 80)} ❌`);
       break;
     }
-    await pacedSleep(ACTION_DELAY, 10000);
+
+    if (!ok(result)) {
+      const message = String((result && (result.msg || result.message)) || "") || brief(result, 80);
+      logStep(logs, "浇水", success === 0 ? `浇水失败: ${message} ❌` : `共成功 ${success} 次后停止: ${message} ⚠️`);
+      break;
+    }
+
+    const data = (result && result.data) || {};
+    if (data && typeof data === "object" && Object.keys(data).length) last = data;
+    success += 1;
+    debugLog(
+      `浇水#${success} 成功 能量=${val(last.energyBalance)} 经验=${val(last.currentExp)}/${val(last.stageRequiredExp)}`
+    );
+
+    let left = 0;
+    try {
+      left = Number(data.energyBalance || 0);
+    } catch (_) {
+      break;
+    }
+    if (left <= 0) break;
+
+    await sleepHuman(ACTION_DELAY);
   }
 
   if (success > 0) {
     logStep(
       logs,
       "浇水",
-      `成功 ${success} 次 ✅ 能量☀️${val(last.energyBalance)} ` +
-        `番茄🍅${val(last.tomatoBalance)} ` +
-        `经验=${last.currentExp === undefined ? "?" : last.currentExp}/${
-          last.stageRequiredExp === undefined ? "?" : last.stageRequiredExp
-        } 阶段=${last.stageName || "?"}`
+      `浇水成功 ${success} 次 ✅ 能量☀️${val(last.energyBalance)} 番茄🍅${val(last.tomatoBalance)} ` +
+        `经验=${val(last.currentExp)}/${val(last.stageRequiredExp)} 阶段=${last.stageName || "?"}`
     );
   }
   return last;
@@ -1241,75 +1120,65 @@ async function processUser(account, index, total) {
   try {
     loginData = await client.login();
   } catch (error) {
-    // 完整错误只在 Loon 日志里出现，通知里保持简短
-    console.log(`[${SCRIPT_NAME}] 登录失败详情：${errText(error)}`);
-    logStep(logs, "登录", `失败：${brief(explainError(errText(error)), 90)} ❌`);
+    logStep(logs, "登录", `失败: ${brief(errText(error), 100)} ❌`);
     return logs;
   }
 
   logStep(
     logs,
     "登录",
-    `成功 ✅ ${
-      loginData.nickName || "未设置昵称"
-    } 能量=${loginData.energyBalance} 番茄=${loginData.tomatoBalance} 阶段=${
-      loginData.stageName || "?"
-    } 开卡=${loginData.cardStatus}`
+    `成功 ✅ ${loginData.nickName || "未设置昵称"} 能量=${val(loginData.energyBalance)} ` +
+      `番茄=${val(loginData.tomatoBalance)} 阶段=${loginData.stageName || "?"} 开卡=${val(loginData.cardStatus)}`
   );
-  await pacedSleep(ACTION_DELAY, 30000);
+  await sleepHuman(ACTION_DELAY);
 
   let cardOpened = await ensureCardOpened(client, loginData, logs);
 
   let home = {};
   try {
-    home = await client.home();
-    logStep(logs, "主页", homeLine(home, "同步成功"));
+    const homeResult = await client.home();
+    if (ok(homeResult) && homeResult.data && typeof homeResult.data === "object") {
+      home = homeResult.data;
+      logStep(logs, "主页", homeLine(home, "同步成功"));
+    } else {
+      logStep(logs, "主页", `失败: ${brief(homeResult, 100)} ❌`);
+    }
   } catch (error) {
-    logStep(logs, "主页", `失败：${brief(errText(error), 80)} ❌`);
+    logStep(logs, "主页", `出错: ${brief(errText(error), 100)} ❌`);
   }
 
   if (String(home.cardStatus || "") === "1") cardOpened = true;
   else if (String(home.cardStatus || "") === "0") cardOpened = false;
 
-  if (budgetLow(35000)) {
-    logStep(logs, "信息", "时间预算不足，跳过任务阶段 ⚠️");
+  await sleepHuman(PHASE_DELAY);
+  await runTasks(client, cardOpened, logs);
+
+  await sleepHuman(PHASE_DELAY);
+  if (cardOpened) {
+    await collectFriendEnergy(client, logs);
   } else {
-    await pacedSleep(PHASE_DELAY, 30000);
-    await runTasks(client, cardOpened, logs);
+    logStep(logs, "信息", "账号活动卡未开通，跳过好友能量 ⚠️");
   }
 
-  if (budgetLow(35000)) {
-    logStep(logs, "信息", "时间预算不足，跳过好友能量 ⚠️");
-  } else if (!cardOpened) {
-    logStep(logs, "信息", "账号活动卡未开通，跳过好友能量 ⚠️");
-  } else {
-    await pacedSleep(PHASE_DELAY, 30000);
-    await collectFriendEnergy(client, logs);
+  await sleepHuman(PHASE_DELAY);
+  try {
+    const refreshed = await client.home();
+    if (ok(refreshed) && refreshed.data && typeof refreshed.data === "object") home = refreshed.data;
+  } catch (error) {
+    debugLog(`主页刷新失败：${errText(error)}`);
   }
+
+  await sleepHuman(ACTION_DELAY);
+  home = await waterEnergy(client, home, cardOpened, logs);
+  await sleepHuman(ACTION_DELAY);
 
   try {
-    if (!budgetLow(30000)) {
-      const refreshed = await client.home();
-      if (refreshed && typeof refreshed === "object") home = refreshed;
+    const finalResult = await client.home();
+    if (ok(finalResult) && finalResult.data && typeof finalResult.data === "object") {
+      home = finalResult.data;
     }
   } catch (error) {
-    debugLog(`浇水前主页刷新失败：${errText(error)}`);
-  }
-
-  if (budgetLow(25000)) {
-    logStep(logs, "浇水", "时间预算不足，跳过浇水 ⚠️");
-  } else {
-    await pacedSleep(ACTION_DELAY, 20000);
-    const after = await waterEnergy(client, home, cardOpened, logs);
-    if (after && typeof after === "object") home = after;
-    await pacedSleep(ACTION_DELAY, 20000);
-  }
-
-  try {
-    const finalHome = await client.home();
-    if (finalHome && typeof finalHome === "object") home = finalHome;
-  } catch (error) {
-    debugLog(`最终主页刷新失败：${errText(error)}`);
+    debugLog(`终态主页刷新失败：${errText(error)}`);
   }
   logStep(logs, "主页", homeLine(home, "最终状态"));
 
@@ -1324,13 +1193,11 @@ function renderReport(allLogs) {
     if (!block || !block.length) continue;
     out.push(block[0]);
 
-    // 每步只保留最后一条，避免刷屏
     const byStep = {};
     for (const line of block.slice(1)) {
       const at = line.indexOf(": ");
       if (at < 0) continue;
-      const step = line.slice(0, at);
-      byStep[step] = line.slice(at + 2);
+      byStep[line.slice(0, at)] = line.slice(at + 2);
     }
 
     for (const step of STEP_ORDER) {
@@ -1338,8 +1205,9 @@ function renderReport(allLogs) {
       out.push(`${STEP_EMOJI[step] || "•"} ${step}：${byStep[step]}`);
     }
 
-    const extra = Object.keys(byStep).filter((step) => STEP_ORDER.indexOf(step) < 0);
-    for (const step of extra) out.push(`• ${step}：${byStep[step]}`);
+    for (const step of Object.keys(byStep)) {
+      if (STEP_ORDER.indexOf(step) < 0) out.push(`• ${step}：${byStep[step]}`);
+    }
 
     out.push("━━━━━━━━━━━━━━━━━━━━");
   }
@@ -1355,24 +1223,10 @@ function notify(title, subtitle, body) {
   }
 }
 
-async function networkProbe() {
-  for (const node of [null, "DIRECT"]) {
-    try {
-      const options = { url: `${BASE_URL}/api/web/open/encrypt/public-key`, timeout: 8000 };
-      if (node) options.node = node;
-      const response = await loonHttp("GET", options);
-      if (response.status > 0) return true;
-    } catch (_) {}
-  }
-  return false;
-}
-
 async function main() {
-  DEADLINE = Date.now() + MAX_RUNTIME_SEC * 1000;
-
   const accounts = loadAccounts();
   if (!accounts.length) {
-    const message = "没有可用账号。请先在微信打开一次茄皇活动页面自动获取，或在插件参数 accounts 里填 wid@openId@手机号";
+    const message = "没有可用账号。请先在微信打开一次茄皇活动页面自动获取";
     console.log(`[${SCRIPT_NAME}] ${message}`);
     notify(SCRIPT_NAME, "尚未获取账号", message);
     return;
@@ -1380,65 +1234,22 @@ async function main() {
 
   for (const account of accounts) registerSensitive(account.wid, account.openId, account.phone);
 
-  if (!(await networkProbe())) {
-    const message =
-      "无法连接 farmgames.ioutu.cn（已尝试直连）。\n" +
-      "请检查 Loon 的节点/规则；若该域名在 MITM 列表里，可临时移除后再试。";
-    console.log(`[${SCRIPT_NAME}] ${message}`);
-    notify(SCRIPT_NAME, "网络不通，未执行", message);
-    return;
-  }
-
   await loadForge();
-  await refreshPublicKey();
 
   console.log(
-    `[${SCRIPT_NAME}] 开始处理 ${accounts.length} 个账号，预算 ${MAX_RUNTIME_SEC}s，浇水 ${WATER_TIMES} 次`
+    `[${SCRIPT_NAME}] 开始处理 ${accounts.length} 个账号，浇水 ${MAX_WATER_TIMES} 次`
   );
 
   const allLogs = [];
-  let done = 0;
 
   for (let i = 0; i < accounts.length; i += 1) {
-    // 至少保证第一个账号跑完；后续账号才按预算决定是否跳过
-    if (i > 0 && budgetLow(45000)) {
-      allLogs.push([
-        `账号 ${i + 1}/${accounts.length}：时间预算不足，已跳过`,
-      ]);
-      debugLog(`剩余 ${Math.round(budgetLeftMs() / 1000)}s，跳过剩余账号`);
-      break;
-    }
-
-    let logs;
-    try {
-      logs = await processUser(accounts[i], i + 1, accounts.length);
-    } catch (error) {
-      logs = [
-        `账号 ${i + 1}/${accounts.length}：wid ${maskId(accounts[i].wid)}`,
-        `信息: 处理异常：${brief(errText(error), 100)} ❌`,
-      ];
-    }
-
-    allLogs.push(logs);
-    done += 1;
-
-    if (i < accounts.length - 1) {
-      if (budgetLow(90000)) {
-        debugLog("时间预算不足以等待账号间隔，缩短等待");
-        await pacedSleep([5, 10], 60000);
-      } else {
-        await pacedSleep(ACCOUNT_DELAY, 60000);
-      }
-    }
+    allLogs.push(await processUser(accounts[i], i + 1, accounts.length));
+    if (i < accounts.length - 1) await sleepHuman(ACCOUNT_DELAY);
   }
 
   const report = renderReport(allLogs);
   console.log(`\n${report}\n`);
-  notify(
-    SCRIPT_NAME,
-    `完成 ${done}/${accounts.length} 个账号 · 耗时 ${Math.round((Date.now() - (DEADLINE - MAX_RUNTIME_SEC * 1000)) / 1000)}s`,
-    report
-  );
+  notify(SCRIPT_NAME, `共 ${accounts.length} 个账号`, report);
 }
 
 (async () => {
