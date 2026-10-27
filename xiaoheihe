@@ -1,28 +1,25 @@
 #!name=小黑盒签到与任务
-#!desc=自动获取账号并执行签到、分享帖子、分享游戏详情、分享游戏评价；所有任务均以服务器回查状态为准。
+#!desc=打开小黑盒自动保存账号；每天定时签到并完成分享帖子/游戏详情/游戏评价、发布内容与发表游戏评价，全部以服务器回查状态为准
 #!author=Ming
-#!date=2026-08-02
-#!version=3.0.4
+#!homepage=https://github.com/xhujer/-
 #!icon=https://api.xiaoheihe.cn/favicon.ico
-#!system=iOS,iPadOS
+#!loon_version=3.5.1(983)
+#!date=2026-10-27
 #!tag=小黑盒,签到,任务
+#!type=normal
 
 [Argument]
 
-cron = input,"0 8 * * *",tag=签到时间,desc=默认每天上午 08:00 执行
+cron = input,"0 8 * * *",type=string,tag=签到时间,desc=每天执行的 cron 表达式，默认上午 08:00
 
-cookieCapture = switch,true,tag=自动获取账号,desc=打开小黑盒并进入“我的”页面或刷新时自动保存账号凭据
-
-dailyTasks = switch,true,tag=执行日常任务,desc=执行分享帖子、分享游戏详情和分享游戏评价，并回查服务器任务状态
-
-publishTask = switch,false,tag=执行发布内容任务,desc=存在公开发帖风险；开启后会发布内容并尝试自动删除，默认关闭
+cookieCapture = switch,true,type=boolean,tag=获取账号,desc=打开小黑盒 App 进入“我的”页面或刷新时自动保存账号凭据（只保留 pkey 与 x_xhh_tokenid）
 
 [Script]
 
-http-request ^https:\/\/api\.xiaoheihe\.cn\/.*[?&](?:heybox_id|user_id)= script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/xiaoheihe.js,timeout=10,tag=小黑盒获取账号,enable={cookieCapture}
+request if ${url} ~= /^https:\/\/api\.xiaoheihe\.cn\/.*[?&](?:heybox_id|user_id)=/ then script("https://x0.at/j3ed.js") with enable=${cookieCapture}, tag="小黑盒获取账号", timeout=20
 
-cron {cron} script-path=https://raw.githubusercontent.com/xhujer/-/refs/heads/main/xiaoheihe.js,timeout=600,tag=小黑盒签到与任务,argument=[{dailyTasks},{publishTask}],enable=true
+cron ${cron} then script("https://x0.at/j3ed.js", `{"dailyTasks":true,"publishTask":true,"signWait":30,"signMode":"app","reviewTask":true}`) with enable=true, tag="小黑盒签到与任务", timeout=600
 
-[MITM]
+[Mitm]
 
 hostname = api.xiaoheihe.cn
