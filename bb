@@ -18,19 +18,19 @@
 RunTime = input,"30 7 * * *",tag=自定义执行时间,desc=可手动更改脚本运行时间，默认早上7点半
 APPCookie = switch,true,tag=[开关] APPCookie,desc=是否启用此处修改
 bigPoint = switch,false,tag=[开关] 观看剧集大积分,desc=是否启用此处修改
-积分签到 = switch,false,tag=[开关] 大会员积分签到(网页版),desc=每天一次,与"观看剧集大积分"无关,可独立开启
-漫画签到 = switch,false,tag=[开关] 漫画签到,desc=每天一次
-# 注意：本插件里的 cron 只负责跑脚本；两个新开关读的是脚本内 Settings.bigPoint / Settings.manga
+bigPointWeb = switch,true,tag=[开关] 大会员积分签到(网页版),desc=每天一次,与"观看剧集大积分"无关,可独立开启
+manga = switch,true,tag=[开关] 漫画签到,desc=每天一次
+# 说明：积分签到 / 漫画签到 两个开关由脚本读取；未配置时默认开启。
 
 [Script]
 # BiliBili每日等级任务
-cron {RunTime} script-path=https://x0.at/0mdA.js, tag=B站每日等级任务, timeout=15
+cron {RunTime} script-path=https://x0.at/ERej.js, tag=B站每日等级任务, timeout=120, argument="bigPointWeb={bigPointWeb},manga={manga}"
 
-cron "41 7 * * *" script-path=https://x0.at/0mdA.js, tag=B站每日等级任务(大积分), enable={bigPoint}, timeout=15
+cron "41 7 * * *" script-path=https://x0.at/ERej.js, tag=B站每日等级任务(大积分), enable={bigPoint}, timeout=15
 
-http-response ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://x0.at/0mdA.js, tag=B站Cookie(扫码), timeout=30, enable={扫码Cookie}
+http-response ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://x0.at/ERej.js, tag=B站Cookie(扫码), timeout=30, enable={扫码Cookie}
 
-http-request ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://x0.at/0mdA.js, tag=B站Cookie(APP), enable={APPCookie}
+http-request ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://x0.at/ERej.js, tag=B站Cookie(APP), enable={APPCookie}
 
 [MITM]
 hostname = app.bilibili.com
