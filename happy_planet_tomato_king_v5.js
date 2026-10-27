@@ -1,6 +1,6 @@
 'use strict';
 
-const SCRIPT_NAME = "快乐星球·茄皇 V6";
+const SCRIPT_NAME = "统一梦时代·茄皇签到";
 const BASE_URL = "https://farmgames.ioutu.cn";
 const ACCOUNT_KEY = "QH";
 
@@ -501,7 +501,7 @@ async function requestWithRetry(options) {
       const low = Math.max(baseSleep, RATE_LIMIT_DELAY[0]);
       const high = Math.max(low, RATE_LIMIT_DELAY[1]);
       const wait = randomBetween(low, high) * (i + 1);
-      console.log(`[${SCRIPT_NAME}] 触发频控，${wait.toFixed(1)}s 后重试（${i + 1}/${retries - 1}）`);
+      console.log(`触发频控，${wait.toFixed(1)}s 后重试（${i + 1}/${retries - 1}）`);
       await sleep(wait);
       continue;
     }
@@ -819,7 +819,7 @@ function homeLine(data, prefix) {
 function say(logs, message) {
   const line = redact(message);
   logs.push(line);
-  console.log(`[${SCRIPT_NAME}] ${line}`);
+  console.log(line);
 }
 
 function taskStepName(taskType) {
@@ -1054,7 +1054,7 @@ async function processUser(account, index, total) {
   }
 
   logs.title = loginData.nickName || "未设置昵称";
-  console.log(`[${SCRIPT_NAME}] 登录成功：${logs.title}`);
+  console.log(logs.title);
   await sleepHuman(ACTION_DELAY);
 
   let home = {};
@@ -1137,7 +1137,7 @@ async function main() {
   const accounts = loadAccounts();
   if (!accounts.length) {
     const message = "没有可用账号。请先在微信打开一次茄皇活动页面自动获取";
-    console.log(`[${SCRIPT_NAME}] ${message}`);
+    console.log(message);
     notify(SCRIPT_NAME, "尚未获取账号", message);
     return;
   }
@@ -1146,19 +1146,15 @@ async function main() {
 
   await loadForge();
 
-  console.log(
-    `[${SCRIPT_NAME}] 开始处理 ${accounts.length} 个账号，浇水 ${MAX_WATER_TIMES} 次`
-  );
-
   const allLogs = [];
 
   for (let i = 0; i < accounts.length; i += 1) {
+    if (i > 0) console.log("━━━━━━━━━━━━━━━━━━━━");
     allLogs.push(await processUser(accounts[i], i + 1, accounts.length));
     if (i < accounts.length - 1) await sleepHuman(ACCOUNT_DELAY);
   }
 
   const report = renderReport(allLogs);
-  console.log(`\n${report}\n`);
   notify(SCRIPT_NAME, `多账号任务完成（${accounts.length} 个账号）`, report);
 }
 
@@ -1173,7 +1169,7 @@ async function main() {
     }
   } catch (error) {
     const message = `${captureMode ? "账号获取" : "脚本运行"}失败：${errText(error)}`;
-    console.log(`[${SCRIPT_NAME}] ${redact(message)}`);
+    console.log(redact(message));
     notify(SCRIPT_NAME, captureMode ? "账号获取失败" : "运行失败", redact(message));
   } finally {
     if (captureMode) $done({});
