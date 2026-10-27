@@ -1,8 +1,7 @@
 #!name = 统一梦时代−茄皇签到
-#!homepage = https://github.com/xhujer/-
 #!loon_version = 3.5.1(983)
 #!date = 2026-10-27
-#!tag = 茄皇,快乐星球,任务
+#!tag = 茄皇,签到
 #!type = normal
 
 [Argument]
