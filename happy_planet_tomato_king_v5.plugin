@@ -5,7 +5,7 @@
 #!type = normal
 
 [Argument]
-capture = switch,true,tag=自动获取账号,desc=开启后访问活动页面自动保存 wid 和 openId（每抓一次新增一个账号）
+capture = switch,true,tag=获取账号,desc=开启后访问活动页面自动保存 wid 和 openId（每抓一次新增一个账号）
 cron = input,"25 10 * * *",type=string,tag=执行时间,desc=默认每天 10:25 执行
 debug = switch,false,tag=调试日志,desc=开启后输出加密库加载、请求次数、频控退避等细节
 
