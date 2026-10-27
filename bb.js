@@ -681,14 +681,13 @@ async function vipExtraEx() {
 	return await $.fetch(myRequest).then(response => {
 		try {
 			const body = $.toObj(response.body)
-			if (body?.code === 0 && body?.message === "0") {
+			if (body?.code === 0) {
 				$.log("- 成功获得10经验值")
 				return true
-			} else {
-				$.log("- 每日额外经验任务失败")
-				$.log("- 原因 " + body?.message)
-				return false
 			}
+			$.log("- 每日额外经验任务失败")
+			$.log("- 原因 " + (body?.message || body?.code))
+			return false
 		} catch (e) {
 			$.logErr(e, response)
 		}
