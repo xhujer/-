@@ -670,7 +670,8 @@ async function requestHkey(account, path, timeSec) {
             path,
             time,
             imei: account.imei,
-            heybox_id: account.heyboxId
+            heybox_id: account.heyboxId,
+            os_version: APP_PROFILE.os_version
           }),
         headers: { "User-Agent": APP_UA, Accept: "application/json" },
         "auto-cookie": false
@@ -709,7 +710,8 @@ async function requestReportData(account, path, textPayload) {
           text: textPayload,
           time,
           imei: account.imei,
-          heybox_id: account.heyboxId
+          heybox_id: account.heyboxId,
+          os_version: APP_PROFILE.os_version
         }),
         "auto-cookie": false
       },
