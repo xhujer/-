@@ -823,9 +823,8 @@ async function bigScoreOgvWatchNew() {
 				}
 				delete config.task_id, delete config.token
 				const bangumi = await getBangumi()
-				const episodes = bangumi?.episodes || []
-				if (episodes.length) {
-					const episode = episodes[Math.floor(Math.random() * episodes.length)]
+				const episode = bangumi.episodes[Math.floor(Math.random() * bangumi.episodes.length)]
+				if (bangumi) {
 					const { task_id, token } = await bigScoreOgvWatchMaterial(bangumi.season_id, episode.ep_id) || {}
 					Object.assign(config, { task_id, token })
 				} else {
@@ -858,7 +857,7 @@ async function bigScoreOgvWatchMaterial(season_id, epid) {
 			const body = $.toObj(response.body)
 			if (body?.code === 0 && body?.message === "success") {
 				$.log("- 任务计时开始,等待十分钟...")
-				return body.data
+				return body.data.watch_count_down_cfg
 			} else {
 				$.log("- 任务计时失败")
 				$.log("- 原因 " + body?.message)
