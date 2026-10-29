@@ -19,12 +19,6 @@ const USER_AGENT =
   "MicroMessenger/8.0.75(0x18004b42) NetType/WIFI Language/zh_CN " +
   "miniProgram/wx532ecb3bdaaf92f9";
 
-const FORGE_URLS = [
-  "https://cdn.jsdelivr.net/npm/node-forge@1.3.1/dist/forge.min.js",
-  "https://unpkg.com/node-forge@1.3.1/dist/forge.min.js",
-  "https://raw.githubusercontent.com/digitalbazaar/forge/1.3.1/dist/forge.min.js",
-];
-
 const ACTION_DELAY = [2.5, 5.0];
 const PHASE_DELAY = [8.0, 15.0];
 const ACCOUNT_DELAY = [30.0, 60.0];
@@ -33,8 +27,7 @@ const MAX_WATER_TIMES = 5;
 
 const REQUEST_TIMEOUT_MS = 20000;
 
-let FORGE = null;
-let RSA_PUBLIC_KEY = null;
+let RSA_KEY = null;
 let PUBLIC_KEY_B64 = PUBLIC_KEY;
 const SENSITIVE_VALUES = new Set();
 
@@ -511,84 +504,381 @@ async function requestWithRetry(options) {
   return last;
 }
 
-function globalObject() {
-  try {
-    return Function("return this")();
-  } catch (_) {
-    return globalThis;
+function b64decode(text) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const clean = String(text).replace(/[^A-Za-z0-9+/]/g, "");
+  const out = [];
+  for (let i = 0; i < clean.length; i += 4) {
+    const n =
+      (chars.indexOf(clean[i]) << 18) |
+      (chars.indexOf(clean[i + 1]) << 12) |
+      ((clean[i + 2] ? chars.indexOf(clean[i + 2]) : 0) << 6) |
+      (clean[i + 3] ? chars.indexOf(clean[i + 3]) : 0);
+    out.push((n >> 16) & 255);
+    if (clean[i + 2]) out.push((n >> 8) & 255);
+    if (clean[i + 3]) out.push(n & 255);
   }
+  return new Uint8Array(out);
 }
 
-function sanitizeLibrarySource(source) {
-  let text = String(source || "").replace(/^\uFEFF/, "");
-  for (;;) {
-    const before = text;
-    text = text.replace(/^\s*\/\*[\s\S]*?\*\//, "");
-    text = text.replace(/^\s*\/\/[^\r\n]*(?:\r?\n|$)/, "");
-    if (text === before) break;
+function b64encode(bytes) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    out += chars[b0 >> 2];
+    out += chars[((b0 & 3) << 4) | (b1 >> 4)];
+    out += i + 1 < bytes.length ? chars[((b1 & 15) << 2) | (b2 >> 6)] : "=";
+    out += i + 2 < bytes.length ? chars[b2 & 63] : "=";
   }
-  return text.trim();
+  return out;
 }
 
-function hideIncompatibleCrypto(root) {
-  try {
-    const source = root.crypto;
-    if (source && typeof source.randomBytes !== "function") {
-      Object.defineProperty(root, "crypto", { value: undefined, configurable: true, writable: true });
-      debugLog("已隐藏不兼容的 crypto 实现");
+function utf8Encode(text) {
+  const out = [];
+  for (let i = 0; i < text.length; i += 1) {
+    let code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      code = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
+      i += 1;
     }
-  } catch (error) {
-    debugLog(`crypto 兼容处理失败：${errText(error)}`);
-  }
-}
-
-async function loadForge() {
-  if (FORGE) return FORGE;
-
-  const root = globalObject();
-  if (root.forge && root.forge.cipher && root.forge.pki) {
-    FORGE = root.forge;
-    return FORGE;
-  }
-
-  if (typeof root.window === "undefined") root.window = root;
-  if (typeof root.self === "undefined") root.self = root;
-  if (typeof root.navigator === "undefined") root.navigator = { userAgent: "Loon JavaScriptCore" };
-
-  let lastError = null;
-  for (const url of FORGE_URLS) {
-    try {
-      debugLog(`加载加密库：${url}`);
-      const response = await loonHttp("GET", { url, timeout: REQUEST_TIMEOUT_MS });
-      if (response.status < 200 || response.status >= 300) throw new Error(`HTTP ${response.status}`);
-      if (!response.body || response.body.length < 100000) throw new Error("加密库内容不完整");
-
-      const source = sanitizeLibrarySource(response.body);
-      if (!source || source.charAt(0) === "*") throw new Error("加密库源码开头异常");
-
-      hideIncompatibleCrypto(root);
-      (0, eval)(`${source}\n//# sourceURL=node-forge-1.3.1.min.js`);
-      if (!root.forge || !root.forge.cipher || !root.forge.pki) throw new Error("加密库初始化失败");
-
-      FORGE = root.forge;
-      seedRandom();
-      debugLog("加密库加载成功");
-      return FORGE;
-    } catch (error) {
-      lastError = error;
-      debugLog(`加密库加载失败：${errText(error)}`);
+    if (code < 0x80) {
+      out.push(code);
+    } else if (code < 0x800) {
+      out.push(0xc0 | (code >> 6), 0x80 | (code & 63));
+    } else if (code < 0x10000) {
+      out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+    } else {
+      out.push(
+        0xf0 | (code >> 18),
+        0x80 | ((code >> 12) & 63),
+        0x80 | ((code >> 6) & 63),
+        0x80 | (code & 63)
+      );
     }
   }
-
-  throw new Error(`无法加载加密库：${lastError ? errText(lastError) : "未知错误"}`);
+  return new Uint8Array(out);
 }
 
-function seedRandom() {
-  if (!FORGE || !FORGE.random) return;
-  try {
-    FORGE.random.collect([Date.now(), Math.random(), Math.random()].join(":"));
-    FORGE.random.collectInt(Date.now() >>> 0, 32);
-  } catch (_) {}
+let RANDOM_POOL = [];
+
+function randomBytes(length) {
+  if (!RANDOM_POOL.length) {
+    RANDOM_POOL.push(Date.now(), Math.random(), Math.random(), Math.random());
+  }
+  const out = new Uint8Array(length);
+  for (let i = 0; i < length; i += 1) {
+    out[i] = Math.floor(Math.random() * 256);
+  }
+  return out;
+}
+
+const K256 = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+function rotr(x, n) {
+  return ((x >>> n) | (x << (32 - n))) >>> 0;
+}
+
+function sha256(bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const bitLen = data.length * 8;
+  const padded = new Uint8Array((((data.length + 9) >> 6) + 1) << 6);
+  padded.set(data);
+  padded[data.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(padded.length - 8, Math.floor(bitLen / 4294967296));
+  view.setUint32(padded.length - 4, bitLen >>> 0);
+
+  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;
+  let h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+  const w = new Array(64);
+
+  for (let off = 0; off < padded.length; off += 64) {
+    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(off + i * 4);
+    for (let i = 16; i < 64; i += 1) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+    for (let i = 0; i < 64; i += 1) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + K256[i] + w[i]) >>> 0;
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0;
+      d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0; h5 = (h5 + f) >>> 0; h6 = (h6 + g) >>> 0; h7 = (h7 + h) >>> 0;
+  }
+
+  const out = new Uint8Array(32);
+  const ov = new DataView(out.buffer);
+  [h0, h1, h2, h3, h4, h5, h6, h7].forEach((v, i) => ov.setUint32(i * 4, v));
+  return out;
+}
+
+function buildSbox() {
+  const exp = new Uint8Array(512);
+  const log = new Uint8Array(256);
+  let x = 1;
+  for (let i = 0; i < 255; i += 1) {
+    exp[i] = x;
+    log[x] = i;
+    x ^= (x << 1) ^ ((x & 0x80) ? 0x11b : 0);
+    x &= 0xff;
+  }
+  for (let i = 255; i < 512; i += 1) exp[i] = exp[i - 255];
+
+  const sbox = new Uint8Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    const inv = i === 0 ? 0 : exp[255 - log[i]];
+    let s = inv;
+    for (let k = 1; k <= 4; k += 1) s ^= ((inv << k) | (inv >>> (8 - k))) & 0xff;
+    sbox[i] = (s ^ 0x63) & 0xff;
+  }
+  return sbox;
+}
+
+const SBOX = buildSbox();
+const RCON = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40];
+
+function expandKey(key) {
+  const nk = key.length / 4;
+  const nr = nk + 6;
+  const w = [];
+  for (let i = 0; i < nk; i += 1) w.push([key[4 * i], key[4 * i + 1], key[4 * i + 2], key[4 * i + 3]]);
+
+  for (let i = nk; i < 4 * (nr + 1); i += 1) {
+    let temp = w[i - 1].slice();
+    if (i % nk === 0) {
+      temp = [temp[1], temp[2], temp[3], temp[0]].map((b) => SBOX[b]);
+      temp[0] ^= RCON[i / nk - 1];
+    } else if (nk > 6 && i % nk === 4) {
+      temp = temp.map((b) => SBOX[b]);
+    }
+    w.push(w[i - nk].map((b, k) => b ^ temp[k]));
+  }
+  return { w, nr };
+}
+
+function encryptBlock(block, expanded) {
+  const { w, nr } = expanded;
+  const state = new Uint8Array(block);
+
+  for (let c = 0; c < 4; c += 1) {
+    for (let r = 0; r < 4; r += 1) state[4 * c + r] ^= w[c][r];
+  }
+
+  for (let round = 1; round <= nr; round += 1) {
+    for (let i = 0; i < 16; i += 1) state[i] = SBOX[state[i]];
+
+    const copy = state.slice();
+    for (let r = 1; r < 4; r += 1) {
+      for (let c = 0; c < 4; c += 1) state[4 * c + r] = copy[4 * ((c + r) % 4) + r];
+    }
+
+    if (round !== nr) {
+      for (let c = 0; c < 4; c += 1) {
+        const a0 = state[4 * c];
+        const a1 = state[4 * c + 1];
+        const a2 = state[4 * c + 2];
+        const a3 = state[4 * c + 3];
+        const all = a0 ^ a1 ^ a2 ^ a3;
+        state[4 * c] = a0 ^ all ^ xtime(a0 ^ a1);
+        state[4 * c + 1] = a1 ^ all ^ xtime(a1 ^ a2);
+        state[4 * c + 2] = a2 ^ all ^ xtime(a2 ^ a3);
+        state[4 * c + 3] = a3 ^ all ^ xtime(a3 ^ a0);
+      }
+    }
+
+    for (let c = 0; c < 4; c += 1) {
+      for (let r = 0; r < 4; r += 1) state[4 * c + r] ^= w[round * 4 + c][r];
+    }
+  }
+  return state;
+}
+
+function xtime(b) {
+  return ((b << 1) ^ ((b & 0x80) ? 0x1b : 0)) & 0xff;
+}
+
+function gfMul(x, y) {
+  const z = new Uint8Array(16);
+  const v = x.slice();
+  for (let i = 0; i < 128; i += 1) {
+    if ((y[i >> 3] >> (7 - (i & 7))) & 1) {
+      for (let k = 0; k < 16; k += 1) z[k] ^= v[k];
+    }
+    const lsb = v[15] & 1;
+    for (let k = 15; k > 0; k -= 1) v[k] = ((v[k] >>> 1) | ((v[k - 1] & 1) << 7)) & 0xff;
+    v[0] = v[0] >>> 1;
+    if (lsb) v[0] ^= 0xe1;
+  }
+  return z;
+}
+
+function ghash(h, data) {
+  let y = new Uint8Array(16);
+  for (let off = 0; off < data.length; off += 16) {
+    for (let k = 0; k < 16; k += 1) y[k] ^= data[off + k] || 0;
+    y = gfMul(y, h);
+  }
+  return y;
+}
+
+function aesGcmEncrypt(key, iv, plaintext) {
+  const expanded = expandKey(key);
+  const h = encryptBlock(new Uint8Array(16), expanded);
+
+  const j0 = new Uint8Array(16);
+  j0.set(iv.subarray(0, 12));
+  j0[15] = 1;
+
+  const counter = j0.slice();
+  const ciphertext = new Uint8Array(plaintext.length);
+  for (let off = 0; off < plaintext.length; off += 16) {
+    for (let k = 15; k >= 12; k -= 1) {
+      counter[k] = (counter[k] + 1) & 0xff;
+      if (counter[k] !== 0) break;
+    }
+    const stream = encryptBlock(counter, expanded);
+    const n = Math.min(16, plaintext.length - off);
+    for (let k = 0; k < n; k += 1) ciphertext[off + k] = plaintext[off + k] ^ stream[k];
+  }
+
+  const lenBlock = new Uint8Array(16);
+  const textBits = plaintext.length * 8;
+  for (let i = 0; i < 8; i += 1) {
+    lenBlock[15 - i] = (textBits / Math.pow(2, 8 * i)) & 0xff;
+  }
+  const paddedLen = Math.ceil(ciphertext.length / 16) * 16;
+  const tagData = new Uint8Array(paddedLen + 16);
+  tagData.set(ciphertext, 0);
+  tagData.set(lenBlock, paddedLen);
+
+  const s = ghash(h, tagData);
+  const mask = encryptBlock(j0, expanded);
+  const tag = new Uint8Array(16);
+  for (let i = 0; i < 16; i += 1) tag[i] = s[i] ^ mask[i];
+
+  return { ciphertext, tag };
+}
+
+function derChildren(bytes, start, end) {
+  const out = [];
+  let i = start;
+  while (i < end) {
+    const tag = bytes[i];
+    let len = bytes[i + 1];
+    let head = 2;
+    if (len & 0x80) {
+      const count = len & 0x7f;
+      len = 0;
+      for (let k = 0; k < count; k += 1) len = (len << 8) | bytes[i + 2 + k];
+      head = 2 + count;
+    }
+    out.push({ tag, start: i + head, end: i + head + len, raw: bytes.subarray(i + head, i + head + len) });
+    i += head + len;
+  }
+  return out;
+}
+
+function bytesToBigInt(bytes) {
+  let hex = "";
+  for (let i = 0; i < bytes.length; i += 1) hex += bytes[i].toString(16).padStart(2, "0");
+  return BigInt("0x" + (hex || "0"));
+}
+
+function bigIntToBytes(value, length) {
+  let hex = value.toString(16);
+  if (hex.length % 2) hex = "0" + hex;
+  const raw = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < raw.length; i += 1) raw[i] = parseInt(hex.substr(i * 2, 2), 16);
+  if (raw.length >= length) return raw.subarray(raw.length - length);
+  const out = new Uint8Array(length);
+  out.set(raw, length - raw.length);
+  return out;
+}
+
+function parseRsaPublicKey(base64Text) {
+  const der = b64decode(base64Text);
+  if (der[0] !== 0x30) throw new Error("公钥格式异常");
+  const top = derChildren(der, 0, der.length)[0];
+  const parts = derChildren(der, top.start, top.end);
+  const bitString = parts[1].raw.subarray(1);
+  const seq = derChildren(bitString, 0, bitString.length)[0];
+  const ints = derChildren(bitString, seq.start, seq.end);
+  return { n: bytesToBigInt(ints[0].raw), e: bytesToBigInt(ints[1].raw) };
+}
+
+function modPow(base, exponent, modulus) {
+  let result = 1n;
+  let b = base % modulus;
+  let e = exponent;
+  while (e > 0n) {
+    if (e & 1n) result = (result * b) % modulus;
+    b = (b * b) % modulus;
+    e >>= 1n;
+  }
+  return result;
+}
+
+function mgf1(seed, length) {
+  const out = new Uint8Array(length);
+  let offset = 0;
+  for (let counter = 0; offset < length; counter += 1) {
+    const block = new Uint8Array(seed.length + 4);
+    block.set(seed);
+    block[seed.length] = (counter >>> 24) & 255;
+    block[seed.length + 1] = (counter >>> 16) & 255;
+    block[seed.length + 2] = (counter >>> 8) & 255;
+    block[seed.length + 3] = counter & 255;
+    const digest = sha256(block);
+    out.set(digest.subarray(0, Math.min(32, length - offset)), offset);
+    offset += 32;
+  }
+  return out;
+}
+
+function rsaOaepEncrypt(message, key) {
+  const k = Math.ceil(key.n.toString(16).length / 2);
+  const hLen = 32;
+  const lHash = sha256(new Uint8Array(0));
+  const ps = new Uint8Array(k - message.length - hLen * 2 - 2);
+  const db = new Uint8Array(lHash.length + ps.length + 1 + message.length);
+  db.set(lHash, 0);
+  db[lHash.length + ps.length] = 1;
+  db.set(message, lHash.length + ps.length + 1);
+
+  const seed = randomBytes(hLen);
+  const dbMask = mgf1(seed, k - hLen - 1);
+  const maskedDB = new Uint8Array(db.length);
+  for (let i = 0; i < db.length; i += 1) maskedDB[i] = db[i] ^ dbMask[i];
+  const seedMask = mgf1(maskedDB, hLen);
+  const maskedSeed = new Uint8Array(hLen);
+  for (let i = 0; i < hLen; i += 1) maskedSeed[i] = seed[i] ^ seedMask[i];
+
+  const em = new Uint8Array(k);
+  em.set(maskedSeed, 1);
+  em.set(maskedDB, hLen + 1);
+
+  return bigIntToBytes(modPow(bytesToBigInt(em), key.e, key.n), k);
 }
 
 async function refreshPublicKey() {
@@ -612,19 +902,16 @@ async function refreshPublicKey() {
     if (data && typeof data === "object") candidates.push(data.publicKey, data.public_key, data.key);
     candidates.push(body && body.publicKey, body && body.public_key);
 
-    const key = candidates.find((v) => typeof v === "string" && v.indexOf("MIIB") > -1);
-    if (!key) return false;
+    const found = candidates.find((v) => typeof v === "string" && v.indexOf("MIIB") > -1);
+    if (!found) return false;
 
-    const cleaned = key
+    const cleaned = found
       .replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----/g, "")
       .replace(/\\n|\s/g, "");
-    const lines = cleaned.match(/.{1,64}/g) || [];
-    FORGE.pki.publicKeyFromPem(
-      `-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----`
-    );
 
+    parseRsaPublicKey(cleaned);
     PUBLIC_KEY_B64 = cleaned;
-    RSA_PUBLIC_KEY = null;
+    RSA_KEY = null;
     return true;
   } catch (error) {
     debugLog(`刷新公钥失败，使用内置公钥：${errText(error)}`);
@@ -633,37 +920,24 @@ async function refreshPublicKey() {
 }
 
 function getPublicKey() {
-  if (RSA_PUBLIC_KEY) return RSA_PUBLIC_KEY;
-  if (!FORGE) throw new Error("加密库尚未初始化");
-  const lines = PUBLIC_KEY_B64.match(/.{1,64}/g) || [];
-  const pem = `-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----`;
-  RSA_PUBLIC_KEY = FORGE.pki.publicKeyFromPem(pem);
-  return RSA_PUBLIC_KEY;
+  if (RSA_KEY) return RSA_KEY;
+  RSA_KEY = parseRsaPublicKey(PUBLIC_KEY_B64);
+  return RSA_KEY;
 }
 
 function encryptPayload(payload) {
-  if (!FORGE) throw new Error("加密库尚未初始化");
-  seedRandom();
-
-  const plaintext = JSON.stringify(payload);
-  const aesKey = FORGE.random.getBytesSync(32);
-  const iv = FORGE.random.getBytesSync(12);
-
-  const cipher = FORGE.cipher.createCipher("AES-GCM", aesKey);
-  cipher.start({ iv, tagLength: 128 });
-  cipher.update(FORGE.util.createBuffer(plaintext, "utf8"));
-  if (!cipher.finish()) throw new Error("AES-GCM 加密失败");
-
-  const encryptedData = cipher.output.getBytes() + cipher.mode.tag.getBytes();
-  const encryptedKey = getPublicKey().encrypt(aesKey, "RSA-OAEP", {
-    md: FORGE.md.sha256.create(),
-    mgf1: { md: FORGE.md.sha256.create() },
-  });
+  const aesKey = randomBytes(32);
+  const iv = randomBytes(12);
+  const plaintext = utf8Encode(JSON.stringify(payload));
+  const { ciphertext, tag } = aesGcmEncrypt(aesKey, iv, plaintext);
+  const data = new Uint8Array(ciphertext.length + tag.length);
+  data.set(ciphertext, 0);
+  data.set(tag, ciphertext.length);
 
   return {
-    data: FORGE.util.encode64(encryptedData),
-    key: FORGE.util.encode64(encryptedKey),
-    iv: FORGE.util.encode64(iv),
+    data: b64encode(data),
+    key: b64encode(rsaOaepEncrypt(aesKey, getPublicKey())),
+    iv: b64encode(iv),
   };
 }
 
@@ -1144,7 +1418,6 @@ async function main() {
 
   for (const account of accounts) registerSensitive(account.wid, account.openId, account.phone);
 
-  await loadForge();
 
   const allLogs = [];
 
