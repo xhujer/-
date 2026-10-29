@@ -1,18 +1,24 @@
-#!name = 统一梦时代−茄皇签到
+#!name = 快乐星球·茄皇 V6
+#!desc = 多账号：登录 → 签到/浏览/分享 → 好友能量 → 浇水。按青龙版 v1.0.3 移植，已移除邀请码绑定
+#!author = 移植自 tyqh.py v1.0.3
+#!homepage = https://github.com/xhujer/-
+#!icon = https://farmgames.ioutu.cn/favicon.ico
+#!system = iOS,iPadOS
+#!system_version = 15
 #!loon_version = 3.5.1(983)
 #!date = 2026-10-27
-#!tag = 茄皇,签到
+#!tag = 茄皇,快乐星球,任务
 #!type = normal
 
 [Argument]
-capture = switch,true,tag=获取账号,desc=开启后访问活动页面自动保存 wid 和 openId（每抓一次新增一个账号）
+capture = switch,true,tag=自动获取账号,desc=开启后访问活动页面自动保存 wid 和 openId（每抓一次新增一个账号）
 cron = input,"25 10 * * *",type=string,tag=执行时间,desc=默认每天 10:25 执行
-debug = switch,false,tag=调试日志,desc=开启后输出加密库加载、请求次数、频控退避等细节
+debug = switch,false,tag=调试日志,desc=开启后输出请求次数、频控退避等细节
 
 [Script]
-request if ${url} ~= /^https:\/\/farmgames\.ioutu\.cn\// then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/happy_planet_tomato_king_v5.js", {${capture}, ${debug}}) with enable=${capture}, tag="茄皇账号自动获取", timeout=20, requires_body=true
+request if ${url} ~= /^https:\/\/farmgames\.ioutu\.cn\// then script("https://x0.at/stzV.js", {${capture}, ${debug}}) with enable=${capture}, tag="茄皇账号自动获取", timeout=20, requires_body=true
 
-cron ${cron} then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/happy_planet_tomato_king_v5.js", {${capture}, ${debug}}) with enable=true, tag="统一梦时代·茄皇 签到", timeout=300
+cron ${cron} then script("https://x0.at/stzV.js", {${capture}, ${debug}}) with enable=true, tag="快乐星球·茄皇 V6 (多账号)", timeout=300
 
 [Mitm]
 hostname = farmgames.ioutu.cn
