@@ -1,0 +1,14 @@
+#!name=三国咸话签到（咸豆）
+#!desc=三国咸话/三国杀社区全自动签到：自动抓取登录态，签到 + 浏览任务 + 分享任务 + 热力领奖 + 自动领取奖励。
+#!author=Minis
+
+[Argument]
+cron = input,"10 8 * * *",type=string,tag=签到时间,desc=cron 5 段，默认每天 08:10
+cookie = input,"",type=string,tag=Cookie,desc=留空即可自动获取；需要覆盖时填 token 或整条 h5/beans?token=xxx&c=2
+
+[Script]
+http-request ^https?:\/\/(api-xh|wxforum)\.sanguosha\.cn\/ script-path=https://x0.at/GlJp.js, requires-body=false, timeout=15, tag=三国咸话抓登录态
+cron "${cron}" script-path=https://x0.at/GlJp.js, requires-body=false, timeout=180, tag=三国咸话签到, argument="{cookie:${cookie}}"
+
+[MITM]
+hostname = %APPEND% api-xh.sanguosha.cn, wxforum.sanguosha.cn
