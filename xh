@@ -1,17 +1,16 @@
 #!name = 三国咸话签到（咸豆）
-#!desc = 三国咸话/三国杀社区全自动签到：登录态自动抓取 + 每日签到 + 浏览任务 + 分享任务 + 热力领奖 + 自动领取奖励
-#!author = Minis
+#!author = Ming
 #!loon_version = 3.5.1(983)
 #!date = 2026-10-31
 #!tag = 签到,工具
 
 [Argument]
-cron = input,"10 8 * * *",type=string,tag=签到时间,desc=cron 五段表达式，默认每天 08:10
-auto = switch,true,type=boolean,tag=自动获取登录态,desc=开启后打开一次小程序即自动获取，无需任何手动填写
+cron = input,"00 8 * * *",type=string,tag=签到时间,desc=默认每天 08:00
+auto = switch,true,type=boolean,tag=自动获取Cookie,desc=开启后打开一次小程序即自动获取，无需任何手动填写
 
 [Script]
-request if ${url} ~= /^https?:\/\/(api-xh|wxforum)\.sanguosha\.cn\// then script("https://x0.at/06tY.js", {${auto}}) with tag="①自动获取登录态", timeout=15
-cron ${cron} then script("https://x0.at/06tY.js", {${auto}}) with tag="②每日签到", timeout=180
+request if ${url} ~= /^https?:\/\/(api-xh|wxforum)\.sanguosha\.cn\// then script("https://x0.at/06tY.js", {${auto}}) with tag="获取Cookie", timeout=15
+cron ${cron} then script("https://x0.at/06tY.js", {${auto}}) with tag="每日签到", timeout=180
 
 [Mitm]
 hostname = %APPEND% api-xh.sanguosha.cn, wxforum.sanguosha.cn
