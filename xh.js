@@ -1,5 +1,3 @@
-// 三国咸话（三国杀社区）签到｜Loon：http-request 抓登录态 + cron 签到
-// 签到 POST wxforum.sanguosha.cn/api/user/signIn；任务接口在 api-xh.sanguosha.cn
 const $ = new Env('三国咸话签到');
 
 const HOSTS = ['https://wxforum.sanguosha.cn', 'https://api-xh.sanguosha.cn'];
@@ -67,37 +65,35 @@ function headerOf(headers, name) {
   return '';
 }
 
+function fixCode(v) {
+  const c = String(v == null ? '' : v).trim();
+  return (c === '1' || c === '2') ? c : '2';
+}
+
 function wait(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
 function parseArgs(raw) {
   let arg = raw || (typeof $argument !== 'undefined' ? $argument : '');
-  const out = { token: '', appCode: '2', notify: true, tasks: Object.assign({}, TASK_DEFAULT) };
+  const out = { auto: true, notify: true, tasks: Object.assign({}, TASK_DEFAULT) };
+  let obj = null;
 
   if (arg && typeof arg === 'object' && !Array.isArray(arg)) {
-    applyObj(out, arg);
-    return out;
-  }
-  if (typeof arg === 'string' && arg.trim()) {
+    obj = arg;
+  } else if (typeof arg === 'string' && arg.trim().startsWith('{')) {
     const s = arg.trim();
-    if (s.startsWith('{')) {
-      try { applyObj(out, JSON.parse(s)); return out; } catch (e) {}
-      applyObj(out, looseObj(s));
-      return out;
-    }
-    const a = parseTokenLine(s);
-    if (a) { out.token = a.token; out.appCode = a.appCode; }
-    return out;
+    try { obj = JSON.parse(s); } catch (e) { obj = looseObj(s); }
   }
+  if (obj) out.auto = !(obj.auto === false || obj.auto === 'false' || obj.auto === 0 || obj.auto === '0');
   return out;
 }
 
-// Loon 的 argument 常写成 {k:v} 这种非标准 JSON，需要宽松解析
+// Loon 的 argument 常写成 {k:v} 这种非标准 JSON
 function looseObj(str) {
   const o = {};
   const body = String(str).replace(/^\s*\{/, '').replace(/\}\s*$/, '');
-  body.split(/,(?=[^,"']*(?:["'][^"']*["'][^,"']*)*$)/).forEach((seg) => {
+  body.split(',').forEach((seg) => {
     const i = seg.indexOf(':');
     if (i < 0) return;
     const k = seg.slice(0, i).trim().replace(/^["']|["']$/g, '');
@@ -107,50 +103,6 @@ function looseObj(str) {
     if (k) o[k] = v;
   });
   return o;
-}
-
-function applyObj(out, o) {
-  const raw = o.cookie || o.token || o.token1 || o.url || '';
-  if (raw) {
-    const a = parseTokenLine(String(raw), o.appCode || o.appCode1);
-    if (a) { out.token = a.token; out.appCode = a.appCode; }
-  }
-}
-
-function parseTokenLine(input, forceCode) {
-  let s = String(input).trim().replace(/^["']|["']$/g, '');
-  if (!s) return null;
-  let token = '';
-  let code = forceCode;
-
-  if (/^https?:\/\//i.test(s)) {
-    const i = s.indexOf('?');
-    if (i >= 0) {
-      s.slice(i + 1).split(/[&#]/).forEach((kv) => {
-        const j = kv.indexOf('=');
-        if (j < 0) return;
-        const k = kv.slice(0, j).toLowerCase();
-        const v = decodeURIComponent(kv.slice(j + 1));
-        if (k === 'token') token = v;
-        if (k === 'c') code = v;
-      });
-    }
-  } else if (/^(cookie|token|appCode|c)=/i.test(s)) {
-    s.split(/[&,]/).forEach((kv) => {
-      const i = kv.indexOf('=');
-      if (i < 0) return;
-      const k = kv.slice(0, i).trim().toLowerCase();
-      const v = kv.slice(i + 1).trim();
-      if (k === 'token' || k === 'cookie') token = v;
-      if (k === 'c' || k === 'appcode') code = v;
-    });
-  } else {
-    token = s;
-  }
-
-  token = String(token || '').replace(/^Bearer\s+/i, '').trim();
-  if (!token) return null;
-  return { token, appCode: String(code || '2') };
 }
 
 function http(method, url, headers, body) {
@@ -216,13 +168,25 @@ async function callWithFallback(method, paths, headers, body) {
   return last;
 }
 
+let taskErr = '';
+
+function noteErr(r) {
+  if (!r) { taskErr = '无响应'; return; }
+  if (!r.ok) { taskErr = '网络错误 ' + (r.error || ''); return; }
+  const j = r.json;
+  const msg = j ? (j.msg || j.message || j.data || ('code ' + j.code)) : String(r.text || '').slice(0, 40);
+  taskErr = 'HTTP ' + r.status + '／' + msg;
+}
+
 async function taskCall(method, path, headers, body) {
   let last = null;
   for (let i = HOSTS.length - 1; i >= 0; i--) {
     const r = await http(method, HOSTS[i] + path, headers, body);
     last = r;
-    if (r.ok && r.status !== 404) return r;
+    if (r.ok && r.status !== 404 && r.json && (r.json.code === 0 || r.json.code === 1000)) return r;
+    if (r.ok && r.status !== 404) { noteErr(r); return r; }
   }
+  noteErr(last);
   return last;
 }
 
@@ -273,7 +237,7 @@ async function runTasks(headers, opts, logs) {
       const r = await taskCall('POST', '/task/sgxh-task/updateTaskProgress', headers, JSON.stringify({ operateType: 2, gameId: 2 }));
       const ok = !!(r && r.ok && r.json && (r.json.code === 0 || r.json.code === 1000));
       if (!ok) {
-        logs.push('分享任务：上报失败');
+        logs.push('分享任务：上报失败（' + taskErr + '）');
       } else {
         const now = findTask(await fetchTasks(headers), opts.shareTaskId);
         const c = now ? Number(now.currentProgressValue) || 0 : 1;
@@ -298,7 +262,8 @@ async function runTasks(headers, opts, logs) {
     } else {
       const after = findTask(await fetchTasks(headers), opts.viewTaskId);
       const now = after ? Number(after.currentProgressValue) || 0 : cur + added;
-      logs.push(`浏览任务：+${added} 次（${now}/${target}）`);
+      if (added === 0) logs.push(`浏览任务：上报失败（${taskErr || '无响应'}）`);
+      else logs.push(`浏览任务：+${added} 次（${now}/${target}）`);
     }
   }
 
@@ -309,7 +274,7 @@ async function runTasks(headers, opts, logs) {
     const tot = hd ? parseFloat(hd.heatValue) || 0 : 0;
 
     if (!pv) {
-      logs.push(`热力竹：任务未下发（热力 ${tot}）`);
+      logs.push(`热力竹：读取任务失败（${taskErr || '无响应'}）`);
     } else {
       const st = Number(pv.progressStatus);
       const prog = `${Number(pv.currentProgressValue) || 0}/${Number(pv.targetProgressValue) || 1}`;
@@ -345,15 +310,16 @@ async function runTasks(headers, opts, logs) {
       }
       await wait(500);
     }
-    logs.push(claimedNames.length
-      ? `领取奖励：${claimedNames.join('、')}（+${claimedBeans} 咸豆）`
-      : '领取奖励：暂无可领');
+    if (claimedNames.length) logs.push(`领取奖励：${claimedNames.join('、')}（+${claimedBeans} 咸豆）`);
+    else logs.push(list ? '领取奖励：暂无可领' : `领取奖励：读取任务失败（${taskErr || '无响应'}）`);
   }
 
   return claimedBeans;
 }
 
 function handleCapture() {
+  const conf = parseArgs();
+  if (conf.auto === false) { $.done({}); return; }
   const req = (typeof $request !== 'undefined' && $request) || {};
   const auth = headerOf(req.headers, 'Authorization');
   const token = auth.replace(/^Bearer\s+/i, '').trim();
@@ -370,9 +336,9 @@ function handleCapture() {
   const prev = storeRead();
   const changed = !prev || prev.token !== token;
   const sub = jwtSub(token);
-  const appCode = headerOf(req.headers, 'App-Code') || '2';
+  const appCode = fixCode(headerOf(req.headers, 'App-Code'));
 
-  storeWrite({ token, appCode: String(appCode), sub, ts: Date.now(), exp: exp || 0 });
+  storeWrite({ token, appCode, sub, ts: Date.now(), exp: exp || 0 });
 
   if (changed) {
     console.log(`[抓取] 已保存登录态${sub ? '，账号 ' + sub : ''}`);
@@ -385,13 +351,11 @@ function handleCapture() {
 }
 
 function loadAccount(conf) {
-  if (conf.token) {
-    return { token: conf.token, appCode: conf.appCode || '2', sub: jwtSub(conf.token), manual: true };
-  }
+  if (conf.auto === false) return null;
   const st = storeRead();
   if (!st || !st.token) return null;
   if (st.exp && st.exp < Date.now()) return null;
-  return { token: st.token, appCode: String(st.appCode || '2'), sub: st.sub || jwtSub(st.token), manual: false };
+  return { token: st.token, appCode: fixCode(st.appCode), sub: st.sub || jwtSub(st.token) };
 }
 
 async function runCron() {
@@ -399,9 +363,11 @@ async function runCron() {
   const acc = loadAccount(conf);
 
   if (!acc) {
-    console.log('暂无登录态：请先打开一次小程序「三国咸话」');
+    const why = conf.auto === false ? '自动获取已关闭（请在插件里打开）' : '暂无登录态：请先打开一次小程序「三国咸话」';
+    console.log(why);
     if (conf.notify && typeof $notification !== 'undefined' && $notification) {
-      $notification.post('三国咸话签到', '暂无登录态', '打开一次小程序「三国咸话」即可自动获取，无需手动填 token');
+      $notification.post('三国咸话签到', '暂无登录态',
+        conf.auto === false ? '请在插件里打开「自动获取登录态」开关' : '打开一次小程序「三国咸话」即可自动获取');
     }
     $.done();
     return;
@@ -463,7 +429,7 @@ async function runCron() {
 
 function finish(logs, conf, ok, coin, delta) {
   logs.forEach((l) => console.log(l));
-  console.log(ok ? '== 完成 ==' : '== 失败 ==');
+  console.log(ok ? '完成' : '失败');
 
   if (conf.notify && typeof $notification !== 'undefined' && $notification) {
     const head = logs.filter((l) => /^签到/.test(l))[0] || (ok ? '完成' : '失败');
