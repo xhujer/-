@@ -9,8 +9,8 @@ cron = input,"00 8 * * *",type=string,tag=签到时间,desc=默认每天 08:00
 auto = switch,true,type=boolean,tag=自动获取Cookie,desc=开启后打开一次小程序即自动获取，无需任何手动填写
 
 [Script]
-request if ${url} ~= /^https?:\/\/(api-xh|wxforum)\.sanguosha\.cn\// then script("https://x0.at/06tY.js", {${auto}}) with tag="获取Cookie", timeout=15
-cron ${cron} then script("https://x0.at/06tY.js", {${auto}}) with tag="每日签到", timeout=180
+request if ${url} ~= /^https?:\/\/(api-xh|wxforum)\.sanguosha\.cn\// then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/xh.js", {${auto}}) with tag="获取Cookie", timeout=15
+cron ${cron} then script("https://raw.githubusercontent.com/xhujer/-/refs/heads/main/xh.js", {${auto}}) with tag="每日签到", timeout=180
 
 [Mitm]
 hostname = %APPEND% api-xh.sanguosha.cn, wxforum.sanguosha.cn
