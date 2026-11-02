@@ -201,7 +201,7 @@ async function signBiliBili() {
 			content:
 				`任务:登录(观看)${check("watch") ? "失败" : "+10exp"} 分享${check("share") ? "失败" : "+5exp"} 投币${check("coins") ? "0" : `+${real_times * 10}exp`}\n` +
 				`经验:当前${config.user.level_info.current_exp}/下级${config.user.level_info.next_exp}/满级28800\n` +
-				`等级:当前${config.user.level_info.current_level}级 升满级最快需${Math.max(0, Math.ceil(config.user.v6_exp / 65))}天` + vipMessage + `\n` + '漫画签到: ' + mangaResult
+				`等级:当前${config.user.level_info.current_level}级 升满级最快需${Math.max(0, Math.ceil(config.user.v6_exp / config.user.daily_exp))}天` + vipMessage + `\n` + '漫画签到: ' + mangaResult
 		}
 		$.msg(notice.title, notice.subTitle, notice.content)
 	} else {
@@ -1006,10 +1006,25 @@ async function me() {
 				config.user.num = check("user") ? 1 : (config.user.num || 0) + 1
 				$.setItem('bilibili_daily_bonus_v2', $.toStr(config))
 
-				config.user.mext_exp = config.user.level_info.next_exp - config.user.level_info.current_exp
+				// 满级号 next_exp 是字符串 "--"，直接相减会得 NaN
+				const nextExp = Number(config.user.level_info.next_exp)
+				config.user.mext_exp = Number.isFinite(nextExp)
+					? nextExp - config.user.level_info.current_exp
+					: 0
 				config.user.next_day = Math.ceil(config.user.mext_exp / 15)
 				config.user.v6_exp = 28800 - config.user.level_info.current_exp
 				config.user.v6_day = Math.ceil(config.user.v6_exp / 15)
+
+				// 每天可得经验：日常15 + 投币(每枚10，默认5枚) + 大会员10
+				const coinTimes = Math.min(Number(config.Settings?.exec ?? 5) || 5, 5)
+				const canCoin = Math.floor(config.user.money) > 5
+				const coinExp = canCoin ? coinTimes * 10 : 0
+				const vipExp = config.user.vipStatus === 1 ? 10 : 0
+				const dailyExp = 15 + coinExp + vipExp
+				config.user.daily_exp = dailyExp
+				config.user.daily_desc = '登录观看分享' +
+					(coinExp ? ` 投币${coinTimes}枚` : '') +
+					(vipExp ? ' 大会员' : '')
 
 				if (config.user.vipStatus === 1) {
 					$.log("- 💖尊贵的" + config.user.vip_label.text + "用户💖")
@@ -1023,9 +1038,12 @@ async function me() {
 				$.log(
 					`- 当前经验: ${config.user.level_info.current_exp}/${config.user.level_info.next_exp}`
 				)
-				$.log(`- 升级还需经验: ${config.user.mext_exp}`)
+				$.log(`- 升级还需经验: ${config.user.mext_exp === 0 ? '已满级' : config.user.mext_exp}`)
 				$.log(
 					`- 距离下级还需: ${config.user.next_day}天(登录 观看 分享)`
+				)
+				$.log(
+					`- 距离下级最快还需: ${Math.max(0, Math.ceil(config.user.mext_exp / config.user.daily_exp))}天(${config.user.daily_desc})`
 				)
 				$.log(
 					`- 距离满级还需: ${Math.max(0, config.user.v6_day)}天(登录 观看 分享)`
@@ -1033,8 +1051,8 @@ async function me() {
 				$.log(`- 剩余硬币最多可投: ${Math.floor((config.user.money)/5)}天`)
 				$.log(
 					"- 距离满级最快还需: " +
-					Math.max(0, Math.ceil(config.user.v6_exp / 65)) +
-						"天(日常 + 投币*5)"
+					Math.max(0, Math.ceil(config.user.v6_exp / config.user.daily_exp)) +
+					`天(${config.user.daily_desc})`
 				)
 				return true
 			}
