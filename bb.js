@@ -1022,9 +1022,9 @@ async function me() {
 				const vipExp = config.user.vipStatus === 1 ? 10 : 0
 				const dailyExp = 15 + coinExp + vipExp
 				config.user.daily_exp = dailyExp
-				config.user.daily_desc = '登录观看分享' +
+				config.user.daily_desc = '登录 观看 分享' +
 					(coinExp ? ` 投币${coinTimes}枚` : '') +
-					(vipExp ? ' 大会员' : '')
+					(vipExp ? ' 大会员等级加速包' : '')
 
 				if (config.user.vipStatus === 1) {
 					$.log("- 💖尊贵的" + config.user.vip_label.text + "用户💖")
