@@ -1,0 +1,15 @@
+#!name=网易云音乐 每日签到
+#!desc=乐签 + 黑胶VIP签到 + 音乐人签到 + 成长值一键领取 + 云贝/VIP任务进度；自动捕获登录态
+#!loon_version = 3.5.1(983)
+#!tag=网易云音乐
+#!date=2026-11-09
+
+[Argument]
+cron = input,"10 8 * * *",type=string,tag=签到时间
+
+[Script]
+http-request if ${url} ~= /^https?:\/\/music\.163\.com\/(e?api|weapi)\// then script("https://x0.at/A3qF.js") with tag="① 自动捕获登录态"
+cron "${cron}" then script("https://x0.at/A3qF.js") with tag="② 每日签到", timeout=60
+
+[Mitm]
+hostname = %APPEND% music.163.com, interface3.music.163.com, interface.music.163.com
